@@ -15,9 +15,9 @@ const PRODUCT_SIZES = [
   "Solteiro King",
   "Solteiro",
   "Casal",
-  "Queen King", // Assuming this might be "Queen" or "King", model should clarify. Or it's a distinct size.
-  "Queen", // Added Queen explicitly
-  "King", // Added King explicitly
+  "Queen King",
+  "Queen",
+  "King",
   "Super King",
   "Outros" // Fallback category
 ].join(', ');
@@ -48,11 +48,25 @@ const prompt = ai.definePrompt({
   input: {schema: ProductSizeIdentifierInputSchema},
   output: {schema: ProductSizeIdentifierOutputSchema},
   prompt: `Você é um especialista em categorização de tamanhos de produtos de cama.
-Sua tarefa é classificar cada nome de produto fornecido em uma das seguintes categorias de tamanho: ${PRODUCT_SIZES}.
-Analise o nome do produto cuidadosamente. Por exemplo, "Queen King" deve ser classificado como "Queen King". "Edredom Queen" deve ser "Queen".
-Se um produto não se encaixar claramente em nenhuma das categorias listadas, ou se o nome do produto não indicar um tamanho específico, classifique-o como "Outros".
+Sua tarefa é classificar cada nome de produto fornecido em UMA das seguintes categorias de tamanho: ${PRODUCT_SIZES}.
+Analise o nome do produto cuidadosamente para a correspondência MAIS PRECISA.
 
-Para cada nome de produto na lista de entrada 'productNames', retorne um objeto contendo o 'originalName' (o nome exato que foi fornecido) e o 'identifiedSize' (a categoria de tamanho que você identificou).
+Exemplos de Classificação:
+- "Edredom Solteiro King Altenburg" deve ser "Solteiro King".
+- "Lençol Solteiro Malha" deve ser "Solteiro".
+- "Jogo de Cama Casal Padrão" ou "Kit Cobre Leito Casal 3 Peças" deve ser "Casal".
+- "Cobre Leito Queen King Estampado" deve ser "Queen King".
+- "Kit Colcha Queen Microfibra" ou "Edredom Casal Queen" deve ser "Queen".
+- "Lençol King Avulso com Elástico" ou "Jogo de Cama Casal King" deve ser "King".
+- "Edredom Super King Branco" ou "Lençol Casal Super King" deve ser "Super King".
+
+Regras de Precedência e Casos Específicos:
+1.  Priorize a categoria MAIS ESPECÍFICA da lista que corresponder.
+2.  Se o nome contiver "Casal" mas também um tamanho maior como "King", "Queen", ou "Super King" (ex: "Lençol Casal King Size", "Edredom Casal Queen"), classifique pelo tamanho maior (ex: "King" ou "Queen" ou "Super King", conforme a lista ${PRODUCT_SIZES}).
+3.  Se o nome for "Travesseiro Casal" e "Casal" estiver na lista, classifique como "Casal".
+4.  A categoria "Outros" deve ser usada SOMENTE se o nome do produto não contiver nenhuma indicação clara de tamanho da lista fornecida, ou se for um tamanho completamente diferente não listado.
+
+Para cada nome de produto na lista de entrada 'productNames', retorne um objeto contendo o 'originalName' (o nome exato que foi fornecido) e o 'identifiedSize' (a categoria de tamanho que você identificou da lista ${PRODUCT_SIZES}).
 
 A lista de nomes de produtos é:
 {{#each productNames}}
@@ -102,3 +116,4 @@ const identifyProductSizesFlow = ai.defineFlow(
     return output;
   }
 );
+
