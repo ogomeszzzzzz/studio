@@ -20,7 +20,7 @@ interface ProductDataTableSectionProps {
   showNameColumn?: boolean;
   showStockColumn?: boolean;
   showReadyToShipColumn?: boolean;
-  showRegulatorStockColumn?: boolean; // Nova prop
+  showRegulatorStockColumn?: boolean;
   showCollectionColumn?: boolean;
   showStartDateColumn?: boolean;
   showEndDateColumn?: boolean;
@@ -68,11 +68,11 @@ export function ProductDataTableSection({
   products, 
   isLoading,
   itemsPerPage = 20,
-  showVtexIdColumn = false,
+  showVtexIdColumn = false, // Defaulted, but RestockOpportunities passes true
   showNameColumn = true,
   showStockColumn = true,
   showReadyToShipColumn = false,
-  showRegulatorStockColumn = false, // Default para false
+  showRegulatorStockColumn = false,
   showCollectionColumn = true,
   showStartDateColumn = true,
   showEndDateColumn = true,
@@ -105,9 +105,9 @@ export function ProductDataTableSection({
       } else if (typeof valA === 'boolean' && typeof valB === 'boolean') {
         comparison = valA === valB ? 0 : (valA ? -1 : 1);
       } else if (valA === null || valA === undefined) {
-        comparison = (valB === null || valB === undefined) ? 0 : 1; // nulls/undefined last
+        comparison = (valB === null || valB === undefined) ? 0 : 1; 
       } else if (valB === null || valB === undefined) {
-        comparison = -1; // nulls/undefined last
+        comparison = -1; 
       }
 
       return sortOrder === 'asc' ? comparison : -comparison;
@@ -119,11 +119,9 @@ export function ProductDataTableSection({
   useEffect(() => {
     if (currentPage > totalPages && totalPages > 0) {
       setCurrentPage(totalPages);
-    } else if (totalPages === 0 && sortedProducts.length > 0) { 
-      setCurrentPage(1);
-    } else if (totalPages === 0 && sortedProducts.length === 0) { 
-      setCurrentPage(1);
     } else if (currentPage === 0 && totalPages > 0) { 
+        setCurrentPage(1);
+    } else if (totalPages === 0 && sortedProducts.length === 0) { 
         setCurrentPage(1);
     }
   }, [sortedProducts, currentPage, itemsPerPage, totalPages]);
@@ -216,7 +214,7 @@ export function ProductDataTableSection({
                     const status = getCollectionStatus(product);
                     return (
                       <TableRow key={`${product.vtexId}-${product.name}-${product.productDerivation}-${index}-${currentPage}`}>
-                        {showVtexIdColumn && <TableCell className="whitespace-nowrap">{product.vtexId}</TableCell>}
+                        {showVtexIdColumn && <TableCell className="whitespace-nowrap">{String(product.vtexId ?? '')}</TableCell>}
                         {showNameColumn && <TableCell className="font-medium">{product.name}</TableCell>}
                         {showProductDerivationColumn && <TableCell className="whitespace-nowrap">{product.productDerivation}</TableCell>}
                         {showStockColumn && <TableCell className="text-right">{product.stock.toLocaleString()}</TableCell>}
@@ -278,4 +276,3 @@ export function ProductDataTableSection({
     </Card>
   );
 }
-    
