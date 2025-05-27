@@ -6,9 +6,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { clientAuth } from '@/lib/firebase/config';
-// AppHeader não é mais usado aqui, pois o cabeçalho autenticado está neste arquivo.
 import { Button } from '@/components/ui/button';
-import { Loader2, LogOut, LayoutDashboard, BarChartBig, UserCircle } from 'lucide-react';
+import { Loader2, LogOut, LayoutDashboard, BarChartBig, UserCircle, PackageSearch } from 'lucide-react';
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 import type { UserProfile } from '@/types';
@@ -22,7 +21,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const router = useRouter();
   const { toast } = useToast();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true); // Start with loading true
+  const [loading, setLoading] = useState(true); 
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(clientAuth, async (firebaseUser) => {
@@ -30,14 +29,12 @@ export default function AppLayout({ children }: AppLayoutProps) {
         setUserProfile({ uid: firebaseUser.uid, email: firebaseUser.email });
       } else {
         setUserProfile(null);
-        // Se não há usuário, redireciona para a página de login.
-        // Usar replace para evitar que a página de app entre no histórico.
         router.replace('/login');
       }
       setLoading(false);
     });
     return () => unsubscribe();
-  }, [router]); // toast removido das dependências, não é usado aqui.
+  }, [router]); 
 
   const handleSignOut = async () => {
     try {
@@ -60,9 +57,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
   }
 
   if (!userProfile) {
-    // Este estado é alcançado se loading for false e userProfile for null.
-    // O useEffect acima já deve ter iniciado o redirecionamento para /login.
-    // Exibir um loader aqui garante que não haja flash de conteúdo não autenticado.
     return (
        <div className="flex items-center justify-center min-h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -99,19 +93,19 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <div className="flex min-h-screen">
-      <nav className="w-64 bg-card border-r border-border p-4 space-y-6 hidden md:flex flex-col shadow-md">
-        <div>
-            <Link href="/dashboard" className="flex items-center gap-2 text-primary p-2 rounded-md hover:bg-muted">
-                <LayoutDashboard className="h-6 w-6" />
-                <span className="font-medium">Dashboard</span>
-            </Link>
-        </div>
-        <div>
-            <Link href="/collection-analyzer" className="flex items-center gap-2 text-foreground p-2 rounded-md hover:bg-muted">
-                <BarChartBig className="h-6 w-6" />
-                <span className="font-medium">Gap Analyzer</span>
-            </Link>
-        </div>
+      <nav className="w-64 bg-card border-r border-border p-4 space-y-2 hidden md:flex flex-col shadow-md">
+        <Link href="/dashboard" className="flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors">
+            <LayoutDashboard className="h-5 w-5" />
+            <span className="font-medium text-sm">Dashboard</span>
+        </Link>
+        <Link href="/collection-analyzer" className="flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors">
+            <BarChartBig className="h-5 w-5" />
+            <span className="font-medium text-sm">Gap Analyzer</span>
+        </Link>
+        <Link href="/restock-opportunities" className="flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors">
+            <PackageSearch className="h-5 w-5" />
+            <span className="font-medium text-sm">Oportunidades Reabast.</span>
+        </Link>
         {/* Add more navigation links here */}
       </nav>
       <div className="flex-1 flex flex-col bg-background">
