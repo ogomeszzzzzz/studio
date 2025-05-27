@@ -4,6 +4,7 @@
 import { useEffect, useActionState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signInWithEmailAndPassword, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import type { FirebaseError } from 'firebase/app'; // Import FirebaseError type
 import { doc, getDoc } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -87,15 +88,49 @@ export default function LoginPage() {
       // Perform the actual client-side Firebase login.
       const userCredential = await signInWithEmailAndPassword(clientAuth, email, password);
       // onAuthStateChanged will handle redirection after approval check.
-    } catch (error: any) {
-      console.error('Login error:', error);
+    } catch (e: unknown) {
       let errorMessage = 'Falha no login. Verifique suas credenciais.';
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-        errorMessage = 'Email ou senha inválidos.';
-      } else if (error.code === 'auth/user-disabled') {
-        errorMessage = 'Esta conta está desabilitada. Pode estar aguardando aprovação.';
+      // Default to console.error for unexpected issues
+      let consoleLogFn: 'error' | 'warn' = 'error';
+      let logMessagePrefix = 'Login error:';
+
+      if (e instanceof FirebaseError) { // FirebaseError is a class from 'firebase/app'
+        logMessagePrefix = `Firebase login attempt failed (${e.code}):`;
+        switch (e.code) {
+          case 'auth/user-not-found':
+          case 'auth/wrong-password':
+          case 'auth/invalid-credential':
+            errorMessage = 'Email ou senha inválidos.';
+            consoleLogFn = 'warn'; // Downgrade to warn for expected, handled auth errors
+            break;
+          case 'auth/user-disabled':
+            errorMessage = 'Esta conta está desabilitada. Pode estar aguardando aprovação.';
+            consoleLogFn = 'warn'; // Downgrade to warn
+            break;
+          default:
+            // Keep as error for unexpected Firebase error codes
+            errorMessage = `Erro do Firebase: ${e.message || 'Erro desconhecido ao tentar logar.'}`;
+            break;
+        }
+      } else if (e instanceof Error) {
+        errorMessage = e.message;
+        logMessagePrefix = 'Generic login error:';
+      } else {
+        logMessagePrefix = 'Unknown login error structure:';
       }
-      toast({ title: 'Erro de Login', description: errorMessage, variant: 'destructive' });
+
+      // Log to console (warn or error based on type)
+      if (consoleLogFn === 'warn') {
+        console.warn(logMessagePrefix, e);
+      } else {
+        console.error(logMessagePrefix, e);
+      }
+
+      toast({
+        title: 'Erro de Login',
+        description: errorMessage,
+        variant: 'destructive'
+      });
     }
   };
   
