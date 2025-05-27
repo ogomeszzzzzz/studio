@@ -72,10 +72,12 @@ A lista de nomes de produtos é:
 {{/each}}
 
 Responda APENAS com a estrutura JSON definida no esquema de saída.
+Certifique-se de que todos os objetos na matriz JSON estejam separados por vírgulas e que todos os pares de chave-valor dentro de cada objeto também estejam separados por vírgulas. As chaves e os valores de string DEVEM estar entre aspas duplas.
+Não inclua nenhuma explicação ou texto adicional fora da estrutura JSON.
 `,
   config: {
     // Higher temperature might be needed for nuanced classification, but start moderate.
-    // temperature: 0.5,
+    // temperature: 0.5, // Setting temperature to null or a low value like 0.2 might improve JSON adherence.
   },
    safetySettings: [
     {
@@ -113,8 +115,9 @@ const identifyProductTypesFlow = ai.defineFlow(
     // However, with Gemini and definePrompt output schema, it should mostly come structured.
     if (!output) {
         console.error("AI prompt returned null output for product type identification.");
-        throw new Error("AI prompt returned null output.");
+        throw new Error("AI prompt returned null output for product type identification.");
     }
     return output;
   }
 );
+

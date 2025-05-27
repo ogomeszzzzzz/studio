@@ -15,7 +15,7 @@ const PRODUCT_SIZES = [
   "Solteiro King",
   "Solteiro",
   "Casal",
-  "Queen King",
+  "Queen King", // Assuming this might be "Queen" or "King", model should clarify. Or it's a distinct size.
   "Super King",
   "Outros" // Fallback category
 ].join(', ');
@@ -57,6 +57,8 @@ A lista de nomes de produtos é:
 {{/each}}
 
 Responda APENAS com a estrutura JSON definida no esquema de saída.
+Certifique-se de que todos os objetos na matriz JSON estejam separados por vírgulas e que todos os pares de chave-valor dentro de cada objeto também estejam separados por vírgulas. As chaves e os valores de string DEVEM estar entre aspas duplas.
+Não inclua nenhuma explicação ou texto adicional fora da estrutura JSON.
 `,
    safetySettings: [
     {
@@ -76,6 +78,7 @@ Responda APENAS com a estrutura JSON definida no esquema de saída.
       threshold: 'BLOCK_LOW_AND_ABOVE',
     },
   ],
+  // config: { temperature: 0.2 } // Consider a low temperature for better JSON adherence
 });
 
 const identifyProductSizesFlow = ai.defineFlow(
@@ -96,3 +99,4 @@ const identifyProductSizesFlow = ai.defineFlow(
     return output;
   }
 );
+
