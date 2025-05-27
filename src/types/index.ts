@@ -11,8 +11,8 @@ export interface Product {
   description?: string;
   size?: string;
   complement?: string;
-  commercialLine?: string;
-  collection: string;
+  commercialLine: string; // Now consistently populated
+  collection: string; // This field's source (e.g. 'COLEÇÃO' or 'Linha Comercial') is determined by parser arg
   commercialLineDescription?: string;
   isCurrentCollection: boolean;
   collectionStartDate: Date | null;
@@ -34,9 +34,9 @@ export interface FilterState {
   endDateTo: Date | undefined;
 }
 
+// UserProfile remains simple as registration was removed.
 export interface UserProfile {
   uid: string;
-  email: string | null; // email can be null from FirebaseUser
-  // isApproved and approval related fields are removed
-  createdAt?: Date; // Keep for potential future use
+  email: string | null; 
+  createdAt?: Date; 
 }

@@ -1,3 +1,4 @@
+
 'use client';
 
 import type { ChangeEvent } from 'react';
@@ -14,9 +15,19 @@ interface ExcelUploadSectionProps {
   onDataParsed: (data: Product[]) => void;
   onProcessingStart: () => void;
   onProcessingEnd: () => void;
+  collectionColumnKey?: string; // New prop
+  cardTitle?: string;
+  cardDescription?: string;
 }
 
-export function ExcelUploadSection({ onDataParsed, onProcessingStart, onProcessingEnd }: ExcelUploadSectionProps) {
+export function ExcelUploadSection({ 
+  onDataParsed, 
+  onProcessingStart, 
+  onProcessingEnd, 
+  collectionColumnKey = 'COLEÇÃO', // Default to 'COLEÇÃO'
+  cardTitle = "Upload Collection Data",
+  cardDescription = "Upload an Excel file with product details (ID VTEX, Name, Stock, Collection, Dates, etc.)."
+}: ExcelUploadSectionProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isParsing, setIsParsing] = useState(false);
   const { toast } = useToast();
@@ -51,7 +62,8 @@ export function ExcelUploadSection({ onDataParsed, onProcessingStart, onProcessi
     setIsParsing(true);
     onProcessingStart();
     try {
-      const data = await parseExcelData(selectedFile);
+      // Pass the collectionColumnKey to parseExcelData
+      const data = await parseExcelData(selectedFile, collectionColumnKey);
       onDataParsed(data);
       toast({
         title: "File Processed",
@@ -76,10 +88,10 @@ export function ExcelUploadSection({ onDataParsed, onProcessingStart, onProcessi
       <CardHeader>
         <CardTitle className="flex items-center text-xl">
           <UploadCloud className="mr-2 h-6 w-6 text-primary" />
-          Upload Collection Data
+          {cardTitle}
         </CardTitle>
         <CardDescription>
-          Upload an Excel file with product details (ID VTEX, Name, Stock, Collection, Dates, etc.).
+          {cardDescription}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

@@ -1,3 +1,4 @@
+
 import * as XLSX from 'xlsx';
 import { parse, isValid } from 'date-fns';
 import type { Product } from '@/types';
@@ -26,7 +27,10 @@ const toBoolean = (value: string | number | undefined): boolean => {
   return Boolean(value);
 };
 
-export const parseExcelData = (file: File): Promise<Product[]> => {
+// collectionColumnKey: The key in the Excel row object to use for the 'collection' field.
+// Defaults to 'COLEÇÃO' for backward compatibility with Collection Analyzer.
+// For Dashboard, it will be 'Linha Comercial'.
+export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇÃO'): Promise<Product[]> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -39,12 +43,17 @@ export const parseExcelData = (file: File): Promise<Product[]> => {
         const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: false });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
+        // Use raw: true to get raw values, especially for dates, then parse them manually.
+        // defval: null ensures empty cells are null, not undefined, which can be more consistent.
         const jsonData = XLSX.utils.sheet_to_json<any>(worksheet, { raw: false, defval: null });
 
         const products: Product[] = jsonData.map((row: any) => {
           const startDate = parseDate(row['Início Coleção']);
           const endDate = parseDate(row['Fim Coleção']);
           
+          // Determine the collection value based on the provided key
+          const collectionValue = row[collectionColumnKey] ?? '';
+
           return {
             vtexId: row['ID VTEX'] ?? '',
             name: row['Nome'] ?? '',
@@ -57,10 +66,10 @@ export const parseExcelData = (file: File): Promise<Product[]> => {
             description: row['Descrição'] ?? undefined,
             size: row['Tamanho'] ?? undefined,
             complement: row['Compl.'] ?? undefined,
-            commercialLine: row['Linha Comercial'] ?? undefined,
-            collection: row['COLEÇÃO'] ?? '',
+            commercialLine: row['Linha Comercial'] ?? '', // Keep commercialLine populated
+            collection: collectionValue, // This is now dynamic
             commercialLineDescription: row['Descrição Linha Comercial'] ?? undefined,
-            isCurrentCollection: toBoolean(row['Coleção Atual']),
+            isCurrentCollection: toBoolean(row['Coleção Atual']), // This might need re-evaluation based on 'Linha Comercial' context
             collectionStartDate: startDate,
             collectionEndDate: endDate,
             rawCollectionStartDate: row['Início Coleção'] ? String(row['Início Coleção']) : undefined,

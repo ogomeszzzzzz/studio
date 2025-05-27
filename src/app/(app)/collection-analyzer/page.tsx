@@ -2,7 +2,6 @@
 'use client';
 
 import { useState, useMemo, useCallback } from 'react';
-// Removed AppHeader import as layout will handle it
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import { FilterControlsSection } from '@/components/domain/FilterControlsSection';
 import { ProductDataTableSection } from '@/components/domain/ProductDataTableSection';
@@ -25,6 +24,7 @@ export default function CollectionGapAnalyzerPage() {
   }, []);
 
   const availableCollections = useMemo(() => {
+    // For Collection Analyzer, 'collection' field is populated from 'COLEÇÃO' column by default
     const collections = new Set(allProducts.map(p => p.collection).filter(Boolean));
     return Array.from(collections).sort();
   }, [allProducts]);
@@ -62,13 +62,14 @@ export default function CollectionGapAnalyzerPage() {
   const handleProcessingEnd = () => setIsLoading(false);
 
   return (
-    // Removed AppHeader as it's now in (app)/layout.tsx
-    // The main container styling (mx-auto, p-4 etc.) is now in (app)/layout.tsx's main tag
     <div className="space-y-6">
       <ExcelUploadSection 
         onDataParsed={handleDataParsed} 
         onProcessingStart={handleProcessingStart}
         onProcessingEnd={handleProcessingEnd}
+        collectionColumnKey="COLEÇÃO" // Explicitly use 'COLEÇÃO' column for this page
+        cardTitle="Upload Dados da Coleção (para Gap Analyzer)"
+        cardDescription="Carregue um arquivo Excel com detalhes do produto. A coluna 'COLEÇÃO' será usada para agrupar."
       />
 
       {allProducts.length > 0 && (
