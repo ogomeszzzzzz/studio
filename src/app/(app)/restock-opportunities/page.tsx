@@ -7,13 +7,19 @@ import { FilterControlsSection } from '@/components/domain/FilterControlsSection
 import { ProductDataTableSection } from '@/components/domain/ProductDataTableSection';
 import type { Product, FilterState } from '@/types';
 import { isAfter, isBefore, isValid, parseISO } from 'date-fns';
-import { PackageSearch, AlertTriangle, Download } from 'lucide-react';
+import { PackageSearch, AlertTriangle, Download, TrendingUp, PackageCheck, ClipboardList, ListFilter, HelpCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import * as XLSX from 'xlsx';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 
 const ALL_COLLECTIONS_VALUE = "_ALL_COLLECTIONS_";
@@ -38,12 +44,12 @@ export default function RestockOpportunitiesPage() {
   }, [allProducts]);
 
   const applyAllFilters = useCallback(() => {
-    setIsLoading(true); // Indicate loading during filtering
+    setIsLoading(true); 
     let tempFiltered = [...allProducts];
     const effectiveThreshold = parseInt(lowStockThreshold, 10);
     
     const currentThreshold = isNaN(effectiveThreshold) ? DEFAULT_LOW_STOCK_THRESHOLD : effectiveThreshold;
-    if (isNaN(effectiveThreshold)) {
+    if (isNaN(effectiveThreshold) && lowStockThreshold.trim() !== '') { // Only toast if user entered something invalid
         toast({ title: "Aviso", description: `Limite de baixo estoque inválido, usando padrão: ${DEFAULT_LOW_STOCK_THRESHOLD}.`, variant: "default" });
     }
 
@@ -100,34 +106,45 @@ export default function RestockOpportunitiesPage() {
     );
     
     setFilteredProducts(tempFiltered);
-    setIsLoading(false); // Filtering complete
+    setIsLoading(false);
   }, [allProducts, baseFilters, lowStockThreshold, toast]);
 
 
   const handleBaseFilterChange = useCallback((filters: FilterState) => {
     setBaseFilters(filters);
-    // Filters will be applied by the button or useEffect
   }, []);
   
-  // Apply filters when relevant state changes and after initial load
   useEffect(() => {
    if(allProducts.length > 0) {
     applyAllFilters();
    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allProducts, lowStockThreshold, baseFilters]); // Added baseFilters to dependencies
+  }, [allProducts, lowStockThreshold, baseFilters]); 
 
   const handleProcessingStart = () => setIsLoading(true);
   const handleProcessingEnd = () => {
-    // applyAllFilters will be called by the useEffect when allProducts changes
-    // If allProducts hasn't changed but we want to re-filter (e.g. after initial load with default filters)
-    // ensure applyAllFilters is called.
     if (allProducts.length > 0) {
         applyAllFilters();
     } else {
-        setIsLoading(false); // Explicitly set loading to false if no products
+        setFilteredProducts([]);
+        setIsLoading(false); 
     }
   };
+
+  const summaryStats = useMemo(() => {
+    const totalSkusToRestock = filteredProducts.length;
+    const totalUnitsAvailableForRestock = filteredProducts.reduce((sum, p) => sum + p.readyToShip + p.order, 0);
+    const potentialStockAtRiskUnits = filteredProducts.reduce((sum, p) => {
+      if (p.stock === 0) return sum + p.readyToShip + p.order; // All units are at risk if stock is zero
+      return sum + Math.max(0, (p.readyToShip + p.order) - p.stock); // Units that exceed current stock
+    }, 0);
+
+    return {
+      totalSkusToRestock,
+      totalUnitsAvailableForRestock,
+      potentialStockAtRiskUnits
+    };
+  }, [filteredProducts]);
 
   const handleExportToExcel = () => {
     if (filteredProducts.length === 0) {
@@ -143,7 +160,7 @@ export default function RestockOpportunitiesPage() {
       "ID VTEX": p.vtexId,
       "Nome Produto": p.name,
       "Produto-Derivação": p.productDerivation,
-      "Estoque": p.stock,
+      "Estoque Atual": p.stock,
       "Pronta Entrega": p.readyToShip,
       "Pedido": p.order,
       "Coleção": p.collection,
@@ -166,107 +183,186 @@ export default function RestockOpportunitiesPage() {
   
   return (
     <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+            <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center">
+                <TrendingUp className="mr-3 h-8 w-8 text-primary" />
+                Oportunidades de Reabastecimento
+            </h1>
+            <p className="text-muted-foreground">
+                Identifique produtos com baixo estoque que possuem unidades em "Pronta Entrega" ou "Pedido" para reposição.
+            </p>
+        </div>
+      </div>
+
       <ExcelUploadSection 
         onDataParsed={handleDataParsed} 
         onProcessingStart={handleProcessingStart}
         onProcessingEnd={handleProcessingEnd}
-        collectionColumnKey="COLEÇÃO" // Consistent with Gap Analyzer for collection definition
-        cardTitle="Upload de Dados para Oportunidades de Reabastecimento"
-        cardDescription="Carregue o arquivo Excel. Itens com baixo estoque e disponibilidade em 'Pronta Entrega' ou 'Pedido' serão destacados."
+        collectionColumnKey="COLEÇÃO" 
+        cardTitle="1. Carregar Dados do Excel"
+        cardDescription="Faça o upload da planilha de produtos. Os dados serão processados para identificar oportunidades."
       />
 
       {allProducts.length > 0 && (
         <>
-          <Card className="shadow-lg">
+          <Card className="shadow-lg border-primary border-l-4">
             <CardHeader>
               <CardTitle className="flex items-center">
-                <PackageSearch className="mr-2 h-5 w-5 text-primary" />
-                Definir Limite de Baixo Estoque e Aplicar Filtros Gerais
+                <ListFilter className="mr-2 h-5 w-5 text-primary" />
+                2. Definir Critérios de Reabastecimento
               </CardTitle>
               <CardDescription>
-                Produtos com estoque igual ou inferior a este valor (e com Pronta Entrega ou Pedido > 0) serão mostrados.
-                Abaixo, você também pode aplicar filtros de coleção, datas, etc. Clique em "Aplicar Filtros" para atualizar.
+                Ajuste o limite de estoque para considerar um item como "baixo" e aplique filtros adicionais se necessário.
+                As oportunidades são itens com estoque atual &lt;= ao limite definido E com unidades em "Pronta Entrega" ou "Pedido".
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex flex-col sm:flex-row items-end gap-4">
-              <div className="flex-grow">
-                <Label htmlFor="lowStockThreshold">Estoque Máximo para Considerar Baixo</Label>
-                <Input 
-                  id="lowStockThreshold"
-                  type="number"
-                  value={lowStockThreshold}
-                  onChange={(e) => setLowStockThreshold(e.target.value)}
-                  placeholder={`Padrão: ${DEFAULT_LOW_STOCK_THRESHOLD}`}
-                  min="0"
+            <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                    <div>
+                        <Label htmlFor="lowStockThreshold" className="flex items-center">
+                            Estoque Máximo para Oportunidade
+                            <TooltipProvider>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <HelpCircle className="ml-1.5 h-4 w-4 text-muted-foreground cursor-help" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        <p>Produtos com estoque atual igual ou inferior a este valor serão considerados.</p>
+                                    </TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                        </Label>
+                        <Input 
+                        id="lowStockThreshold"
+                        type="number"
+                        value={lowStockThreshold}
+                        onChange={(e) => setLowStockThreshold(e.target.value)}
+                        placeholder={`Padrão: ${DEFAULT_LOW_STOCK_THRESHOLD}`}
+                        min="0"
+                        className="mt-1"
+                        />
+                    </div>
+                    <Button onClick={applyAllFilters} className="w-full md:w-auto" disabled={isLoading}>
+                        {isLoading ? 'Aplicando...' : 'Aplicar Critérios e Filtros'}
+                    </Button>
+                </div>
+                <FilterControlsSection
+                    products={allProducts}
+                    onFilterChange={handleBaseFilterChange}
+                    availableCollections={availableCollections}
                 />
-              </div>
-              <Button onClick={applyAllFilters} className="w-full sm:w-auto">Aplicar Todos os Filtros</Button>
             </CardContent>
           </Card>
+        
+          <Card className="shadow-lg">
+            <CardHeader>
+                <CardTitle className="flex items-center">
+                    <PackageSearch className="mr-2 h-5 w-5 text-primary" />
+                    3. Resultados da Análise de Reabastecimento
+                </CardTitle>
+                <CardDescription>
+                    Visão geral e lista detalhada dos produtos que representam oportunidades de reabastecimento.
+                </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+                <div className="grid gap-4 md:grid-cols-3">
+                    <Card className="border-accent border-l-4">
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">SKUs para Reabastecer</CardTitle>
+                            <PackageSearch className="h-5 w-5 text-accent" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold text-accent">{summaryStats.totalSkusToRestock.toLocaleString()}</div>
+                            <p className="text-xs text-muted-foreground">Produtos únicos identificados.</p>
+                        </CardContent>
+                    </Card>
+                    <Card className="border-green-500 border-l-4">
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">Unidades Disponíveis</CardTitle>
+                            <PackageCheck className="h-5 w-5 text-green-500" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold text-green-600">{summaryStats.totalUnitsAvailableForRestock.toLocaleString()}</div>
+                            <p className="text-xs text-muted-foreground">Total em Pronta Entrega + Pedidos.</p>
+                        </CardContent>
+                    </Card>
+                    <Card className="border-destructive border-l-4">
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">Estoque em Risco (Un.)</CardTitle>
+                            <AlertTriangle className="h-5 w-5 text-destructive" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold text-destructive">{summaryStats.potentialStockAtRiskUnits.toLocaleString()}</div>
+                            <p className="text-xs text-muted-foreground">Unidades de Pronta Entrega/Pedido que podem faltar.</p>
+                        </CardContent>
+                    </Card>
+                </div>
+                
+                <div className="flex justify-end">
+                    <Button onClick={handleExportToExcel} disabled={filteredProducts.length === 0 || isLoading}>
+                    <Download className="mr-2 h-5 w-5" />
+                    Exportar Lista para Excel
+                    </Button>
+                </div>
 
-          <FilterControlsSection
-            products={allProducts}
-            onFilterChange={handleBaseFilterChange}
-            availableCollections={availableCollections}
-          />
-          
-          <div className="flex justify-end my-4">
-            <Button onClick={handleExportToExcel} disabled={filteredProducts.length === 0 || isLoading}>
-              <Download className="mr-2 h-5 w-5" />
-              Exportar para Excel
-            </Button>
-          </div>
-
-          <ProductDataTableSection
-            products={filteredProducts}
-            isLoading={isLoading && filteredProducts.length === 0} // Show skeleton only if loading AND no products
-            cardIcon={PackageSearch}
-            cardTitle="Oportunidades de Reabastecimento Identificadas"
-            showVtexIdColumn={true}
-            showNameColumn={true}
-            showProductDerivationColumn={true} // Exibir Produto-Derivação
-            showStockColumn={true}
-            showReadyToShipColumn={true}
-            showOrderColumn={true}
-            showCollectionColumn={true}
-            showDescriptionColumn={true} 
-            showSizeColumn={true}        
-            showProductTypeColumn={true} 
-            showStartDateColumn={true} 
-            showEndDateColumn={true}  
-            showStatusColumn={true}   
-          />
+                <ProductDataTableSection
+                    products={filteredProducts}
+                    isLoading={isLoading && filteredProducts.length === 0} 
+                    cardIcon={PackageSearch}
+                    cardTitle="Produtos com Oportunidade de Reabastecimento"
+                    showVtexIdColumn={true}
+                    showNameColumn={true}
+                    showProductDerivationColumn={true} 
+                    showStockColumn={true}
+                    showReadyToShipColumn={true}
+                    showOrderColumn={true}
+                    showCollectionColumn={true}
+                    showDescriptionColumn={true} 
+                    showSizeColumn={true}        
+                    showProductTypeColumn={true} 
+                    showStartDateColumn={false} 
+                    showEndDateColumn={true}  
+                    showStatusColumn={true}   
+                />
+                 {allProducts.length > 0 && filteredProducts.length === 0 && !isLoading && (
+                    <Card className="shadow-md my-6 border-info border-l-4">
+                        <CardHeader>
+                            <CardTitle className="flex items-center text-info-foreground">
+                                <AlertTriangle className="mr-2 h-5 w-5 text-info" />
+                                Nenhuma Oportunidade Encontrada
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <p className="text-muted-foreground">
+                                Nenhum produto com estoque atual &le; <span className="font-semibold">{parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD}</span> unidades e com disponibilidade em "Pronta Entrega" ou "Pedido" foi encontrado com os filtros atuais.
+                            </p>
+                            <p className="text-muted-foreground mt-2">
+                                Tente ajustar o "Estoque Máximo para Oportunidade" ou os filtros gerais e clique em "Aplicar Critérios e Filtros".
+                            </p>
+                        </CardContent>
+                    </Card>
+                  )}
+            </CardContent>
+          </Card>
         </>
       )}
       {allProducts.length === 0 && !isLoading && (
-        <div className="text-center py-10 bg-card shadow-md rounded-lg">
-          <h2 className="text-xl font-semibold text-foreground mb-2">
-            Oportunidades de Reabastecimento
-          </h2>
-          <p className="text-muted-foreground">
-            Carregue um arquivo Excel para identificar produtos com baixo estoque que podem ser reabastecidos.
-          </p>
-        </div>
-      )}
-      {allProducts.length > 0 && filteredProducts.length === 0 && !isLoading && (
-         <Card className="shadow-lg my-6">
-            <CardHeader>
-                <CardTitle className="flex items-center text-accent-foreground"> {/* Changed to accent for less alarming color */}
-                    <AlertTriangle className="mr-2 h-5 w-5" />
-                    Nenhuma Oportunidade Encontrada
-                </CardTitle>
-            </CardHeader>
-            <CardContent>
-                <p className="text-muted-foreground">
-                    Nenhum produto com estoque baixo (considerando o limite de <span className="font-semibold">{parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD}</span> unidades) 
-                    e disponibilidade em "Pronta Entrega" ou "Pedido" foi encontrado com os filtros atuais.
-                </p>
-                <p className="text-muted-foreground mt-2">
-                    Tente ajustar o limite de baixo estoque ou os filtros gerais e clique em "Aplicar Todos os Filtros".
-                </p>
-            </CardContent>
+        <Card className="shadow-lg text-center py-10">
+          <CardHeader>
+            <CardTitle className="flex items-center justify-center">
+                <PackageSearch className="mr-2 h-7 w-7 text-primary" />
+                Comece Analisando as Oportunidades
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground">
+              Carregue um arquivo Excel no passo "1. Carregar Dados do Excel" para identificar produtos com baixo estoque que podem ser reabastecidos a partir da "Pronta Entrega" ou "Pedidos".
+            </p>
+          </CardContent>
         </Card>
       )}
     </div>
   );
 }
+

@@ -25,11 +25,12 @@ interface ProductDataTableSectionProps {
   showStartDateColumn?: boolean;
   showEndDateColumn?: boolean;
   showStatusColumn?: boolean;
-  showDescriptionColumn?: boolean; // Estampa
+  showDescriptionColumn?: boolean; 
   showSizeColumn?: boolean;
   showProductTypeColumn?: boolean;
   showProductDerivationColumn?: boolean; 
   cardTitle?: string;
+  cardDescription?: string; // Added for more context
   cardIcon?: React.ElementType;
 }
 
@@ -81,6 +82,7 @@ export function ProductDataTableSection({
   showProductTypeColumn = false,
   showProductDerivationColumn = false,
   cardTitle = "Dados dos Produtos",
+  cardDescription = "Lista detalhada de produtos. Clique nos cabeçalhos das colunas para ordenar.",
   cardIcon: CardIcon = ListChecks,
 }: ProductDataTableSectionProps) {
   const [sortKey, setSortKey] = useState<SortKey>('name');
@@ -111,8 +113,6 @@ export function ProductDataTableSection({
       return sortOrder === 'asc' ? comparison : -comparison;
     });
   }, [products, sortKey, sortOrder]);
-
-  const totalPages = Math.ceil(sortedProducts.length / itemsPerPage);
 
   useEffect(() => {
     const newTotalPages = Math.ceil(sortedProducts.length / itemsPerPage);
@@ -154,66 +154,60 @@ export function ProductDataTableSection({
     return <ArrowUpDown className="h-4 w-4 inline ml-1 opacity-30" />;
   };
   
-  const TableSkeleton = () => (
-    <TableRow>
-      <TableCell colSpan={
-        (showVtexIdColumn ? 1 : 0) +
-        (showNameColumn ? 1 : 0) +
-        (showProductDerivationColumn ? 1: 0) +
-        (showStockColumn ? 1 : 0) +
-        (showReadyToShipColumn ? 1 : 0) +
-        (showOrderColumn ? 1 : 0) +
-        (showCollectionColumn ? 1 : 0) +
-        (showStartDateColumn ? 1 : 0) +
-        (showEndDateColumn ? 1 : 0) +
-        (showStatusColumn ? 1 : 0) +
-        (showDescriptionColumn ? 1 : 0) +
-        (showSizeColumn ? 1 : 0) +
-        (showProductTypeColumn ? 1 : 0) || 1 
-      }>
-        <div className="space-y-2">
-          {[...Array(5)].map((_, i) => (
-            <Skeleton key={i} className="h-10 w-full" />
-          ))}
-        </div>
-      </TableCell>
-    </TableRow>
-  );
+  const TableSkeleton = () => {
+    const colCount = [
+        showVtexIdColumn, showNameColumn, showProductDerivationColumn, showStockColumn, 
+        showReadyToShipColumn, showOrderColumn, showCollectionColumn, showDescriptionColumn, 
+        showSizeColumn, showProductTypeColumn, showStartDateColumn, showEndDateColumn, showStatusColumn
+    ].filter(Boolean).length || 1;
+
+    return (
+        <>
+            {[...Array(5)].map((_, i) => (
+                <TableRow key={`skeleton-row-${i}`}>
+                    <TableCell colSpan={colCount}>
+                        <Skeleton className="h-8 w-full" />
+                    </TableCell>
+                </TableRow>
+            ))}
+        </>
+    );
+  };
 
 
   return (
-    <Card className="shadow-lg">
-      <CardHeader>
-        <CardTitle className="flex items-center text-xl">
-          <CardIcon className="mr-2 h-6 w-6 text-primary" />
+    <Card className="shadow-sm"> {/* Reduced shadow for a cleaner look within another card */}
+      <CardHeader className="pt-4 pb-2"> {/* Adjusted padding */}
+        <CardTitle className="flex items-center text-lg"> {/* Slightly smaller title */}
+          <CardIcon className="mr-2 h-5 w-5 text-primary" />
           {cardTitle}
         </CardTitle>
-        <CardDescription>
-          Lista detalhada de produtos. Clique nos cabeçalhos das colunas para ordenar.
+        <CardDescription className="text-sm">
+          {cardDescription}
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="pt-2"> {/* Adjusted padding */}
         {(products.length === 0 && !isLoading) ? (
-          <p className="text-center text-muted-foreground py-8">Nenhum dado de produto para exibir. Faça o upload de um arquivo Excel e processe-o, ou ajuste os filtros.</p>
+          <p className="text-center text-muted-foreground py-6">Nenhum produto corresponde aos critérios selecionados.</p>
         ) : (
           <>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    {showVtexIdColumn && <TableHead onClick={() => handleSort('vtexId')} className="cursor-pointer hover:bg-muted/50 min-w-[100px]">ID VTEX {renderSortIcon('vtexId')}</TableHead>}
-                    {showNameColumn && <TableHead onClick={() => handleSort('name')} className="cursor-pointer hover:bg-muted/50 min-w-[200px]">Nome Produto {renderSortIcon('name')}</TableHead>}
-                    {showProductDerivationColumn && <TableHead onClick={() => handleSort('productDerivation')} className="cursor-pointer hover:bg-muted/50 min-w-[150px]">Produto-Derivação {renderSortIcon('productDerivation')}</TableHead>}
-                    {showStockColumn && <TableHead onClick={() => handleSort('stock')} className="cursor-pointer hover:bg-muted/50 text-right">Estoque {renderSortIcon('stock')}</TableHead>}
-                    {showReadyToShipColumn && <TableHead onClick={() => handleSort('readyToShip')} className="cursor-pointer hover:bg-muted/50 text-right">Pronta Entrega {renderSortIcon('readyToShip')}</TableHead>}
-                    {showOrderColumn && <TableHead onClick={() => handleSort('order')} className="cursor-pointer hover:bg-muted/50 text-right">Pedido {renderSortIcon('order')}</TableHead>}
-                    {showCollectionColumn && <TableHead onClick={() => handleSort('collection')} className="cursor-pointer hover:bg-muted/50">Coleção {renderSortIcon('collection')}</TableHead>}
-                    {showDescriptionColumn && <TableHead onClick={() => handleSort('description')} className="cursor-pointer hover:bg-muted/50">Estampa {renderSortIcon('description')}</TableHead>}
-                    {showSizeColumn && <TableHead onClick={() => handleSort('size')} className="cursor-pointer hover:bg-muted/50">Tamanho {renderSortIcon('size')}</TableHead>}
-                    {showProductTypeColumn && <TableHead onClick={() => handleSort('productType')} className="cursor-pointer hover:bg-muted/50">Tipo Produto {renderSortIcon('productType')}</TableHead>}
-                    {showStartDateColumn && <TableHead onClick={() => handleSort('collectionStartDate')} className="cursor-pointer hover:bg-muted/50">Data Início {renderSortIcon('collectionStartDate')}</TableHead>}
-                    {showEndDateColumn && <TableHead onClick={() => handleSort('collectionEndDate')} className="cursor-pointer hover:bg-muted/50">Data Fim {renderSortIcon('collectionEndDate')}</TableHead>}
-                    {showStatusColumn && <TableHead>Status</TableHead>}
+                    {showVtexIdColumn && <TableHead onClick={() => handleSort('vtexId')} className="cursor-pointer hover:bg-muted/50 min-w-[100px] whitespace-nowrap">ID VTEX {renderSortIcon('vtexId')}</TableHead>}
+                    {showNameColumn && <TableHead onClick={() => handleSort('name')} className="cursor-pointer hover:bg-muted/50 min-w-[250px]">Nome Produto {renderSortIcon('name')}</TableHead>}
+                    {showProductDerivationColumn && <TableHead onClick={() => handleSort('productDerivation')} className="cursor-pointer hover:bg-muted/50 min-w-[180px] whitespace-nowrap">Produto-Derivação {renderSortIcon('productDerivation')}</TableHead>}
+                    {showStockColumn && <TableHead onClick={() => handleSort('stock')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap">Est. Atual {renderSortIcon('stock')}</TableHead>}
+                    {showReadyToShipColumn && <TableHead onClick={() => handleSort('readyToShip')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap font-semibold text-green-600">Pronta Ent. {renderSortIcon('readyToShip')}</TableHead>}
+                    {showOrderColumn && <TableHead onClick={() => handleSort('order')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap font-semibold text-blue-600">Pedido {renderSortIcon('order')}</TableHead>}
+                    {showCollectionColumn && <TableHead onClick={() => handleSort('collection')} className="cursor-pointer hover:bg-muted/50 min-w-[150px]">Coleção {renderSortIcon('collection')}</TableHead>}
+                    {showDescriptionColumn && <TableHead onClick={() => handleSort('description')} className="cursor-pointer hover:bg-muted/50 min-w-[150px]">Estampa {renderSortIcon('description')}</TableHead>}
+                    {showSizeColumn && <TableHead onClick={() => handleSort('size')} className="cursor-pointer hover:bg-muted/50 min-w-[100px]">Tamanho {renderSortIcon('size')}</TableHead>}
+                    {showProductTypeColumn && <TableHead onClick={() => handleSort('productType')} className="cursor-pointer hover:bg-muted/50 min-w-[150px]">Tipo Produto {renderSortIcon('productType')}</TableHead>}
+                    {showStartDateColumn && <TableHead onClick={() => handleSort('collectionStartDate')} className="cursor-pointer hover:bg-muted/50 whitespace-nowrap">Data Início {renderSortIcon('collectionStartDate')}</TableHead>}
+                    {showEndDateColumn && <TableHead onClick={() => handleSort('collectionEndDate')} className="cursor-pointer hover:bg-muted/50 whitespace-nowrap">Data Fim {renderSortIcon('collectionEndDate')}</TableHead>}
+                    {showStatusColumn && <TableHead className="min-w-[120px]">Status Coleção</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -221,28 +215,28 @@ export function ProductDataTableSection({
                     const status = getCollectionStatus(product);
                     return (
                       <TableRow key={`${product.vtexId}-${product.name}-${product.productDerivation}-${index}-${currentPage}`}>
-                        {showVtexIdColumn && <TableCell>{product.vtexId}</TableCell>}
+                        {showVtexIdColumn && <TableCell className="whitespace-nowrap">{product.vtexId}</TableCell>}
                         {showNameColumn && <TableCell className="font-medium">{product.name}</TableCell>}
-                        {showProductDerivationColumn && <TableCell>{product.productDerivation}</TableCell>}
-                        {showStockColumn && <TableCell className="text-right">{product.stock}</TableCell>}
-                        {showReadyToShipColumn && <TableCell className="text-right">{product.readyToShip}</TableCell>}
-                        {showOrderColumn && <TableCell className="text-right">{product.order}</TableCell>}
+                        {showProductDerivationColumn && <TableCell className="whitespace-nowrap">{product.productDerivation}</TableCell>}
+                        {showStockColumn && <TableCell className="text-right">{product.stock.toLocaleString()}</TableCell>}
+                        {showReadyToShipColumn && <TableCell className="text-right font-semibold text-green-700">{product.readyToShip.toLocaleString()}</TableCell>}
+                        {showOrderColumn && <TableCell className="text-right font-semibold text-blue-700">{product.order.toLocaleString()}</TableCell>}
                         {showCollectionColumn && <TableCell>{product.collection}</TableCell>}
                         {showDescriptionColumn && <TableCell>{product.description}</TableCell>}
                         {showSizeColumn && <TableCell>{product.size}</TableCell>}
                         {showProductTypeColumn && <TableCell>{product.productType}</TableCell>}
-                        {showStartDateColumn && <TableCell>
+                        {showStartDateColumn && <TableCell className="whitespace-nowrap">
                           {product.collectionStartDate && isValid(new Date(product.collectionStartDate))
-                            ? format(new Date(product.collectionStartDate), 'dd/MM/yyyy')
+                            ? format(new Date(product.collectionStartDate), 'dd/MM/yy')
                             : product.rawCollectionStartDate || 'N/A'}
                         </TableCell>}
-                        {showEndDateColumn && <TableCell>
+                        {showEndDateColumn && <TableCell className="whitespace-nowrap">
                           {product.collectionEndDate && isValid(new Date(product.collectionEndDate))
-                            ? format(new Date(product.collectionEndDate), 'dd/MM/yyyy')
+                            ? format(new Date(product.collectionEndDate), 'dd/MM/yy')
                             : product.rawCollectionEndDate || 'N/A'}
                         </TableCell>}
                         {showStatusColumn && <TableCell>
-                          <Badge variant={status.variant} className={cn("whitespace-nowrap", status.colorClass)}>{status.text}</Badge>
+                          <Badge variant={status.variant} className={cn("whitespace-nowrap text-xs", status.colorClass)}>{status.text}</Badge>
                         </TableCell>}
                       </TableRow>
                     );
@@ -251,7 +245,7 @@ export function ProductDataTableSection({
               </Table>
             </div>
             {totalPages > 1 && (
-              <div className="flex items-center justify-between pt-6">
+              <div className="flex items-center justify-between pt-4">
                 <Button
                   variant="outline"
                   size="sm"
@@ -263,7 +257,7 @@ export function ProductDataTableSection({
                   Anterior
                 </Button>
                 <span className="text-sm text-muted-foreground">
-                  Página {currentPage} de {totalPages}
+                  Página {currentPage} de {totalPages} (Total: {sortedProducts.length.toLocaleString()} produtos)
                 </span>
                 <Button
                   variant="outline"
