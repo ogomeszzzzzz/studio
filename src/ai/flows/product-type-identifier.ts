@@ -3,7 +3,7 @@
 /**
  * @fileOverview Identifies product types (e.g., Edredom, Jogo de Cama) from product names.
  *
- * - identifyProductTypesFlow - A function that takes product names and returns their identified types.
+ * - identifyProductTypes - A function that takes product names and returns their identified types.
  * - ProductTypeIdentifierInput - The input type for the function.
  * - ProductTypeIdentifierOutput - The return type for the function.
  */
@@ -34,12 +34,13 @@ const PRODUCT_CATEGORIES = [
   "Outros" // Fallback category
 ].join(', ');
 
-export const ProductTypeIdentifierInputSchema = z.object({
+// Schema definitions are now local to this module and not exported.
+const ProductTypeIdentifierInputSchema = z.object({
   productNames: z.array(z.string()).describe('An array of product names to be categorized.'),
 });
 export type ProductTypeIdentifierInput = z.infer<typeof ProductTypeIdentifierInputSchema>;
 
-export const ProductTypeIdentifierOutputSchema = z.object({
+const ProductTypeIdentifierOutputSchema = z.object({
   categorizedProducts: z
     .array(
       z.object({
