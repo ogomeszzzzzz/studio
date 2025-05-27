@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useMemo, useCallback } from 'react';
@@ -8,6 +9,8 @@ import { ProductDataTableSection } from '@/components/domain/ProductDataTableSec
 import { GapAnalysisSection } from '@/components/domain/GapAnalysisSection';
 import type { Product, FilterState } from '@/types';
 import { isAfter, isBefore, isValid } from 'date-fns';
+
+const ALL_COLLECTIONS_VALUE = "_ALL_COLLECTIONS_";
 
 export default function CollectionGapAnalyzerPage() {
   const [allProducts, setAllProducts] = useState<Product[]>([]);
@@ -30,7 +33,7 @@ export default function CollectionGapAnalyzerPage() {
     setActiveFilters(filters);
     let tempFiltered = [...allProducts];
 
-    if (filters.collection) {
+    if (filters.collection && filters.collection !== ALL_COLLECTIONS_VALUE) {
       tempFiltered = tempFiltered.filter(p => p.collection === filters.collection);
     }
     if (filters.stockMin) {

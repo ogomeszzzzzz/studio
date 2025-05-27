@@ -1,3 +1,4 @@
+
 'use client';
 
 import type { ChangeEvent } from 'react';
@@ -20,8 +21,10 @@ interface FilterControlsSectionProps {
   availableCollections: string[];
 }
 
+const ALL_COLLECTIONS_VALUE = "_ALL_COLLECTIONS_";
+
 const initialFilterState: FilterState = {
-  collection: '',
+  collection: ALL_COLLECTIONS_VALUE,
   stockMin: '',
   stockMax: '',
   startDateFrom: undefined,
@@ -86,7 +89,7 @@ export function FilterControlsSection({ products, onFilterChange, availableColle
                 <SelectValue placeholder="All Collections" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Collections</SelectItem>
+                <SelectItem value={ALL_COLLECTIONS_VALUE}>All Collections</SelectItem>
                 {availableCollections.map(c => (
                   <SelectItem key={c} value={c}>{c}</SelectItem>
                 ))}
