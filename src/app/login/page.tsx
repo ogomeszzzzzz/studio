@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react'; // useActionState não é mais necessário aqui
+import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { signInWithEmailAndPassword, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { FirebaseError } from 'firebase/app';
@@ -10,7 +10,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-// Link para registro removido
 import { clientAuth } from '@/lib/firebase/config';
 import { LogIn, Loader2 } from 'lucide-react';
 
@@ -24,8 +23,6 @@ export default function LoginPage() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(clientAuth, (user) => {
       if (user) {
-        // Usuário está logado, redireciona para o dashboard
-        // A lógica de aprovação foi removida
         toast({ title: 'Login Bem-sucedido', description: 'Redirecionando para o dashboard...' });
         router.push('/dashboard');
       }
@@ -33,18 +30,7 @@ export default function LoginPage() {
     return () => unsubscribe();
   }, [router, toast]);
 
-  useEffect(() => {
-    const approvalSuccess = searchParams.get('approvalSuccess');
-    if (approvalSuccess === 'true') {
-      toast({
-        title: 'Conta Aprovada!',
-        description: 'Sua conta foi aprovada com sucesso. Você já pode fazer login.',
-      });
-      // Remove o parâmetro da URL para não mostrar o toast novamente no refresh
-      router.replace('/login', undefined);
-    }
-  }, [searchParams, toast, router]);
-
+  // Approval success toast removed as approval system is disabled.
 
   const handleClientFirebaseLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -64,8 +50,7 @@ export default function LoginPage() {
 
     try {
       await signInWithEmailAndPassword(clientAuth, email, password);
-      // onAuthStateChanged lidará com o redirecionamento.
-      // setIsLoading(false) será tratado pelo redirecionamento ou erro.
+      // onAuthStateChanged will handle the redirection.
     } catch (e: unknown) {
       setIsLoading(false);
       let errorMessage = 'Falha no login. Verifique suas credenciais.';
@@ -82,7 +67,7 @@ export default function LoginPage() {
             consoleLogFn = 'warn';
             break;
           case 'auth/user-disabled':
-            errorMessage = 'Esta conta está desabilitada.'; // Não deve acontecer com o sistema de aprovação removido
+            errorMessage = 'Esta conta está desabilitada.';
             consoleLogFn = 'warn';
             break;
           default:
@@ -130,7 +115,6 @@ export default function LoginPage() {
                 name="email" 
                 type="email" 
                 placeholder="seu@email.com" 
-                defaultValue="altenburgstore@gmail.com" // Valor padrão para facilitar
                 required 
                 className="text-base py-3 px-4"/>
             </div>
@@ -140,7 +124,7 @@ export default function LoginPage() {
                 id="password" 
                 name="password" 
                 type="password" 
-                defaultValue="gapecommerce2025" // Valor padrão para facilitar
+                placeholder="••••••••"
                 required 
                 className="text-base py-3 px-4"/>
             </div>
@@ -154,7 +138,6 @@ export default function LoginPage() {
            {formMessage?.message && (
             <p className={`text-sm ${formMessage.status === 'error' ? 'text-destructive' : 'text-green-600'}`}>{formMessage.message}</p>
           )}
-          {/* Link para registro removido */}
         </CardFooter>
       </Card>
     </div>
