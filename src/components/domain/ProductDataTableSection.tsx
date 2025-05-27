@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { Product } from '@/types';
-import { format, isValid, addDays, isBefore } from 'date-fns';
+import { format, isValid, addDays, isBefore, parseISO } from 'date-fns';
 import { ArrowUpDown, ListChecks, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -41,23 +41,40 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
   const today = new Date();
   today.setHours(0,0,0,0); 
 
-  if (product.collectionEndDate && isValid(product.collectionEndDate)) {
-    const endDate = new Date(product.collectionEndDate); 
+  const endDateInput = product.collectionEndDate;
+  
+  // Check if endDateInput is already a Date object, if not, try to parse it
+  let endDate: Date | null = null;
+  if (endDateInput instanceof Date && isValid(endDateInput)) {
+    endDate = endDateInput;
+  } else if (typeof endDateInput === 'string') {
+    const parsedDate = parseISO(endDateInput);
+    if (isValid(parsedDate)) {
+      endDate = parsedDate;
+    }
+  } else if (typeof endDateInput === 'number') { // Handle Excel serial dates if they come as numbers
+      const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+      const d = new Date(excelEpoch.getTime() + endDateInput * 24 * 60 * 60 * 1000);
+      if (isValid(d)) endDate = d;
+  }
+
+
+  if (endDate && isValid(endDate)) {
     endDate.setHours(0,0,0,0); 
 
     if (isBefore(endDate, today)) {
       return product.stock > 0 
         ? { text: 'Coleção Passada (Em Estoque)', variant: 'destructive', colorClass: 'bg-destructive/80 text-destructive-foreground' } 
-        : { text: 'Coleção Passada (Sem Estoque)', variant: 'outline' };
+        : { text: 'Coleção Passada (Sem Estoque)', variant: 'outline', colorClass: 'border-muted-foreground text-muted-foreground' };
     }
     if (isBefore(endDate, addDays(today, 30))) {
-      return { text: 'Próximo ao Fim', variant: 'default', colorClass: 'bg-accent text-accent-foreground' };
+      return { text: 'Próximo ao Fim', variant: 'default', colorClass: 'bg-amber-500 text-white' }; // Using amber for accent-like
     }
   }
-  if (!product.isCurrentCollection && product.stock > 0) {
+  if (product.isCurrentCollection === false && product.stock > 0) { // Explicitly check for false
      return { text: 'Não Atual (Em Estoque)', variant: 'secondary' };
   }
-  if (product.isCurrentCollection) {
+  if (product.isCurrentCollection === true) { // Explicitly check for true
     return { text: 'Coleção Atual', variant: 'default', colorClass: 'bg-primary/80 text-primary-foreground' };
   }
   return { text: 'Status N/A', variant: 'outline' };
@@ -68,7 +85,7 @@ export function ProductDataTableSection({
   products, 
   isLoading,
   itemsPerPage = 20,
-  showVtexIdColumn = false, // Defaulted, but RestockOpportunities passes true
+  showVtexIdColumn = false,
   showNameColumn = true,
   showStockColumn = true,
   showReadyToShipColumn = false,
@@ -122,7 +139,7 @@ export function ProductDataTableSection({
     } else if (currentPage === 0 && totalPages > 0) { 
         setCurrentPage(1);
     } else if (totalPages === 0 && sortedProducts.length === 0) { 
-        setCurrentPage(1);
+        setCurrentPage(1); // Reset to page 1 if no products
     }
   }, [sortedProducts, currentPage, itemsPerPage, totalPages]);
 
@@ -158,13 +175,13 @@ export function ProductDataTableSection({
         showVtexIdColumn, showNameColumn, showProductDerivationColumn, showStockColumn, 
         showReadyToShipColumn, showRegulatorStockColumn, showCollectionColumn, showDescriptionColumn, 
         showSizeColumn, showProductTypeColumn, showStartDateColumn, showEndDateColumn, showStatusColumn
-    ].filter(Boolean).length || 1;
+    ].filter(Boolean).length || 1; // Ensure colCount is at least 1
 
     return (
         <>
-            {[...Array(5)].map((_, i) => (
+            {[...Array(itemsPerPage > 10 ? 10 : itemsPerPage)].map((_, i) => ( // Show up to 10 skeleton rows or itemsPerPage
                 <TableRow key={`skeleton-row-${i}`}>
-                    <TableCell colSpan={colCount}>
+                    <TableCell colSpan={colCount > 0 ? colCount : 1}>
                         <Skeleton className="h-8 w-full" />
                     </TableCell>
                 </TableRow>
@@ -194,19 +211,19 @@ export function ProductDataTableSection({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    {showVtexIdColumn && <TableHead onClick={() => handleSort('vtexId')} className="cursor-pointer hover:bg-muted/50 min-w-[100px] whitespace-nowrap">ID VTEX {renderSortIcon('vtexId')}</TableHead>}
-                    {showNameColumn && <TableHead onClick={() => handleSort('name')} className="cursor-pointer hover:bg-muted/50 min-w-[250px]">Nome Produto {renderSortIcon('name')}</TableHead>}
-                    {showProductDerivationColumn && <TableHead onClick={() => handleSort('productDerivation')} className="cursor-pointer hover:bg-muted/50 min-w-[180px] whitespace-nowrap">Produto-Derivação {renderSortIcon('productDerivation')}</TableHead>}
-                    {showStockColumn && <TableHead onClick={() => handleSort('stock')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap">Est. Atual {renderSortIcon('stock')}</TableHead>}
-                    {showReadyToShipColumn && <TableHead onClick={() => handleSort('readyToShip')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap font-semibold text-green-600">Pronta Ent. {renderSortIcon('readyToShip')}</TableHead>}
-                    {showRegulatorStockColumn && <TableHead onClick={() => handleSort('regulatorStock')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap font-semibold text-orange-600">Regulador {renderSortIcon('regulatorStock')}</TableHead>}
-                    {showCollectionColumn && <TableHead onClick={() => handleSort('collection')} className="cursor-pointer hover:bg-muted/50 min-w-[150px]">Coleção {renderSortIcon('collection')}</TableHead>}
-                    {showDescriptionColumn && <TableHead onClick={() => handleSort('description')} className="cursor-pointer hover:bg-muted/50 min-w-[150px]">Estampa {renderSortIcon('description')}</TableHead>}
-                    {showSizeColumn && <TableHead onClick={() => handleSort('size')} className="cursor-pointer hover:bg-muted/50 min-w-[100px]">Tamanho {renderSortIcon('size')}</TableHead>}
-                    {showProductTypeColumn && <TableHead onClick={() => handleSort('productType')} className="cursor-pointer hover:bg-muted/50 min-w-[150px]">Tipo Produto {renderSortIcon('productType')}</TableHead>}
-                    {showStartDateColumn && <TableHead onClick={() => handleSort('collectionStartDate')} className="cursor-pointer hover:bg-muted/50 whitespace-nowrap">Data Início {renderSortIcon('collectionStartDate')}</TableHead>}
-                    {showEndDateColumn && <TableHead onClick={() => handleSort('collectionEndDate')} className="cursor-pointer hover:bg-muted/50 whitespace-nowrap">Data Fim {renderSortIcon('collectionEndDate')}</TableHead>}
-                    {showStatusColumn && <TableHead className="min-w-[120px]">Status Coleção</TableHead>}
+                    {showVtexIdColumn && <TableHead onClick={() => handleSort('vtexId')} className="cursor-pointer hover:bg-muted/50 min-w-[100px] whitespace-nowrap px-2 py-3 text-xs sm:text-sm">ID VTEX {renderSortIcon('vtexId')}</TableHead>}
+                    {showNameColumn && <TableHead onClick={() => handleSort('name')} className="cursor-pointer hover:bg-muted/50 min-w-[200px] px-2 py-3 text-xs sm:text-sm">Nome Produto {renderSortIcon('name')}</TableHead>}
+                    {showProductDerivationColumn && <TableHead onClick={() => handleSort('productDerivation')} className="cursor-pointer hover:bg-muted/50 min-w-[150px] whitespace-nowrap px-2 py-3 text-xs sm:text-sm">Produto-Derivação {renderSortIcon('productDerivation')}</TableHead>}
+                    {showStockColumn && <TableHead onClick={() => handleSort('stock')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap px-2 py-3 text-xs sm:text-sm">Est. Atual {renderSortIcon('stock')}</TableHead>}
+                    {showReadyToShipColumn && <TableHead onClick={() => handleSort('readyToShip')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap font-semibold text-green-600 px-2 py-3 text-xs sm:text-sm">Pronta Ent. {renderSortIcon('readyToShip')}</TableHead>}
+                    {showRegulatorStockColumn && <TableHead onClick={() => handleSort('regulatorStock')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap font-semibold text-orange-600 px-2 py-3 text-xs sm:text-sm">Regulador {renderSortIcon('regulatorStock')}</TableHead>}
+                    {showCollectionColumn && <TableHead onClick={() => handleSort('collection')} className="cursor-pointer hover:bg-muted/50 min-w-[150px] px-2 py-3 text-xs sm:text-sm">Coleção {renderSortIcon('collection')}</TableHead>}
+                    {showDescriptionColumn && <TableHead onClick={() => handleSort('description')} className="cursor-pointer hover:bg-muted/50 min-w-[150px] px-2 py-3 text-xs sm:text-sm">Estampa {renderSortIcon('description')}</TableHead>}
+                    {showSizeColumn && <TableHead onClick={() => handleSort('size')} className="cursor-pointer hover:bg-muted/50 min-w-[100px] px-2 py-3 text-xs sm:text-sm">Tamanho {renderSortIcon('size')}</TableHead>}
+                    {showProductTypeColumn && <TableHead onClick={() => handleSort('productType')} className="cursor-pointer hover:bg-muted/50 min-w-[150px] px-2 py-3 text-xs sm:text-sm">Tipo Produto {renderSortIcon('productType')}</TableHead>}
+                    {showStartDateColumn && <TableHead onClick={() => handleSort('collectionStartDate')} className="cursor-pointer hover:bg-muted/50 whitespace-nowrap px-2 py-3 text-xs sm:text-sm">Data Início {renderSortIcon('collectionStartDate')}</TableHead>}
+                    {showEndDateColumn && <TableHead onClick={() => handleSort('collectionEndDate')} className="cursor-pointer hover:bg-muted/50 whitespace-nowrap px-2 py-3 text-xs sm:text-sm">Data Fim {renderSortIcon('collectionEndDate')}</TableHead>}
+                    {showStatusColumn && <TableHead className="min-w-[120px] px-2 py-3 text-xs sm:text-sm">Status Coleção</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -214,28 +231,28 @@ export function ProductDataTableSection({
                     const status = getCollectionStatus(product);
                     return (
                       <TableRow key={`${product.vtexId}-${product.name}-${product.productDerivation}-${index}-${currentPage}`}>
-                        {showVtexIdColumn && <TableCell className="whitespace-nowrap">{String(product.vtexId ?? '')}</TableCell>}
-                        {showNameColumn && <TableCell className="font-medium">{product.name}</TableCell>}
-                        {showProductDerivationColumn && <TableCell className="whitespace-nowrap">{product.productDerivation}</TableCell>}
-                        {showStockColumn && <TableCell className="text-right">{product.stock.toLocaleString()}</TableCell>}
-                        {showReadyToShipColumn && <TableCell className="text-right font-semibold text-green-700">{product.readyToShip.toLocaleString()}</TableCell>}
-                        {showRegulatorStockColumn && <TableCell className="text-right font-semibold text-orange-700">{product.regulatorStock.toLocaleString()}</TableCell>}
-                        {showCollectionColumn && <TableCell>{product.collection}</TableCell>}
-                        {showDescriptionColumn && <TableCell>{product.description}</TableCell>}
-                        {showSizeColumn && <TableCell>{product.size}</TableCell>}
-                        {showProductTypeColumn && <TableCell>{product.productType}</TableCell>}
-                        {showStartDateColumn && <TableCell className="whitespace-nowrap">
+                        {showVtexIdColumn && <TableCell className="whitespace-nowrap px-2 py-2 text-xs sm:text-sm">{String(product.vtexId ?? '')}</TableCell>}
+                        {showNameColumn && <TableCell className="font-medium px-2 py-2 text-xs sm:text-sm">{product.name}</TableCell>}
+                        {showProductDerivationColumn && <TableCell className="whitespace-nowrap px-2 py-2 text-xs sm:text-sm">{product.productDerivation}</TableCell>}
+                        {showStockColumn && <TableCell className="text-right px-2 py-2 text-xs sm:text-sm">{product.stock.toLocaleString()}</TableCell>}
+                        {showReadyToShipColumn && <TableCell className="text-right font-semibold text-green-700 px-2 py-2 text-xs sm:text-sm">{product.readyToShip.toLocaleString()}</TableCell>}
+                        {showRegulatorStockColumn && <TableCell className="text-right font-semibold text-orange-700 px-2 py-2 text-xs sm:text-sm">{product.regulatorStock.toLocaleString()}</TableCell>}
+                        {showCollectionColumn && <TableCell className="px-2 py-2 text-xs sm:text-sm">{product.collection}</TableCell>}
+                        {showDescriptionColumn && <TableCell className="px-2 py-2 text-xs sm:text-sm">{product.description}</TableCell>}
+                        {showSizeColumn && <TableCell className="px-2 py-2 text-xs sm:text-sm">{product.size}</TableCell>}
+                        {showProductTypeColumn && <TableCell className="px-2 py-2 text-xs sm:text-sm">{product.productType}</TableCell>}
+                        {showStartDateColumn && <TableCell className="whitespace-nowrap px-2 py-2 text-xs sm:text-sm">
                           {product.collectionStartDate && isValid(new Date(product.collectionStartDate))
                             ? format(new Date(product.collectionStartDate), 'dd/MM/yy')
                             : product.rawCollectionStartDate || 'N/A'}
                         </TableCell>}
-                        {showEndDateColumn && <TableCell className="whitespace-nowrap">
+                        {showEndDateColumn && <TableCell className="whitespace-nowrap px-2 py-2 text-xs sm:text-sm">
                           {product.collectionEndDate && isValid(new Date(product.collectionEndDate))
                             ? format(new Date(product.collectionEndDate), 'dd/MM/yy')
                             : product.rawCollectionEndDate || 'N/A'}
                         </TableCell>}
-                        {showStatusColumn && <TableCell>
-                          <Badge variant={status.variant} className={cn("whitespace-nowrap text-xs", status.colorClass)}>{status.text}</Badge>
+                        {showStatusColumn && <TableCell className="px-2 py-2 text-xs sm:text-sm">
+                          <Badge variant={status.variant} className={cn("whitespace-nowrap text-xs px-1.5 py-0.5", status.colorClass)}>{status.text}</Badge>
                         </TableCell>}
                       </TableRow>
                     );
@@ -262,7 +279,7 @@ export function ProductDataTableSection({
                   variant="outline"
                   size="sm"
                   onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                  disabled={currentPage === totalPages}
+                  disabled={currentPage === totalPages || sortedProducts.length === 0}
                   aria-label="Próxima página"
                 >
                   Próxima
