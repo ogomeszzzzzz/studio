@@ -1,3 +1,4 @@
+
 import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
@@ -18,6 +19,9 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // experimental: {
+  //   serverActions: true, // Ensure server actions are enabled, though usually true by default in recent Next.js
+  // },
 };
 
 export default nextConfig;

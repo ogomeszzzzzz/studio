@@ -1,3 +1,4 @@
+
 import type {Metadata} from 'next';
 import {Geist, Geist_Mono} from 'next/font/google';
 import './globals.css';
@@ -14,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Collection Gap Analyzer',
-  description: 'Analyze collection gaps from Excel data.',
+  title: 'Collection Gap Analyzer & Dashboard',
+  description: 'Analyze collection gaps and view inventory dashboards.',
 };
 
 export default function RootLayout({
@@ -24,8 +25,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased font-sans`}>
+    <html lang="pt-BR">
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased font-sans bg-background text-foreground`}>
         {children}
         <Toaster />
       </body>

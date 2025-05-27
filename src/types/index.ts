@@ -33,3 +33,12 @@ export interface FilterState {
   endDateFrom: Date | undefined;
   endDateTo: Date | undefined;
 }
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  isApproved: boolean;
+  approvalToken?: string; // Store token for one-time use
+  createdAt: Date;
+  approvedAt?: Date;
+}
