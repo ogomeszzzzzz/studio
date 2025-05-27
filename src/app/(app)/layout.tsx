@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { clientAuth } from '@/lib/firebase/config';
 import { Button } from '@/components/ui/button';
-import { Loader2, LogOut, LayoutDashboard, BarChartBig, UserCircle, PackageSearch } from 'lucide-react';
+import { Loader2, LogOut, LayoutDashboard, UserCircle, PackageSearch } from 'lucide-react'; // BarChartBig removed
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 import type { UserProfile } from '@/types';
@@ -98,10 +98,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <LayoutDashboard className="h-5 w-5" />
             <span className="font-medium text-sm">Dashboard</span>
         </Link>
-        <Link href="/collection-analyzer" className="flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors">
-            <BarChartBig className="h-5 w-5" />
-            <span className="font-medium text-sm">Gap Analyzer</span>
-        </Link>
+        {/* Link to Gap Analyzer removed */}
         <Link href="/restock-opportunities" className="flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors">
             <PackageSearch className="h-5 w-5" />
             <span className="font-medium text-sm">Oportunidades Reabast.</span>
