@@ -4,8 +4,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { onAuthStateChanged } from 'firebase/auth';
-import { clientAuth, firestore } from '@/lib/firebase/config';
-import { doc, getDoc } from 'firebase/firestore';
+import { clientAuth } from '@/lib/firebase/config'; // Firestore não é mais necessário aqui
 import { Loader2 } from 'lucide-react';
 
 export default function HomePage() {
@@ -14,28 +13,16 @@ export default function HomePage() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(clientAuth, async (user) => {
       if (user) {
-        // User is signed in, check if approved and redirect to dashboard
-        if (!firestore) {
-            console.error("Firestore not available for homepage redirect check");
-            router.push('/login'); // Fallback to login if DB check fails
-            return;
-        }
-        const userDocRef = doc(firestore, 'users', user.uid);
-        const userDoc = await getDoc(userDocRef);
-        if (userDoc.exists() && userDoc.data().isApproved) {
-          router.replace('/dashboard');
-        } else {
-          // Not approved or data missing, redirect to login (after signing out if needed)
-          await clientAuth.signOut();
-          router.replace('/login');
-        }
+        // Usuário está logado, redireciona para o dashboard.
+        // A verificação de 'isApproved' foi removida.
+        router.replace('/dashboard');
       } else {
-        // No user signed in, redirect to login page
+        // Nenhum usuário logado, redireciona para a página de login.
         router.replace('/login');
       }
     });
 
-    return () => unsubscribe(); // Cleanup subscription on unmount
+    return () => unsubscribe(); // Limpa a inscrição ao desmontar
   }, [router]);
 
   return (

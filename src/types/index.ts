@@ -36,9 +36,7 @@ export interface FilterState {
 
 export interface UserProfile {
   uid: string;
-  email: string;
-  isApproved: boolean;
-  approvalToken?: string; // Store token for one-time use
-  createdAt: Date;
-  approvedAt?: Date;
+  email: string | null; // email can be null from FirebaseUser
+  // isApproved and approval related fields are removed
+  createdAt?: Date; // Keep for potential future use
 }
