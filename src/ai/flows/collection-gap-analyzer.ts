@@ -1,3 +1,4 @@
+
 'use server';
 
 /**
@@ -22,7 +23,7 @@ const AnalyzeStockoutRisksInputSchema = z.object({
 export type AnalyzeStockoutRisksInput = z.infer<typeof AnalyzeStockoutRisksInputSchema>;
 
 const AnalyzeStockoutRisksOutputSchema = z.object({
-  analysisResults: z.string().describe('Analysis of stockout risks for current collections.'),
+  analysisResults: z.string().describe('Análise dos riscos de ruptura de estoque para as coleções atuais, em Português.'),
 });
 
 export type AnalyzeStockoutRisksOutput = z.infer<typeof AnalyzeStockoutRisksOutputSchema>;
@@ -35,14 +36,15 @@ const analyzeStockoutRisksPrompt = ai.definePrompt({
   name: 'analyzeStockoutRisksPrompt',
   input: {schema: AnalyzeStockoutRisksInputSchema},
   output: {schema: AnalyzeStockoutRisksOutputSchema},
-  prompt: `You are an expert business analyst specializing in inventory management.
+  prompt: `Você é um analista de negócios especialista em gestão de inventário.
 
-You will analyze the provided product data to identify potential stockout risks, especially for products in current collections.
-Consider factors such as stock levels, collection end dates, and sales estimates, but sales estimates may not be available.
+Você analisará os dados de produtos fornecidos para identificar potenciais riscos de ruptura de estoque, especialmente para produtos em coleções atuais.
+Considere fatores como níveis de estoque, datas de término das coleções e estimativas de vendas, mas as estimativas de vendas podem não estar disponíveis.
 
-Product Data: {{{productData}}}
+Dados do Produto: {{{productData}}}
 
-Provide a clear and concise analysis of potential stockout risks, highlighting products that require attention.
+Forneça uma análise clara e concisa dos potenciais riscos de ruptura de estoque, destacando os produtos que requerem atenção.
+A resposta DEVE ser em Português do Brasil.
 `, safetySettings: [
     {
       category: 'HARM_CATEGORY_HATE_SPEECH',
@@ -74,3 +76,4 @@ const analyzeStockoutRisksFlow = ai.defineFlow(
     return output!;
   }
 );
+

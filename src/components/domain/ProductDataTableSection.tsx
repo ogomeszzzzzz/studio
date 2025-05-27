@@ -1,14 +1,14 @@
 
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { Product } from '@/types';
 import { format, isBefore, isAfter, addDays, isValid } from 'date-fns';
-import { ArrowUpDown, ListChecks } from 'lucide-react';
+import { ArrowUpDown, ListChecks, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
@@ -20,6 +20,8 @@ interface ProductDataTableSectionProps {
 type SortKey = keyof Product | '';
 type SortOrder = 'asc' | 'desc';
 
+const ITEMS_PER_PAGE = 20;
+
 const getCollectionStatus = (product: Product): { text: string; variant: 'default' | 'secondary' | 'destructive' | 'outline', colorClass?: string } => {
   const today = new Date();
   today.setHours(0,0,0,0); // Normalize today to start of day
@@ -30,18 +32,18 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
 
     if (isBefore(endDate, today)) {
       return product.stock > 0 
-        ? { text: 'Past Collection (Stocked)', variant: 'destructive', colorClass: 'bg-destructive/80 text-destructive-foreground' } 
-        : { text: 'Past Collection (OOS)', variant: 'outline' };
+        ? { text: 'Coleção Passada (Em Estoque)', variant: 'destructive', colorClass: 'bg-destructive/80 text-destructive-foreground' } 
+        : { text: 'Coleção Passada (Sem Estoque)', variant: 'outline' };
     }
     if (isBefore(endDate, addDays(today, 30))) {
-      return { text: 'Nearing End', variant: 'default', colorClass: 'bg-accent text-accent-foreground' };
+      return { text: 'Próximo ao Fim', variant: 'default', colorClass: 'bg-accent text-accent-foreground' };
     }
   }
   if (!product.isCurrentCollection && product.stock > 0) {
-     return { text: 'Not Current (Stocked)', variant: 'secondary' };
+     return { text: 'Não Atual (Em Estoque)', variant: 'secondary' };
   }
   if (product.isCurrentCollection) {
-    return { text: 'Current Collection', variant: 'default', colorClass: 'bg-primary/80 text-primary-foreground' };
+    return { text: 'Coleção Atual', variant: 'default', colorClass: 'bg-primary/80 text-primary-foreground' };
   }
   return { text: 'Status N/A', variant: 'outline' };
 };
@@ -50,6 +52,7 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
 export function ProductDataTableSection({ products, isLoading }: ProductDataTableSectionProps) {
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+  const [currentPage, setCurrentPage] = useState(1);
 
   const sortedProducts = useMemo(() => {
     if (!sortKey) return products;
@@ -73,6 +76,29 @@ export function ProductDataTableSection({ products, isLoading }: ProductDataTabl
     });
   }, [products, sortKey, sortOrder]);
 
+  const totalPages = Math.ceil(sortedProducts.length / ITEMS_PER_PAGE);
+
+  useEffect(() => {
+    const newTotalPages = Math.ceil(sortedProducts.length / ITEMS_PER_PAGE);
+    if (currentPage > newTotalPages && newTotalPages > 0) {
+      setCurrentPage(newTotalPages);
+    } else if (newTotalPages === 0 && sortedProducts.length > 0) { // If products exist but totalPages is 0 (e.g. from filter)
+      setCurrentPage(1);
+    } else if (newTotalPages === 0 && sortedProducts.length === 0) { // No products, reset to 1
+      setCurrentPage(1);
+    } else if (currentPage === 0 && newTotalPages > 0) { // currentPage somehow became 0
+        setCurrentPage(1);
+    }
+  }, [sortedProducts, currentPage]);
+
+
+  const paginatedProducts = useMemo(() => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const endIndex = startIndex + ITEMS_PER_PAGE;
+    return sortedProducts.slice(startIndex, endIndex);
+  }, [sortedProducts, currentPage]);
+
+
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
       setSortOrder(prevOrder => (prevOrder === 'asc' ? 'desc' : 'asc'));
@@ -80,6 +106,7 @@ export function ProductDataTableSection({ products, isLoading }: ProductDataTabl
       setSortKey(key);
       setSortOrder('asc');
     }
+    setCurrentPage(1); // Reset to first page on sort
   };
 
   const renderSortIcon = (key: SortKey) => {
@@ -107,55 +134,84 @@ export function ProductDataTableSection({ products, isLoading }: ProductDataTabl
       <CardHeader>
         <CardTitle className="flex items-center text-xl">
           <ListChecks className="mr-2 h-6 w-6 text-primary" />
-          Product Data
+          Dados dos Produtos
         </CardTitle>
         <CardDescription>
-          Detailed list of products from the uploaded file. Click headers to sort.
+          Lista detalhada de produtos do arquivo carregado. Clique nos cabeçalhos para ordenar.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {products.length === 0 && !isLoading ? (
-          <p className="text-center text-muted-foreground py-8">No product data to display. Upload an Excel file and process it.</p>
+        {(products.length === 0 && !isLoading) ? (
+          <p className="text-center text-muted-foreground py-8">Nenhum dado de produto para exibir. Faça o upload de um arquivo Excel e processe-o.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead onClick={() => handleSort('name')} className="cursor-pointer hover:bg-muted/50 min-w-[200px]">Name {renderSortIcon('name')}</TableHead>
-                  <TableHead onClick={() => handleSort('stock')} className="cursor-pointer hover:bg-muted/50 text-right">Stock {renderSortIcon('stock')}</TableHead>
-                  <TableHead onClick={() => handleSort('collection')} className="cursor-pointer hover:bg-muted/50">Collection {renderSortIcon('collection')}</TableHead>
-                  <TableHead onClick={() => handleSort('collectionStartDate')} className="cursor-pointer hover:bg-muted/50">Start Date {renderSortIcon('collectionStartDate')}</TableHead>
-                  <TableHead onClick={() => handleSort('collectionEndDate')} className="cursor-pointer hover:bg-muted/50">End Date {renderSortIcon('collectionEndDate')}</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? <TableSkeleton /> : sortedProducts.map((product, index) => {
-                  const status = getCollectionStatus(product);
-                  return (
-                    <TableRow key={`${product.vtexId}-${index}`}>
-                      <TableCell className="font-medium">{product.name}</TableCell>
-                      <TableCell className="text-right">{product.stock}</TableCell>
-                      <TableCell>{product.collection}</TableCell>
-                      <TableCell>
-                        {product.collectionStartDate && isValid(product.collectionStartDate)
-                          ? format(product.collectionStartDate, 'dd/MM/yyyy')
-                          : product.rawCollectionStartDate || 'N/A'}
-                      </TableCell>
-                      <TableCell>
-                        {product.collectionEndDate && isValid(product.collectionEndDate)
-                          ? format(product.collectionEndDate, 'dd/MM/yyyy')
-                          : product.rawCollectionEndDate || 'N/A'}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={status.variant} className={cn("whitespace-nowrap", status.colorClass)}>{status.text}</Badge>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
+          <>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead onClick={() => handleSort('name')} className="cursor-pointer hover:bg-muted/50 min-w-[200px]">Nome {renderSortIcon('name')}</TableHead>
+                    <TableHead onClick={() => handleSort('stock')} className="cursor-pointer hover:bg-muted/50 text-right">Estoque {renderSortIcon('stock')}</TableHead>
+                    <TableHead onClick={() => handleSort('collection')} className="cursor-pointer hover:bg-muted/50">Coleção {renderSortIcon('collection')}</TableHead>
+                    <TableHead onClick={() => handleSort('collectionStartDate')} className="cursor-pointer hover:bg-muted/50">Data Início {renderSortIcon('collectionStartDate')}</TableHead>
+                    <TableHead onClick={() => handleSort('collectionEndDate')} className="cursor-pointer hover:bg-muted/50">Data Fim {renderSortIcon('collectionEndDate')}</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? <TableSkeleton /> : paginatedProducts.map((product, index) => {
+                    const status = getCollectionStatus(product);
+                    return (
+                      <TableRow key={`${product.vtexId}-${index}-${currentPage}`}>
+                        <TableCell className="font-medium">{product.name}</TableCell>
+                        <TableCell className="text-right">{product.stock}</TableCell>
+                        <TableCell>{product.collection}</TableCell>
+                        <TableCell>
+                          {product.collectionStartDate && isValid(product.collectionStartDate)
+                            ? format(product.collectionStartDate, 'dd/MM/yyyy')
+                            : product.rawCollectionStartDate || 'N/A'}
+                        </TableCell>
+                        <TableCell>
+                          {product.collectionEndDate && isValid(product.collectionEndDate)
+                            ? format(product.collectionEndDate, 'dd/MM/yyyy')
+                            : product.rawCollectionEndDate || 'N/A'}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={status.variant} className={cn("whitespace-nowrap", status.colorClass)}>{status.text}</Badge>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between pt-6">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                  aria-label="Página anterior"
+                >
+                  <ChevronLeft className="h-4 w-4 mr-1" />
+                  Anterior
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  Página {currentPage} de {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                  aria-label="Próxima página"
+                >
+                  Próxima
+                  <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </CardContent>
     </Card>
