@@ -4,9 +4,9 @@
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
-import { clientAuth } from '@/lib/firebase/config'; // Firestore não é mais necessário aqui para isApproved
-import { AppHeader } from '@/components/domain/AppHeader';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { clientAuth } from '@/lib/firebase/config';
+// AppHeader não é mais usado aqui, pois o cabeçalho autenticado está neste arquivo.
 import { Button } from '@/components/ui/button';
 import { Loader2, LogOut, LayoutDashboard, BarChartBig, UserCircle } from 'lucide-react';
 import Link from 'next/link';
@@ -22,29 +22,28 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const router = useRouter();
   const { toast } = useToast();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // Start with loading true
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(clientAuth, async (firebaseUser) => {
       if (firebaseUser) {
-        // Usuário está logado via Firebase Auth.
-        // Não precisamos mais verificar 'isApproved' no Firestore para este layout simplificado.
         setUserProfile({ uid: firebaseUser.uid, email: firebaseUser.email });
       } else {
-        // Ninguém logado, redireciona para login.
         setUserProfile(null);
-        router.push('/login');
+        // Se não há usuário, redireciona para a página de login.
+        // Usar replace para evitar que a página de app entre no histórico.
+        router.replace('/login');
       }
       setLoading(false);
     });
     return () => unsubscribe();
-  }, [router, toast]);
+  }, [router]); // toast removido das dependências, não é usado aqui.
 
   const handleSignOut = async () => {
     try {
       await signOut(clientAuth);
       toast({ title: 'Logout', description: 'Você foi desconectado.' });
-      router.push('/login'); // Redireciona para login após o logout
+      router.push('/login'); 
     } catch (error) {
       console.error('Error signing out:', error);
       toast({ title: 'Erro de Logout', description: 'Não foi possível desconectar.', variant: 'destructive' });
@@ -61,12 +60,13 @@ export default function AppLayout({ children }: AppLayoutProps) {
   }
 
   if (!userProfile) {
-    // Este caso deve ser tratado pelo redirecionamento no useEffect,
-    // mas como fallback, previne a renderização dos filhos e mostra o loader.
+    // Este estado é alcançado se loading for false e userProfile for null.
+    // O useEffect acima já deve ter iniciado o redirecionamento para /login.
+    // Exibir um loader aqui garante que não haja flash de conteúdo não autenticado.
     return (
        <div className="flex items-center justify-center min-h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="ml-4 text-lg text-foreground">Verificando autenticação...</p>
+        <p className="ml-4 text-lg text-foreground">Redirecionando para o login...</p>
       </div>
     );
   }

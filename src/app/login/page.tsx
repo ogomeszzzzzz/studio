@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation'; // useSearchParams removido pois não é usado
 import { signInWithEmailAndPassword, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { FirebaseError } from 'firebase/app';
 import { Button } from '@/components/ui/button';
@@ -12,30 +12,33 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { useToast } from '@/hooks/use-toast';
 import { clientAuth } from '@/lib/firebase/config';
 import { LogIn, Loader2 } from 'lucide-react';
+// loginUserServerAction e useActionState removidos pois o login é puramente client-side agora
 
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const searchParams = useSearchParams();
+  // searchParams e formMessage/state não são mais necessários com o login puramente client-side.
   const [isLoading, setIsLoading] = useState(false);
-  const [formMessage, setFormMessage] = useState<{ message: string, status: string } | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(clientAuth, (user) => {
       if (user) {
-        toast({ title: 'Login Bem-sucedido', description: 'Redirecionando para o dashboard...' });
-        router.push('/dashboard');
+        // Usuário está logado, redireciona para o dashboard.
+        // O toast de login bem-sucedido pode ser movido para após o signIn bem-sucedido
+        // ou mantido aqui, mas pode aparecer em cada recarregamento se o usuário já estiver logado.
+        // Vamos deixar o toast para o momento do login efetivo.
+        router.replace('/dashboard'); // Usar replace para não adicionar /login ao histórico
       }
+      // Se o usuário não estiver logado, ele permanece na página de login.
     });
     return () => unsubscribe();
-  }, [router, toast]);
+  }, [router]);
 
-  // Approval success toast removed as approval system is disabled.
 
   const handleClientFirebaseLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
-    setFormMessage(null);
+    // setFormMessage(null); // Removido
     
     const formData = new FormData(event.currentTarget);
     const email = formData.get('email') as string;
@@ -43,14 +46,23 @@ export default function LoginPage() {
     
     if (!email || !password) {
       toast({ title: 'Erro de Validação', description: 'Email e senha são obrigatórios.', variant: 'destructive' });
-      setFormMessage({ message: 'Email e senha são obrigatórios.', status: 'error' });
+      // setFormMessage({ message: 'Email e senha são obrigatórios.', status: 'error' }); // Removido
       setIsLoading(false);
       return;
     }
 
     try {
       await signInWithEmailAndPassword(clientAuth, email, password);
-      // onAuthStateChanged will handle the redirection.
+      // Se o login for bem-sucedido, o onAuthStateChanged listener (no useEffect acima)
+      // irá detectar a mudança de estado e redirecionar para /dashboard.
+      // Adicionamos um toast aqui para feedback imediato.
+      toast({ title: 'Login Bem-sucedido', description: 'Redirecionando para o dashboard...' });
+      // Não precisamos de setIsLoading(false) aqui, pois o redirecionamento desmontará o componente.
+      // No entanto, se o redirecionamento demorar, o botão permanecerá em loading.
+      // Para ser seguro, e se o onAuthStateChanged demorar, vamos setar para false,
+      // mas o redirecionamento deve ser rápido.
+      // Na verdade, o onAuthStateChanged já trata o redirecionamento. Se houver erro, o catch trata o isLoading.
+      // Se não houver erro, o redirecionamento vai acontecer.
     } catch (e: unknown) {
       setIsLoading(false);
       let errorMessage = 'Falha no login. Verifique suas credenciais.';
@@ -70,6 +82,10 @@ export default function LoginPage() {
             errorMessage = 'Esta conta está desabilitada.';
             consoleLogFn = 'warn';
             break;
+          case 'auth/invalid-email':
+             errorMessage = 'O formato do email é inválido.';
+             consoleLogFn = 'warn';
+             break;
           default:
             errorMessage = `Erro do Firebase: ${e.message || 'Erro desconhecido ao tentar logar.'}`;
             break;
@@ -92,8 +108,10 @@ export default function LoginPage() {
         description: errorMessage,
         variant: 'destructive'
       });
-      setFormMessage({ message: errorMessage, status: 'error' });
+      // setFormMessage({ message: errorMessage, status: 'error' }); // Removido
     }
+    // Não é necessário setIsLoading(false) aqui, pois ou houve erro (tratado no catch)
+    // ou houve sucesso (e o onAuthStateChanged cuidará do redirecionamento, desmontando o componente)
   };
   
   return (
@@ -107,6 +125,7 @@ export default function LoginPage() {
           <CardDescription>Faça login para acessar o Collection Gap Analyzer.</CardDescription>
         </CardHeader>
         <CardContent>
+          {/* formAction removido do form, onSubmit é suficiente para client-side auth */}
           <form onSubmit={handleClientFirebaseLogin} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
@@ -116,6 +135,7 @@ export default function LoginPage() {
                 type="email" 
                 placeholder="seu@email.com" 
                 required 
+                // defaultValue removido
                 className="text-base py-3 px-4"/>
             </div>
             <div className="space-y-2">
@@ -126,6 +146,7 @@ export default function LoginPage() {
                 type="password" 
                 placeholder="••••••••"
                 required 
+                // defaultValue removido
                 className="text-base py-3 px-4"/>
             </div>
             <Button type="submit" className="w-full text-lg py-6" disabled={isLoading}>
@@ -135,11 +156,10 @@ export default function LoginPage() {
           </form>
         </CardContent>
         <CardFooter className="flex flex-col items-center space-y-2">
-           {formMessage?.message && (
-            <p className={`text-sm ${formMessage.status === 'error' ? 'text-destructive' : 'text-green-600'}`}>{formMessage.message}</p>
-          )}
+           {/* formMessage removido, toasts são usados para feedback */}
         </CardFooter>
       </Card>
     </div>
   );
 }
+
