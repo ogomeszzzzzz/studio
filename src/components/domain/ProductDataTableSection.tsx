@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useMemo } from 'react';
@@ -9,6 +10,7 @@ import type { Product } from '@/types';
 import { format, isBefore, isAfter, addDays, isValid } from 'date-fns';
 import { ArrowUpDown, ListChecks } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 
 interface ProductDataTableSectionProps {
   products: Product[];
@@ -159,3 +161,4 @@ export function ProductDataTableSection({ products, isLoading }: ProductDataTabl
     </Card>
   );
 }
+
