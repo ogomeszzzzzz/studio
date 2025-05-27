@@ -66,20 +66,31 @@ const prompt = ai.definePrompt({
   input: {schema: ProductTypeIdentifierInputSchema},
   output: {schema: ProductTypeIdentifierOutputSchema},
   prompt: `Você é um especialista em categorização de produtos de cama, mesa e banho.
-Sua tarefa é classificar cada nome de produto fornecido em uma das seguintes categorias: ${PRODUCT_CATEGORIES}.
+Sua tarefa é classificar CADA nome de produto fornecido em EXATAMENTE UMA das seguintes categorias: ${PRODUCT_CATEGORIES}.
+Você DEVE usar apenas as categorias fornecidas na lista. Não invente novas categorias nem use variações.
 
-IMPORTANTE: O tipo de produto geralmente é a primeira palavra ou as primeiras palavras do nome do produto. Preste atenção especial ao início do nome.
-Exemplos:
-- "Jogo de Cama Casal..." deve ser "Jogo de Cama".
-- "TOALHA DE BANHO GIGANTE..." deve ser "Toalha de Banho" ou "Toalha".
-- "Jogo de Colcha Queen..." deve ser "Jogo de Colcha".
-- "Lençol com Elástico Solteiro..." deve ser "Lençol com Elástico".
-- "Lençol Superior Casal..." deve ser "Lençol Superior".
-- "Fronha Avulsa Altenburg..." deve ser "Fronha Avulsa" ou "Fronha".
+Regras CRÍTICAS de Classificação:
+1.  **Foco no Início do Nome:** O tipo de produto geralmente é a primeira palavra ou as primeiras palavras do nome do produto. Analise o início do nome do produto com MÁXIMA prioridade.
+2.  **Correspondência Exata e Mais Específica:** Encontre a correspondência MAIS LONGA e MAIS ESPECÍFICA do início do nome do produto com os termos na lista de categorias.
+    *   Por exemplo, se o nome do produto começa com "Jogo de Cama", ele DEVE ser classificado como "Jogo de Cama". Não simplifique para "Cama" se "Jogo de Cama" estiver na lista.
+    *   Se o nome começa com "Edredom", classifique como "Edredom".
+    *   Se o nome começa com "Toalha de Banho", classifique como "Toalha de Banho", mesmo que "Toalha" também esteja na lista. "Toalha de Banho" é mais específico.
+    *   Se o nome começa com "Fronha Avulsa", classifique como "Fronha Avulsa". Se começar apenas com "Fronha" (e nenhuma outra categoria mais específica se aplicar, como "Porta Travesseiro"), classifique como "Fronha".
+3.  **Não Divida Categorias Compostas:** Se uma categoria é "Jogo de Cama", não a divida em "Jogo" e "Cama" separadamente. A correspondência deve ser com o termo completo da categoria.
+4.  **Categoria "Outros":** Use "Outros" SOMENTE se nenhuma das categorias da lista (${PRODUCT_CATEGORIES}, exceto "Outros") corresponder claramente ao início do nome do produto após aplicar as regras acima.
 
-Se um produto não se encaixar claramente em nenhuma das categorias listadas, mesmo considerando o início do nome, classifique-o como "Outros".
+Exemplos de Classificação CORRETA:
+- "Edredom Casal Malha Fio Penteado Altenburg" deve ser "Edredom".
+- "Jogo de Cama Solteiro Infantil 3 Peças 100% Algodão" deve ser "Jogo de Cama".
+- "Fronha Avulsa Lisa Percal 180 Fios" deve ser "Fronha Avulsa".
+- "Lençol com Elástico King Size Microfibra" deve ser "Lençol com Elástico".
+- "Toalha de Rosto para Bordar Premier" deve ser "Toalha de Rosto".
+- "Travesseiro Suporte Firme Visco Nasa" deve ser "Travesseiro".
+- "Kit Cobre Leito Queen Dupla Face" deve ser "Cobre Leito" (considerando que "Kit Cobre Leito" não está na lista e "Cobre Leito" é a categoria mais próxima da lista ${PRODUCT_CATEGORIES} que corresponde ao início). Se "Kit Colcha" for a intenção e corresponder, use "Kit Colcha".
+- "Manta Decorativa para Sofá Microfibra" deve ser "Manta".
+- "PORTA TRAVESSEIRO ULTIMATE CETIM 300 FIOS BRANCO" deve ser "Porta Travesseiro".
 
-Para cada nome de produto na lista de entrada 'productNames', retorne um objeto contendo o 'originalName' (o nome exato que foi fornecido) e o 'identifiedType' (a categoria que você identificou).
+Para cada nome de produto na lista de entrada 'productNames', retorne um objeto contendo o 'originalName' (o nome exato que foi fornecido) e o 'identifiedType' (a categoria que você identificou da lista ${PRODUCT_CATEGORIES}).
 
 A lista de nomes de produtos é:
 {{#each productNames}}
@@ -108,7 +119,7 @@ Não inclua nenhuma explicação ou texto adicional fora da estrutura JSON.
       threshold: 'BLOCK_LOW_AND_ABOVE',
     },
   ],
-  // config: { temperature: 0.2 } // Consider a low temperature for better JSON adherence if issues persist
+  // config: { temperature: 0.1 } // Consider a VERY low temperature for strict adherence to classification if issues persist.
 });
 
 const identifyProductTypesFlow = ai.defineFlow(
@@ -122,8 +133,9 @@ const identifyProductTypesFlow = ai.defineFlow(
       return { categorizedProducts: [] };
     }
     const {output} = await prompt(input);
-    if (!output) {
+    if (!output) { // This case is critical if AI returns malformed JSON that Zod can't parse
         console.error("AI prompt returned null output for product type identification. This could be due to malformed JSON from AI or a schema mismatch.");
+        // To provide more context to the user, perhaps return a specific error or an empty list with a warning.
         throw new Error("AI prompt returned null or invalid output for product type identification.");
     }
     return output;
