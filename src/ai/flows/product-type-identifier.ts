@@ -75,9 +75,7 @@ Responda APENAS com a estrutura JSON definida no esquema de saída.
 `,
   config: {
     // Higher temperature might be needed for nuanced classification, but start moderate.
-    // temperature: 0.5, 
-    // Ensure Gemini attempts to provide structured JSON output
-    responseMIMEType: "application/json" 
+    // temperature: 0.5,
   },
    safetySettings: [
     {
