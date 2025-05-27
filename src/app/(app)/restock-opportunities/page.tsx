@@ -6,8 +6,7 @@ import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import { FilterControlsSection } from '@/components/domain/FilterControlsSection';
 import { ProductDataTableSection } from '@/components/domain/ProductDataTableSection';
 import type { Product, FilterState } from '@/types';
-// isAfter, isBefore, isValid, parseISO removed as date filters are gone
-import { PackageSearch, AlertTriangle, Download, TrendingUp, PackageCheck, ClipboardList, ListFilter, HelpCircle, Loader2 } from 'lucide-react';
+import { PackageSearch, AlertTriangle, Download, TrendingUp, PackageCheck, ListFilter, HelpCircle, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -50,12 +49,12 @@ export default function RestockOpportunitiesPage() {
   }, [allProducts]);
 
   const applyAllFilters = useCallback(() => {
-    setIsLoading(true); 
+    setIsLoading(true);
     let tempFiltered = [...allProducts];
     const effectiveThreshold = parseInt(lowStockThreshold, 10);
-    
-    const currentThreshold = isNaN(effectiveThreshold) ? DEFAULT_LOW_STOCK_THRESHOLD : effectiveThreshold;
-    if (isNaN(effectiveThreshold) && lowStockThreshold.trim() !== '') { 
+
+    const currentThreshold = isNaN(effectiveThreshold) || lowStockThreshold.trim() === '' ? DEFAULT_LOW_STOCK_THRESHOLD : effectiveThreshold;
+    if (isNaN(effectiveThreshold) && lowStockThreshold.trim() !== '') {
         toast({ title: "Aviso", description: `Limite de baixo estoque inválido, usando padrão: ${DEFAULT_LOW_STOCK_THRESHOLD}.`, variant: "default" });
     }
 
@@ -66,7 +65,7 @@ export default function RestockOpportunitiesPage() {
       if (baseFilters.productType && baseFilters.productType !== ALL_PRODUCT_TYPES_VALUE) {
         tempFiltered = tempFiltered.filter(p => p.productType === baseFilters.productType);
       }
-      if (baseFilters.stockMin && baseFilters.stockMin.trim() !== '') { 
+      if (baseFilters.stockMin && baseFilters.stockMin.trim() !== '') {
         const stockMinNum = parseInt(baseFilters.stockMin, 10);
         if (!isNaN(stockMinNum)) {
             tempFiltered = tempFiltered.filter(p => p.stock >= stockMinNum);
@@ -78,15 +77,14 @@ export default function RestockOpportunitiesPage() {
             tempFiltered = tempFiltered.filter(p => p.stock <= stockMaxNum);
         }
       }
-      // Date filter logic removed
     }
-    
+
     // Core logic for restock opportunities
-    tempFiltered = tempFiltered.filter(p => 
-        p.stock <= currentThreshold && 
+    tempFiltered = tempFiltered.filter(p =>
+        p.stock <= currentThreshold &&
         (p.readyToShip > 0 || p.regulatorStock > 0)
     );
-    
+
     setFilteredProducts(tempFiltered);
     setIsLoading(false);
   }, [allProducts, baseFilters, lowStockThreshold, toast]);
@@ -95,25 +93,24 @@ export default function RestockOpportunitiesPage() {
   const handleBaseFilterChange = useCallback((filters: FilterState) => {
     setBaseFilters(filters);
   }, []);
-  
+
   useEffect(() => {
    if(allProducts.length > 0) {
     applyAllFilters();
    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allProducts, lowStockThreshold, baseFilters]); // Apply filters if allProducts, threshold, or baseFilters change
+  }, [allProducts, lowStockThreshold, baseFilters, applyAllFilters]); // Adicionado applyAllFilters aqui
 
   const handleProcessingStart = () => setIsLoading(true);
   const handleProcessingEnd = () => {
-    setIsLoading(false); 
+    setIsLoading(false);
   };
 
   const summaryStats = useMemo(() => {
     const totalSkusToRestock = filteredProducts.length;
     const totalUnitsAvailableForRestock = filteredProducts.reduce((sum, p) => sum + p.readyToShip + p.regulatorStock, 0);
     const potentialStockAtRiskUnits = filteredProducts.reduce((sum, p) => {
-      if (p.stock === 0) return sum + p.readyToShip + p.regulatorStock; 
-      return sum + Math.max(0, (p.readyToShip + p.regulatorStock) - p.stock); // Simplified: units available - current stock, if positive
+      if (p.stock === 0) return sum + p.readyToShip + p.regulatorStock;
+      return sum + Math.max(0, (p.readyToShip + p.regulatorStock) - p.stock);
     }, 0);
 
     return {
@@ -143,12 +140,9 @@ export default function RestockOpportunitiesPage() {
       "Pronta Entrega": p.readyToShip,
       "Regulador": p.regulatorStock,
       "Coleção (Desc. Linha Comercial)": p.collection,
-      "Descrição (Estampa)": p.description, 
+      "Descrição (Estampa)": p.description,
       "Tamanho": p.size,
       "Tipo Produto": p.productType,
-      // Dates are not primary focus here, can be added if needed from raw fields
-      // "Data Início Coleção": p.collectionStartDate && isValid(new Date(p.collectionStartDate)) ? new Date(p.collectionStartDate).toLocaleDateString('pt-BR') : p.rawCollectionStartDate || 'N/A',
-      // "Data Fim Coleção": p.collectionEndDate && isValid(new Date(p.collectionEndDate)) ? new Date(p.collectionEndDate).toLocaleDateString('pt-BR') : p.rawCollectionEndDate || 'N/A',
     }));
 
     try {
@@ -167,7 +161,7 @@ export default function RestockOpportunitiesPage() {
         setIsExporting(false);
     }
   };
-  
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -182,8 +176,8 @@ export default function RestockOpportunitiesPage() {
         </div>
       </div>
 
-      <ExcelUploadSection 
-        onDataParsed={handleDataParsed} 
+      <ExcelUploadSection
+        onDataParsed={handleDataParsed}
         onProcessingStart={handleProcessingStart}
         onProcessingEnd={handleProcessingEnd}
         collectionColumnKey="Descrição Linha Comercial"
@@ -220,7 +214,7 @@ export default function RestockOpportunitiesPage() {
                                 </Tooltip>
                             </TooltipProvider>
                         </Label>
-                        <Input 
+                        <Input
                         id="lowStockThreshold"
                         type="number"
                         value={lowStockThreshold}
@@ -232,7 +226,7 @@ export default function RestockOpportunitiesPage() {
                     </div>
                     <Button onClick={applyAllFilters} className="w-full md:w-auto py-2.5 text-base" disabled={isLoading}>
                         {isLoading ? (
-                            <Loader2 className="mr-2 h-5 w-5 animate-spin" /> 
+                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                         ) : (
                             <ListFilter className="mr-2 h-5 w-5" />
                         )}
@@ -243,11 +237,11 @@ export default function RestockOpportunitiesPage() {
                     products={allProducts}
                     onFilterChange={handleBaseFilterChange}
                     availableCollections={availableCollections}
-                    availableProductTypes={availableProductTypes} // Pass available product types
+                    availableProductTypes={availableProductTypes}
                 />
             </CardContent>
           </Card>
-        
+
           <Card className="shadow-lg">
             <CardHeader>
                 <CardTitle className="flex items-center">
@@ -297,26 +291,26 @@ export default function RestockOpportunitiesPage() {
                         </CardContent>
                     </Card>
                 </div>
-                
+
                 <ProductDataTableSection
                     products={filteredProducts}
-                    isLoading={isLoading && filteredProducts.length === 0} 
+                    isLoading={isLoading && filteredProducts.length === 0}
                     cardIcon={PackageSearch}
                     cardTitle="Produtos com Oportunidade de Reabastecimento"
                     cardDescription="Lista de produtos com baixo estoque atual e disponibilidade em 'Pronta Entrega' ou 'Regulador'."
                     showVtexIdColumn={true}
                     showNameColumn={true}
-                    showProductDerivationColumn={true} 
+                    showProductDerivationColumn={true}
                     showStockColumn={true}
                     showReadyToShipColumn={true}
                     showRegulatorStockColumn={true}
-                    showCollectionColumn={true} // Based on "Descrição Linha Comercial"
-                    showDescriptionColumn={true} // Estampa
-                    showSizeColumn={true}        
-                    showProductTypeColumn={true} // From Excel "Tipo. Produto"
-                    showStartDateColumn={false} 
-                    showEndDateColumn={false} // Not primary for this view, can be enabled if needed 
-                    showStatusColumn={true}   
+                    showCollectionColumn={true}
+                    showDescriptionColumn={true}
+                    showSizeColumn={true}
+                    showProductTypeColumn={true}
+                    showStartDateColumn={false}
+                    showEndDateColumn={false}
+                    showStatusColumn={true}
                 />
                  {allProducts.length > 0 && filteredProducts.length === 0 && !isLoading && (
                     <Card className="shadow-md my-6 border-blue-500/50 border-l-4">
