@@ -73,10 +73,12 @@ export default function DashboardPage() {
     let totalZeroStockSkus = 0;
 
     dashboardProducts.forEach(product => {
-      const collectionKey = product.collection || 'Não Especificada'; // 'collection' is now from 'Linha Comercial'
+      // 'product.collection' is populated by excel-parser based on collectionColumnKey
+      // which is now "Descrição Linha Comercial" for the dashboard.
+      const collectionKey = product.collection || 'Não Especificada';
       const sizeKey = product.size || 'Não Especificado';
 
-      // Stock by Collection (using product.collection which maps to "Linha Comercial")
+      // Stock by Collection (using product.collection)
       const currentCollection = stockByCollectionMap.get(collectionKey) || { stock: 0, skus: 0 };
       currentCollection.stock += product.stock;
       currentCollection.skus += 1;
@@ -146,7 +148,7 @@ export default function DashboardPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-foreground">Dashboard de Performance</h1>
-          <p className="text-muted-foreground">Visão geral dos dados da sua coleção com base na "Linha Comercial".</p>
+          <p className="text-muted-foreground">Visão geral dos dados da sua coleção com base na "Descrição Linha Comercial".</p>
         </div>
         <Link href="/collection-analyzer">
           <Button>
@@ -160,9 +162,9 @@ export default function DashboardPage() {
         onDataParsed={handleDashboardDataParsed}
         onProcessingStart={handleProcessingStart}
         onProcessingEnd={handleProcessingEnd}
-        collectionColumnKey="Linha Comercial" // Use 'Linha Comercial' column for dashboard collections
+        collectionColumnKey="Descrição Linha Comercial" // Use 'Descrição Linha Comercial' column for dashboard collections
         cardTitle="Upload de Dados para Dashboard"
-        cardDescription="Carregue o arquivo Excel. A coluna 'Linha Comercial' será usada para agrupar coleções."
+        cardDescription="Carregue o arquivo Excel. A coluna 'Descrição Linha Comercial' será usada para agrupar coleções."
       />
 
       {dashboardProducts.length === 0 && !isProcessingExcel && (
@@ -214,8 +216,8 @@ export default function DashboardPage() {
           <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-2">
             <Card className="shadow-lg hover:shadow-xl transition-shadow">
               <CardHeader>
-                <CardTitle className="flex items-center"><ShoppingBag className="mr-2 h-5 w-5 text-primary" />Estoque por Linha Comercial</CardTitle>
-                <CardDescription>Distribuição de estoque e SKUs por linha comercial.</CardDescription>
+                <CardTitle className="flex items-center"><ShoppingBag className="mr-2 h-5 w-5 text-primary" />Estoque por Descrição Linha Comercial</CardTitle>
+                <CardDescription>Distribuição de estoque e SKUs por descrição linha comercial.</CardDescription>
               </CardHeader>
               <CardContent className="h-[400px]">
                 {aggregatedData.stockByCollection.length > 0 ? (
@@ -233,7 +235,7 @@ export default function DashboardPage() {
                       </BarChart>
                     </ResponsiveContainer>
                   </ChartContainer>
-                ) : <p className="text-muted-foreground text-center pt-10">Sem dados de estoque por linha comercial.</p>}
+                ) : <p className="text-muted-foreground text-center pt-10">Sem dados de estoque por descrição linha comercial.</p>}
               </CardContent>
             </Card>
 
@@ -263,8 +265,8 @@ export default function DashboardPage() {
 
           <Card className="shadow-lg hover:shadow-xl transition-shadow">
             <CardHeader>
-              <CardTitle className="flex items-center"><TrendingDown className="mr-2 h-5 w-5 text-destructive" />SKUs Zerados por Linha Comercial</CardTitle>
-              <CardDescription>Contagem de SKUs com estoque zero em cada linha comercial.</CardDescription>
+              <CardTitle className="flex items-center"><TrendingDown className="mr-2 h-5 w-5 text-destructive" />SKUs Zerados por Descrição Linha Comercial</CardTitle>
+              <CardDescription>Contagem de SKUs com estoque zero em cada descrição linha comercial.</CardDescription>
             </CardHeader>
             <CardContent className="h-[400px]">
               {aggregatedData.zeroStockSkusByCollection.length > 0 ? (
