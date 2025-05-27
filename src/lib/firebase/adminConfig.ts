@@ -1,85 +1,124 @@
 
 import * as admin from 'firebase-admin';
+import path from 'path';
+import fs from 'fs';
 
-console.log('Attempting to initialize Firebase Admin SDK...');
+console.log('[Firebase Admin SDK] Attempting to initialize...');
 
-if (!admin.apps.length) {
-  let initialized = false;
-  const serviceAccountString = process.env.FIREBASE_ADMIN_SDK_CONFIG;
-  const serviceAccountPath = process.env.FIREBASE_ADMIN_SDK_CONFIG_PATH;
+let initialized = false;
 
-  // Attempt 1: Try with JSON string from FIREBASE_ADMIN_SDK_CONFIG
-  if (serviceAccountString) {
-    console.log('FIREBASE_ADMIN_SDK_CONFIG environment variable found. Attempting to parse and initialize...');
-    try {
-      const serviceAccount = JSON.parse(serviceAccountString);
+if (admin.apps.length > 0) {
+  console.log('[Firebase Admin SDK] Already initialized.');
+  initialized = true;
+}
+
+// Log environment variables related to Firebase Admin SDK
+const serviceAccountPathEnv = process.env.FIREBASE_ADMIN_SDK_CONFIG_PATH;
+const serviceAccountStringEnv = process.env.FIREBASE_ADMIN_SDK_CONFIG;
+const projectIdEnv = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+const emulatorHostEnv = process.env.FIREBASE_AUTH_EMULATOR_HOST;
+
+console.log(`[Firebase Admin SDK] FIREBASE_ADMIN_SDK_CONFIG_PATH: ${serviceAccountPathEnv}`);
+console.log(`[Firebase Admin SDK] FIREBASE_ADMIN_SDK_CONFIG (length): ${serviceAccountStringEnv ? serviceAccountStringEnv.length : 'Not set'}`);
+console.log(`[Firebase Admin SDK] NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${projectIdEnv}`);
+console.log(`[Firebase Admin SDK] FIREBASE_AUTH_EMULATOR_HOST: ${emulatorHostEnv}`);
+
+// Attempt 1: Initialize from file path (FIREBASE_ADMIN_SDK_CONFIG_PATH)
+if (!initialized && serviceAccountPathEnv) {
+  console.log(`[Firebase Admin SDK] Attempting initialization from file path: ${serviceAccountPathEnv}`);
+  try {
+    const absolutePath = path.resolve(process.cwd(), serviceAccountPathEnv);
+    console.log(`[Firebase Admin SDK] Resolved absolute path: ${absolutePath}`);
+
+    if (fs.existsSync(absolutePath)) {
+      console.log(`[Firebase Admin SDK] Service account file found at: ${absolutePath}`);
       admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
+        credential: admin.credential.cert(absolutePath),
       });
-      console.log('Firebase Admin SDK initialized successfully from FIREBASE_ADMIN_SDK_CONFIG string.');
+      console.log('[Firebase Admin SDK] Initialized successfully from file path.');
       initialized = true;
-    } catch (error: any) {
-      console.error('Error initializing Firebase Admin SDK from FIREBASE_ADMIN_SDK_CONFIG string:');
-      console.error('Error message:', error.message);
-      console.warn('Please ensure FIREBASE_ADMIN_SDK_CONFIG in your .env file is a valid JSON string, with newlines in the private_key escaped as \\\\n if using this method.');
+    } else {
+      console.error(`[Firebase Admin SDK] Service account file NOT FOUND at: ${absolutePath}`);
     }
+  } catch (error: any) {
+    console.error('[Firebase Admin SDK] Error initializing from file path:');
+    console.error('Error Name:', error.name);
+    console.error('Error Message:', error.message);
+    console.error('Error Code:', error.code);
+    console.error('Stack:', error.stack);
+  }
+} else if (!initialized) {
+  console.log('[Firebase Admin SDK] FIREBASE_ADMIN_SDK_CONFIG_PATH not set or already initialized. Skipping file path initialization.');
+}
+
+// Attempt 2: Initialize from JSON string (FIREBASE_ADMIN_SDK_CONFIG)
+// Only attempt if not already initialized and the string is actually provided
+if (!initialized && serviceAccountStringEnv && serviceAccountStringEnv.trim() !== '') {
+  console.log('[Firebase Admin SDK] Attempting initialization from JSON string (FIREBASE_ADMIN_SDK_CONFIG)...');
+  try {
+    const serviceAccount = JSON.parse(serviceAccountStringEnv);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+    });
+    console.log('[Firebase Admin SDK] Initialized successfully from JSON string.');
+    initialized = true;
+  } catch (error: any) {
+    console.error('[Firebase Admin SDK] Error initializing from JSON string:');
+    console.error('Error Name:', error.name);
+    console.error('Error Message:', error.message);
+    console.error('Error Code:', error.code);
+    console.error('Stack:', error.stack);
+    console.warn('[Firebase Admin SDK] Ensure FIREBASE_ADMIN_SDK_CONFIG in your .env file is a valid JSON string, with newlines in private_key escaped as \\\\n if using this method.');
+  }
+} else if (!initialized) {
+  console.log('[Firebase Admin SDK] FIREBASE_ADMIN_SDK_CONFIG not set, is empty, or already initialized. Skipping JSON string initialization.');
+}
+
+// Attempt 3: Emulator check (if not initialized and in non-production environment)
+if (!initialized && process.env.NODE_ENV !== 'production' && emulatorHostEnv) {
+  console.log('[Firebase Admin SDK] Attempting initialization for emulators (no service account)...');
+  if (!projectIdEnv) {
+    console.error('[Firebase Admin SDK] NEXT_PUBLIC_FIREBASE_PROJECT_ID is required for emulator initialization but not set.');
   } else {
-    console.log('FIREBASE_ADMIN_SDK_CONFIG environment variable not set. Skipping direct string initialization.');
-  }
-
-  // Attempt 2: Try with file path from FIREBASE_ADMIN_SDK_CONFIG_PATH (if not already initialized)
-  if (!initialized && serviceAccountPath) {
-    console.log('FIREBASE_ADMIN_SDK_CONFIG_PATH environment variable found:', serviceAccountPath, '. Attempting to initialize...');
     try {
-      // The path should be relative to the project root where the Next.js server runs.
       admin.initializeApp({
-        credential: admin.credential.cert(serviceAccountPath),
+        projectId: projectIdEnv,
       });
-      console.log('Firebase Admin SDK initialized successfully from FIREBASE_ADMIN_SDK_CONFIG_PATH.');
+      console.log(`[Firebase Admin SDK] Initialized for emulators with projectId: ${projectIdEnv}.`);
       initialized = true;
-    } catch (pathError: any) {
-      console.error('Error initializing Firebase Admin SDK from FIREBASE_ADMIN_SDK_CONFIG_PATH:');
-      console.error('Error message:', pathError.message);
-      console.error('Stack trace:', pathError.stack);
-      console.warn(`Ensure the file at '${serviceAccountPath}' exists and is a valid service account JSON key file.`);
-    }
-  } else if (!initialized) {
-    console.log('FIREBASE_ADMIN_SDK_CONFIG_PATH environment variable not set, or already attempted string init.');
-  }
-  
-  // Attempt 3: Emulator check (if not already initialized and in non-production environment)
-  if (!initialized && process.env.NODE_ENV !== 'production' && process.env.FIREBASE_AUTH_EMULATOR_HOST) {
-    console.log('Attempting to initialize Firebase Admin SDK for emulators (no service account)...');
-    try {
-        admin.initializeApp({
-            projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID, // Make sure this is set for emulators too
-        });
-        console.log('Firebase Admin SDK initialized for emulators.');
-        initialized = true;
-    } catch(emulatorError: any) {
-        console.error('Error initializing Firebase Admin SDK for emulators:');
-        console.error('Error message:', emulatorError.message);
+    } catch (emulatorError: any) {
+      console.error('[Firebase Admin SDK] Error initializing for emulators:');
+      console.error('Error Name:', emulatorError.name);
+      console.error('Error Message:', emulatorError.message);
+      console.error('Error Code:', emulatorError.code);
+      console.error('Stack:', emulatorError.stack);
     }
   }
+} else if (!initialized) {
+  console.log('[Firebase Admin SDK] Not in development with emulator, or already initialized. Skipping emulator initialization.');
+}
+
+
+if (!initialized) {
+  console.error('--------------------------------------------------------------------');
+  console.error('[Firebase Admin SDK] FAILED TO INITIALIZE after all attempts.');
+  console.error('Please check server logs for details and ensure your environment variables are correctly set.');
+  console.error('Most common issues:');
+  console.error('1. If using FIREBASE_ADMIN_SDK_CONFIG_PATH: Ensure the path is correct and the JSON file is valid.');
+  console.error('2. If using FIREBASE_ADMIN_SDK_CONFIG (string): Ensure it\'s a valid JSON string with properly escaped newlines (\\\\n for \\n).');
+  console.error('--------------------------------------------------------------------');
 } else {
-  console.log('Firebase Admin SDK already initialized.');
+  console.log(`[Firebase Admin SDK] Successfully initialized. Total apps: ${admin.apps.length}.`);
 }
-
-if (!admin.apps.length) {
-  console.error('Firebase Admin SDK FAILED TO INITIALIZE after all attempts. Check server logs for details.');
-  console.error('Ensure either FIREBASE_ADMIN_SDK_CONFIG (as a valid JSON string) or FIREBASE_ADMIN_SDK_CONFIG_PATH (to a valid key file) is correctly set in your environment variables.');
-}
-
-console.log(`Firebase Admin SDK apps count: ${admin.apps.length}`);
 
 const adminAuth = admin.apps.length ? admin.auth() : null;
 const adminFirestore = admin.apps.length ? admin.firestore() : null;
 
 if (!adminAuth) {
-    console.warn('adminAuth is null. User registration and approval will fail.');
+  console.warn('[Firebase Admin SDK] adminAuth is null. User registration and approval might fail if SDK did not initialize.');
 }
 if (!adminFirestore) {
-    console.warn('adminFirestore is null. User profile operations will fail.');
+  console.warn('[Firebase Admin SDK] adminFirestore is null. User profile operations might fail if SDK did not initialize.');
 }
 
 export { adminAuth, adminFirestore };
