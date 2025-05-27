@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect, useActionState } from 'react'; // Changed import
+import { useEffect, useActionState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signInWithEmailAndPassword, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
@@ -14,17 +14,15 @@ import Link from 'next/link';
 import { clientAuth, firestore } from '@/lib/firebase/config'; // Client auth
 import { LogIn, UserPlus } from 'lucide-react';
 
-// Placeholder for a server action (not fully implemented here for brevity in client-side handling)
+// This server action is called by the form's `action` prop.
+// It's primarily for pre-flight checks or setting initial form state.
 async function loginUserAction(prevState: any, formData: FormData) {
-  // This server action would ideally handle server-side checks if needed,
-  // but primary Firebase login is client-side.
-  // For this example, we'll focus on client-side Firebase auth.
-  // In a real app, you might use this to set secure HTTPOnly cookies.
   const email = formData.get('email') as string;
   const password = formData.get('password') as string;
    if (!email || !password) {
     return { message: 'Email e senha são obrigatórios.', status: 'error' };
   }
+  // This message will be set while the client-side Firebase login attempts.
   return { message: 'Tentando login...', status: 'pending' };
 }
 
@@ -32,7 +30,7 @@ async function loginUserAction(prevState: any, formData: FormData) {
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const [state, formAction] = useActionState(loginUserAction, { message: '', status: '' }); // Changed hook
+  const [state, formAction] = useActionState(loginUserAction, { message: '', status: '' });
 
  useEffect(() => {
     const unsubscribe = onAuthStateChanged(clientAuth, (user) => {
@@ -42,7 +40,7 @@ export default function LoginPage() {
       }
     });
     return () => unsubscribe();
-  }, [router]); // Added router to dependency array as it's used in checkApprovalAndRedirect
+  }, [router, toast]); // Added toast to dependency array as it's used in checkApprovalAndRedirect
 
 
   const checkApprovalAndRedirect = async (user: FirebaseUser) => {
@@ -67,26 +65,28 @@ export default function LoginPage() {
     }
   };
 
-
-  const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  // This handler is for client-side Firebase authentication.
+  // The server action `formAction` is invoked by the form's `action` prop.
+  const handleClientFirebaseLogin = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); // Important: prevent default as Firebase login is client-side.
+    
     const formData = new FormData(event.currentTarget);
     const email = formData.get('email') as string;
     const password = formData.get('password') as string;
     
-    // Trigger the formAction for optimistic UI or server-side logic if any
-    // For now, it's mostly a placeholder as Firebase auth is client-driven
-    formAction(formData);
-
+    // The server action (`loginUserAction` via `formAction`) has already been triggered by the form's `action` prop.
+    // `state` will reflect its outcome (e.g., "Tentando login..." or validation error).
 
     if (!email || !password) {
+      // Client-side validation can also show a toast, though server action also checks.
       toast({ title: 'Erro de Validação', description: 'Email e senha são obrigatórios.', variant: 'destructive' });
       return;
     }
 
     try {
+      // Perform the actual client-side Firebase login.
       const userCredential = await signInWithEmailAndPassword(clientAuth, email, password);
-      // onAuthStateChanged will handle redirection after approval check
+      // onAuthStateChanged will handle redirection after approval check.
     } catch (error: any) {
       console.error('Login error:', error);
       let errorMessage = 'Falha no login. Verifique suas credenciais.';
@@ -100,10 +100,14 @@ export default function LoginPage() {
   };
   
   useEffect(() => {
+    // This useEffect handles messages from the server action's state.
     if (state?.status === 'error' && state.message) {
       toast({ title: 'Erro', description: state.message, variant: 'destructive' });
+    } else if (state?.status === 'pending' && state.message) {
+      // Optionally, show a "pending" toast, though it might be quick.
+      // toast({ title: 'Progresso', description: state.message });
     }
-    // Do not show success toast here, as actual success is handled by onAuthStateChanged
+    // Actual success (login and redirect) is handled by onAuthStateChanged.
   }, [state, toast]);
 
   return (
@@ -117,7 +121,8 @@ export default function LoginPage() {
           <CardDescription>Faça login para acessar o Collection Gap Analyzer.</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleLogin} className="space-y-6">
+          {/* Pass formAction to the form's `action` prop */}
+          <form action={formAction} onSubmit={handleClientFirebaseLogin} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input id="email" name="email" type="email" placeholder="seu@email.com" required 
@@ -134,9 +139,13 @@ export default function LoginPage() {
           </form>
         </CardContent>
         <CardFooter className="flex flex-col items-center space-y-2">
+           {/* Display message from server action state if it's an error */}
            {state?.message && state.status === 'error' && (
             <p className="text-sm text-destructive">{state.message}</p>
           )}
+          {/* The "pending" message from the server action is subtle and might be overwritten by other toasts. */}
+          {/* For example, if email/password are empty, server action returns error state, this toast shows. */}
+          {/* If email/password are provided, server action returns pending, then client login attempts. */}
           <p className="text-sm text-muted-foreground">
             Não tem uma conta?{' '}
             <Link href="/register" className="font-medium text-primary hover:underline">
