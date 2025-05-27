@@ -5,10 +5,10 @@ import { useState, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
-import { BarChartBig, ShoppingBag, PackageSearch, AlertTriangle, FileSpreadsheet, Activity, Layers, TrendingDown } from 'lucide-react';
+import { BarChartBig, ShoppingBag, PackageSearch, AlertTriangle, FileSpreadsheet, Activity, Layers, TrendingDown, LayoutDashboard } from 'lucide-react';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import type { Product } from '@/types';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, PieChart, Pie, Cell } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, PieChart, Pie, Cell, CartesianGrid } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart"
 
 interface AggregatedCollectionData {
