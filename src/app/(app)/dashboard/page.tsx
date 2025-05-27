@@ -6,15 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import {
-  BarChartBig, ShoppingBag, PackageSearch, AlertTriangle, FileSpreadsheet,
-  Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Cpu, Ruler, Box
+  BarChartBig, ShoppingBag, AlertTriangle, FileSpreadsheet,
+  Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler
 } from 'lucide-react';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import type { Product } from '@/types';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart"
-// AI related imports removed
-// import { useToast } from '@/hooks/use-toast'; // Keep if used for other things, like Excel upload status
 
 interface AggregatedCollectionData {
   name: string;
@@ -32,7 +30,7 @@ interface AggregatedPrintData {
   stock: number;
 }
 interface AggregatedProductTypeData {
-  name: string; // Product Type derived from Excel 'Nome'
+  name: string; // Product Type from Excel 'Tipo. Produto'
   stock: number;
 }
 
@@ -60,8 +58,6 @@ const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3
 export default function DashboardPage() {
   const [dashboardProducts, setDashboardProducts] = useState<Product[]>([]);
   const [isProcessingExcel, setIsProcessingExcel] = useState(false);
-  // AI state variables removed
-  // const { toast } = useToast(); // Keep if used for other toasts
 
   const handleDashboardDataParsed = useCallback((data: Product[]) => {
     setDashboardProducts(data);
@@ -70,15 +66,13 @@ export default function DashboardPage() {
   const handleProcessingStart = () => setIsProcessingExcel(true);
   const handleProcessingEnd = () => setIsProcessingExcel(false);
 
-  // useEffect for AI categorization removed
-
   const aggregatedData = useMemo(() => {
     if (dashboardProducts.length === 0) {
       return {
         stockByCollection: [],
         stockBySize: [],
         stockByPrint: [],
-        stockByProductType: [], // Changed from stockByAiProductType
+        stockByProductType: [],
         zeroStockSkusByCollection: [],
         totalStock: 0,
         totalSkus: 0,
@@ -91,7 +85,7 @@ export default function DashboardPage() {
     const stockByCollectionMap = new Map<string, { stock: number; skus: number }>();
     const stockBySizeMap = new Map<string, { stock: number }>();
     const stockByPrintMap = new Map<string, { stock: number }>();
-    const stockByProductTypeMap = new Map<string, { stock: number }>(); // Changed from stockByAiProductTypeMap
+    const stockByProductTypeMap = new Map<string, { stock: number }>();
     const zeroStockSkusByCollectionMap = new Map<string, { count: number }>();
 
     let totalStock = 0;
@@ -102,11 +96,9 @@ export default function DashboardPage() {
 
     dashboardProducts.forEach(product => {
       const collectionKey = product.collection || 'Não Especificada';
-      // Use size directly from Excel data (product.size)
       const sizeKey = product.size || 'Não Especificado';
-      const printKey = product.description || 'Não Especificada'; // Using 'description' for print/pattern
-      // Use productType derived from Excel 'Nome'
-      const typeKey = product.productType || 'Outros (Tipo Derivado)';
+      const printKey = product.description || 'Não Especificada';
+      const typeKey = product.productType || 'Não Especificado'; // Uses product.productType from Excel 'Tipo. Produto'
 
       // Stock by Collection
       const currentCol = stockByCollectionMap.get(collectionKey) || { stock: 0, skus: 0 };
@@ -124,7 +116,7 @@ export default function DashboardPage() {
       currentPrint.stock += product.stock;
       stockByPrintMap.set(printKey, currentPrint);
 
-      // Stock by Product Type (derived from Excel 'Nome')
+      // Stock by Product Type (from Excel 'Tipo. Produto')
       const currentType = stockByProductTypeMap.get(typeKey) || { stock: 0 };
       currentType.stock += product.stock;
       stockByProductTypeMap.set(typeKey, currentType);
@@ -145,7 +137,7 @@ export default function DashboardPage() {
       stockByCollection: Array.from(stockByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
       stockBySize: Array.from(stockBySizeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
       stockByPrint: Array.from(stockByPrintMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock).slice(0, 15), // Top 15 prints
-      stockByProductType: Array.from(stockByProductTypeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock), // Changed
+      stockByProductType: Array.from(stockByProductTypeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
       zeroStockSkusByCollection: Array.from(zeroStockSkusByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.count - a.count),
       totalStock,
       totalSkus,
@@ -169,10 +161,9 @@ export default function DashboardPage() {
   const stockByCollectionChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByCollection), [aggregatedData.stockByCollection]);
   const stockBySizeChartConfig = useMemo(() => createChartConfig(aggregatedData.stockBySize), [aggregatedData.stockBySize]);
   const stockByPrintChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByPrint), [aggregatedData.stockByPrint]);
-  const stockByProductTypeChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByProductType), [aggregatedData.stockByProductType]); // Changed
+  const stockByProductTypeChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByProductType), [aggregatedData.stockByProductType]);
   const zeroStockSkusChartConfig = useMemo(() => createChartConfig(aggregatedData.zeroStockSkusByCollection), [aggregatedData.zeroStockSkusByCollection]);
 
-  // isAnyAICategorizationRunning removed
 
   return (
     <div className="space-y-8">
@@ -209,7 +200,6 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {/* AI Loading Card removed */}
 
       {dashboardProducts.length > 0 && (
         <>
@@ -345,10 +335,10 @@ export default function DashboardPage() {
             <Card className="shadow-lg hover:shadow-xl transition-shadow">
               <CardHeader>
                 <CardTitle className="flex items-center"><Box className="mr-2 h-5 w-5" style={{color: 'hsl(var(--chart-5))'}} />Estoque por Tipo de Produto</CardTitle>
-                <CardDescription>Distribuição de estoque por tipo de produto (derivado da coluna "Nome" do Excel).</CardDescription>
+                <CardDescription>Distribuição de estoque por tipo de produto (coluna "Tipo. Produto" do Excel).</CardDescription>
               </CardHeader>
               <CardContent className="h-[400px]">
-                 {aggregatedData.stockByProductType.length > 0 ? ( // Changed
+                 {aggregatedData.stockByProductType.length > 0 ? (
                    <ChartContainer config={stockByProductTypeChartConfig} className="h-full w-full">
                     <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={aggregatedData.stockByProductType} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}>

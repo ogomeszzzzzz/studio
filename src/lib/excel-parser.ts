@@ -26,48 +26,7 @@ const toBoolean = (value: string | number | undefined): boolean => {
   return Boolean(value);
 };
 
-const KNOWN_PRODUCT_TYPES = [
-  "Jogo de Cama",
-  "Lençol Avulso",
-  "Lençol com Elástico",
-  "Lençol Superior",
-  "Fronha Avulsa",
-  "Cobre Leito",
-  "Kit Colcha",
-  "Jogo de Colcha",
-  "Protetor de Colchão",
-  "Protetor de Travesseiro",
-  "Saia para Cama Box",
-  "Porta Travesseiro",
-  "Toalha de Banho",
-  "Toalha de Rosto",
-  "Toalha de Piso",
-  // Single word types that should be prioritized if found alone or as start
-  "Edredom",
-  "Fronha",
-  "Travesseiro",
-  "Toalha",
-  "Roupão",
-  "Cortina",
-  "Almofada",
-  "Manta",
-  "Tapete"
-].sort((a, b) => b.length - a.length); // Sort by length descending to match longer phrases first
-
-const deriveProductType = (productName: string): string => {
-  if (!productName || typeof productName !== 'string') return 'Outros';
-  const nameUpper = productName.toUpperCase();
-
-  for (const type of KNOWN_PRODUCT_TYPES) {
-    if (nameUpper.startsWith(type.toUpperCase())) {
-      return type;
-    }
-  }
-  // Fallback to the first word if no known type matches
-  const firstWord = productName.split(' ')[0];
-  return firstWord || 'Outros';
-};
-
+// Removed deriveProductType function and KNOWN_PRODUCT_TYPES as product type now comes directly from Excel.
 
 export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇÃO'): Promise<Product[]> => {
   return new Promise((resolve, reject) => {
@@ -88,11 +47,11 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
           const startDate = parseDate(row['Início Coleção']);
           const endDate = parseDate(row['Fim Coleção']);
           const collectionValue = row[collectionColumnKey] ?? '';
-          const productName = row['Nome'] ?? '';
+          // const productName = row['Nome'] ?? ''; // Still needed for product.name
 
           return {
             vtexId: row['ID VTEX'] ?? '',
-            name: productName,
+            name: row['Nome'] ?? '', // Product name is still needed
             productId: row['Produto'] ?? undefined,
             derivation: row['Derivação'] ?? undefined,
             productDerivation: row['Produto-Derivação'] ?? undefined,
@@ -101,7 +60,7 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
             order: Number(row['Pedido']) || 0,
             description: row['Descrição'] ?? '', // For print/pattern
             size: row['Tamanho'] ?? 'Não Especificado', // From Excel "Tamanho"
-            productType: deriveProductType(productName), // Derived from "Nome"
+            productType: row['Tipo. Produto'] ?? 'Não Especificado', // Directly from "Tipo. Produto" column
             complement: row['Compl.'] ?? undefined,
             commercialLine: row['Linha Comercial'] ?? '',
             collection: collectionValue,
