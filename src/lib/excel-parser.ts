@@ -26,8 +26,6 @@ const toBoolean = (value: string | number | undefined): boolean => {
   return Boolean(value);
 };
 
-// Removed deriveProductType function and KNOWN_PRODUCT_TYPES as product type now comes directly from Excel.
-
 export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇÃO'): Promise<Product[]> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -47,20 +45,21 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
           const startDate = parseDate(row['Início Coleção']);
           const endDate = parseDate(row['Fim Coleção']);
           const collectionValue = row[collectionColumnKey] ?? '';
-          // const productName = row['Nome'] ?? ''; // Still needed for product.name
 
           return {
             vtexId: row['ID VTEX'] ?? '',
-            name: row['Nome'] ?? '', // Product name is still needed
+            // Prioritize "Nome do Produto", fallback to "Nome"
+            name: row['Nome do Produto'] ?? row['Nome'] ?? '',
             productId: row['Produto'] ?? undefined,
             derivation: row['Derivação'] ?? undefined,
             productDerivation: row['Produto-Derivação'] ?? undefined,
             stock: Number(row['Estoque']) || 0,
             readyToShip: Number(row['Pronta Entrega']) || 0,
             order: Number(row['Pedido']) || 0,
-            description: row['Descrição'] ?? '', // For print/pattern
-            size: row['Tamanho'] ?? 'Não Especificado', // From Excel "Tamanho"
-            productType: row['Tipo. Produto'] ?? 'Não Especificado', // Directly from "Tipo. Produto" column
+            // This should be the print/pattern from the "Descrição" column
+            description: row['Descrição'] ?? '',
+            size: row['Tamanho'] ?? 'Não Especificado',
+            productType: row['Tipo. Produto'] ?? 'Não Especificado',
             complement: row['Compl.'] ?? undefined,
             commercialLine: row['Linha Comercial'] ?? '',
             collection: collectionValue,
