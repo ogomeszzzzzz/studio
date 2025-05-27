@@ -43,7 +43,7 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
         const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: false });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        // Use raw: true to get raw values, especially for dates, then parse them manually.
+        // Use raw: false to get raw values, especially for dates, then parse them manually.
         // defval: null ensures empty cells are null, not undefined, which can be more consistent.
         const jsonData = XLSX.utils.sheet_to_json<any>(worksheet, { raw: false, defval: null });
 
@@ -61,9 +61,9 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
             derivation: row['Derivação'] ?? undefined,
             productDerivation: row['Produto-Derivação'] ?? undefined,
             stock: Number(row['Estoque']) || 0,
-            readyToShip: row['Pronta Entrega'] ?? undefined,
-            order: row['Pedido'] ?? undefined,
-            description: row['Descrição'] ?? undefined,
+            readyToShip: Number(row['Pronta Entrega']) || 0, // Convert to number
+            order: Number(row['Pedido']) || 0, // Convert to number
+            description: row['Descrição'] ?? '', // Keep as string for print/pattern
             size: row['Tamanho'] ?? undefined,
             complement: row['Compl.'] ?? undefined,
             commercialLine: row['Linha Comercial'] ?? '', // Keep commercialLine populated

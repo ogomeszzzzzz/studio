@@ -6,9 +6,9 @@ export interface Product {
   derivation?: string | number;
   productDerivation?: string;
   stock: number;
-  readyToShip?: string | number;
-  order?: string;
-  description?: string;
+  readyToShip: number; // Changed to number
+  order: number; // Changed to number
+  description: string; // Represents print/pattern
   size?: string;
   complement?: string;
   commercialLine: string; // Now consistently populated
@@ -22,6 +22,7 @@ export interface Product {
   // Raw values for display if needed
   rawCollectionStartDate?: string;
   rawCollectionEndDate?: string;
+  identifiedType?: string; // For AI-identified product type
 }
 
 export interface FilterState {
@@ -39,4 +40,10 @@ export interface UserProfile {
   uid: string;
   email: string | null; 
   createdAt?: Date; 
+}
+
+// For AI Product Type Identification
+export interface CategorizedProduct {
+  originalName: string;
+  identifiedType: string;
 }
