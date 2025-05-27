@@ -19,10 +19,9 @@ import {
  */
 export async function getAIProductCategorization(productNames: string[]): Promise<ProductTypeIdentifierOutput | { error: string }> {
   if (!productNames || productNames.length === 0) {
-    return { categorizedProducts: [] }; // Return empty if no names provided, consistent with flow
+    return { categorizedProducts: [] }; 
   }
 
-  // Remove duplicates to avoid redundant AI calls and processing
   const uniqueProductNames = Array.from(new Set(productNames.filter(name => name && name.trim() !== '')));
 
   if (uniqueProductNames.length === 0) {
@@ -38,8 +37,14 @@ export async function getAIProductCategorization(productNames: string[]): Promis
     return result;
   } catch (error) {
     console.error('Error performing AI product type categorization:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to categorize product types using AI.';
-    return { error: errorMessage };
+    let errorMessage = 'Failed to categorize product types using AI.';
+    if (error instanceof Error) {
+        errorMessage = error.message;
+    } else if (typeof error === 'string') {
+        errorMessage = error;
+    }
+    // Limitar o tamanho da mensagem de erro para evitar problemas com o cliente/toast
+    return { error: errorMessage.substring(0, 500) };
   }
 }
 
@@ -67,7 +72,12 @@ export async function getAIProductSizeCategorization(productNames: string[]): Pr
     return result;
   } catch (error) {
     console.error('Error performing AI product size categorization:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to categorize product sizes using AI.';
-    return { error: errorMessage };
+    let errorMessage = 'Failed to categorize product sizes using AI.';
+     if (error instanceof Error) {
+        errorMessage = error.message;
+    } else if (typeof error === 'string') {
+        errorMessage = error;
+    }
+    return { error: errorMessage.substring(0, 500) };
   }
 }

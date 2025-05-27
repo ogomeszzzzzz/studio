@@ -16,6 +16,8 @@ const PRODUCT_SIZES = [
   "Solteiro",
   "Casal",
   "Queen King", // Assuming this might be "Queen" or "King", model should clarify. Or it's a distinct size.
+  "Queen", // Added Queen explicitly
+  "King", // Added King explicitly
   "Super King",
   "Outros" // Fallback category
 ].join(', ');
@@ -47,6 +49,7 @@ const prompt = ai.definePrompt({
   output: {schema: ProductSizeIdentifierOutputSchema},
   prompt: `Você é um especialista em categorização de tamanhos de produtos de cama.
 Sua tarefa é classificar cada nome de produto fornecido em uma das seguintes categorias de tamanho: ${PRODUCT_SIZES}.
+Analise o nome do produto cuidadosamente. Por exemplo, "Queen King" deve ser classificado como "Queen King". "Edredom Queen" deve ser "Queen".
 Se um produto não se encaixar claramente em nenhuma das categorias listadas, ou se o nome do produto não indicar um tamanho específico, classifique-o como "Outros".
 
 Para cada nome de produto na lista de entrada 'productNames', retorne um objeto contendo o 'originalName' (o nome exato que foi fornecido) e o 'identifiedSize' (a categoria de tamanho que você identificou).
@@ -78,7 +81,7 @@ Não inclua nenhuma explicação ou texto adicional fora da estrutura JSON.
       threshold: 'BLOCK_LOW_AND_ABOVE',
     },
   ],
-  // config: { temperature: 0.2 } // Consider a low temperature for better JSON adherence
+  // config: { temperature: 0.2 } // Consider a low temperature for better JSON adherence if issues persist
 });
 
 const identifyProductSizesFlow = ai.defineFlow(
@@ -93,10 +96,9 @@ const identifyProductSizesFlow = ai.defineFlow(
     }
     const {output} = await prompt(input);
     if (!output) {
-        console.error("AI prompt returned null output for product size identification.");
-        throw new Error("AI prompt returned null output for size identification.");
+        console.error("AI prompt returned null output for product size identification. This could be due to malformed JSON from AI or a schema mismatch.");
+        throw new Error("AI prompt returned null or invalid output for size identification.");
     }
     return output;
   }
 );
-

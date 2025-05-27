@@ -75,10 +75,6 @@ Responda APENAS com a estrutura JSON definida no esquema de saída.
 Certifique-se de que todos os objetos na matriz JSON estejam separados por vírgulas e que todos os pares de chave-valor dentro de cada objeto também estejam separados por vírgulas. As chaves e os valores de string DEVEM estar entre aspas duplas.
 Não inclua nenhuma explicação ou texto adicional fora da estrutura JSON.
 `,
-  config: {
-    // Higher temperature might be needed for nuanced classification, but start moderate.
-    // temperature: 0.5, // Setting temperature to null or a low value like 0.2 might improve JSON adherence.
-  },
    safetySettings: [
     {
       category: 'HARM_CATEGORY_HATE_SPEECH',
@@ -97,6 +93,7 @@ Não inclua nenhuma explicação ou texto adicional fora da estrutura JSON.
       threshold: 'BLOCK_LOW_AND_ABOVE',
     },
   ],
+  // config: { temperature: 0.2 } // Consider a low temperature for better JSON adherence if issues persist
 });
 
 const identifyProductTypesFlow = ai.defineFlow(
@@ -110,12 +107,9 @@ const identifyProductTypesFlow = ai.defineFlow(
       return { categorizedProducts: [] };
     }
     const {output} = await prompt(input);
-    // Ensure output is not null and adheres to the schema.
-    // The model might sometimes return a string that needs parsing if responseMIMEType is not perfectly respected.
-    // However, with Gemini and definePrompt output schema, it should mostly come structured.
     if (!output) {
-        console.error("AI prompt returned null output for product type identification.");
-        throw new Error("AI prompt returned null output for product type identification.");
+        console.error("AI prompt returned null output for product type identification. This could be due to malformed JSON from AI or a schema mismatch.");
+        throw new Error("AI prompt returned null or invalid output for product type identification.");
     }
     return output;
   }
