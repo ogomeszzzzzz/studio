@@ -15,9 +15,13 @@ const PRODUCT_CATEGORIES = [
   "Edredom",
   "Jogo de Cama",
   "Lençol Avulso",
+  "Lençol com Elástico",
+  "Lençol Superior",
   "Fronha Avulsa",
+  "Fronha",
   "Cobre Leito",
   "Kit Colcha",
+  "Jogo de Colcha",
   "Travesseiro",
   "Protetor de Colchão",
   "Protetor de Travesseiro",
@@ -26,6 +30,7 @@ const PRODUCT_CATEGORIES = [
   "Toalha de Banho",
   "Toalha de Rosto",
   "Toalha de Piso",
+  "Toalha",
   "Roupão",
   "Cortina",
   "Almofada",
@@ -62,7 +67,17 @@ const prompt = ai.definePrompt({
   output: {schema: ProductTypeIdentifierOutputSchema},
   prompt: `Você é um especialista em categorização de produtos de cama, mesa e banho.
 Sua tarefa é classificar cada nome de produto fornecido em uma das seguintes categorias: ${PRODUCT_CATEGORIES}.
-Se um produto não se encaixar claramente em nenhuma das categorias listadas, classifique-o como "Outros".
+
+IMPORTANTE: O tipo de produto geralmente é a primeira palavra ou as primeiras palavras do nome do produto. Preste atenção especial ao início do nome.
+Exemplos:
+- "Jogo de Cama Casal..." deve ser "Jogo de Cama".
+- "TOALHA DE BANHO GIGANTE..." deve ser "Toalha de Banho" ou "Toalha".
+- "Jogo de Colcha Queen..." deve ser "Jogo de Colcha".
+- "Lençol com Elástico Solteiro..." deve ser "Lençol com Elástico".
+- "Lençol Superior Casal..." deve ser "Lençol Superior".
+- "Fronha Avulsa Altenburg..." deve ser "Fronha Avulsa" ou "Fronha".
+
+Se um produto não se encaixar claramente em nenhuma das categorias listadas, mesmo considerando o início do nome, classifique-o como "Outros".
 
 Para cada nome de produto na lista de entrada 'productNames', retorne um objeto contendo o 'originalName' (o nome exato que foi fornecido) e o 'identifiedType' (a categoria que você identificou).
 
