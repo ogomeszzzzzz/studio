@@ -4,17 +4,21 @@
 import { useState, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import Link from 'next/link';
+// Link para Gap Analyzer removido
 import {
   BarChartBig, ShoppingBag, AlertTriangle, FileSpreadsheet,
   Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler,
-  Download, Loader2 // Adicionado Download e Loader2
+  Download, Loader2, Activity // Adicionado Activity para Regulador
 } from 'lucide-react';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import type { Product } from '@/types';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart";
-import { useToast } from '@/hooks/use-toast'; // Adicionado useToast
+import { useToast } from '@/hooks/use-toast'; 
+import jsPDF from 'jspdf'; // Importação direta
+import html2canvas from 'html2canvas'; // Importação direta
+import autoTable from 'jspdf-autotable'; // Importação direta
+
 
 interface AggregatedCollectionData {
   name: string;
@@ -59,18 +63,18 @@ const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3
 export default function DashboardPage() {
   const [dashboardProducts, setDashboardProducts] = useState<Product[]>([]);
   const [isProcessingExcel, setIsProcessingExcel] = useState(false);
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false); // Estado para o PDF
-  const { toast } = useToast(); // Hook para notificações
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false); 
+  const { toast } = useToast(); 
 
   const handleDashboardDataParsed = useCallback((data: Product[]) => {
     setDashboardProducts(data);
     if (data.length > 0) {
-      console.log("--- DIAGNÓSTICO ESTAMPA ---");
+      console.log("--- DIAGNÓSTICO ESTAMPA (Dashboard) ---");
       console.log("Amostra dos valores de 'product.description' lidos do Excel (deveriam ser as estampas da coluna 'Descrição'):");
       data.slice(0, 5).forEach((p, index) => {
         console.log(`Produto ${index + 1} - product.description: "${p.description}" (Usado para 'Estoque por Estampa')`);
       });
-      console.log("--- FIM DIAGNÓSTICO ESTAMPA ---");
+      console.log("--- FIM DIAGNÓSTICO ESTAMPA (Dashboard) ---");
     }
   }, []);
 
@@ -89,7 +93,7 @@ export default function DashboardPage() {
         totalSkus: 0,
         totalZeroStockSkus: 0,
         totalReadyToShipStock: 0,
-        totalOrderedStock: 0,
+        totalRegulatorStock: 0, // Alterado de totalOrderedStock
       };
     }
 
@@ -103,13 +107,13 @@ export default function DashboardPage() {
     let totalSkus = dashboardProducts.length;
     let totalZeroStockSkus = 0;
     let totalReadyToShipStock = 0;
-    let totalOrderedStock = 0;
+    let totalRegulatorStock = 0; // Alterado de totalOrderedStock
 
     dashboardProducts.forEach(product => {
-      const collectionKey = product.collection || 'Não Especificada'; // From 'Descrição Linha Comercial'
-      const sizeKey = product.size || 'Não Especificado'; // From Excel 'Tamanho'
-      const printKey = product.description || 'Não Especificada'; // From Excel 'Descrição' - FOR STAMPS
-      const typeKey = product.productType || 'Não Especificado'; // From Excel 'Tipo. Produto'
+      const collectionKey = product.collection || 'Não Especificada'; 
+      const sizeKey = product.size || 'Não Especificado'; 
+      const printKey = product.description || 'Não Especificada'; 
+      const typeKey = product.productType || 'Não Especificado';
 
       const currentCol = stockByCollectionMap.get(collectionKey) || { stock: 0, skus: 0 };
       currentCol.stock += product.stock;
@@ -136,7 +140,7 @@ export default function DashboardPage() {
       }
       totalStock += product.stock;
       totalReadyToShipStock += product.readyToShip;
-      totalOrderedStock += product.order;
+      totalRegulatorStock += product.regulatorStock; // Usando regulatorStock
     });
 
     return {
@@ -149,7 +153,7 @@ export default function DashboardPage() {
       totalSkus,
       totalZeroStockSkus,
       totalReadyToShipStock,
-      totalOrderedStock,
+      totalRegulatorStock, // Retornando totalRegulatorStock
     };
   }, [dashboardProducts]);
 
@@ -180,10 +184,6 @@ export default function DashboardPage() {
     toast({ title: "Gerando PDF...", description: "Por favor, aguarde." });
 
     try {
-      const { default: jsPDF } = await import('jspdf');
-      const { default: html2canvas } = await import('html2canvas');
-      const { default: autoTable } = await import('jspdf-autotable');
-
       const doc = new jsPDF('p', 'mm', 'a4');
       let yPos = 15;
       const pageHeight = doc.internal.pageSize.height;
@@ -206,7 +206,7 @@ export default function DashboardPage() {
       const summaryTableBody = [
         ["Estoque Total", aggregatedData.totalStock.toLocaleString()],
         ["Pronta Entrega", aggregatedData.totalReadyToShipStock.toLocaleString()],
-        ["Pedidos", aggregatedData.totalOrderedStock.toLocaleString()],
+        ["Regulador", aggregatedData.totalRegulatorStock.toLocaleString()], // Alterado de Pedidos
         ["Total SKUs", aggregatedData.totalSkus.toLocaleString()],
         ["Total SKUs Zerados", aggregatedData.totalZeroStockSkus.toLocaleString()],
       ];
@@ -235,18 +235,16 @@ export default function DashboardPage() {
         if (chartElement) {
           try {
             const canvas = await html2canvas(chartElement, { scale: 1.5, useCORS: true, logging: false });
-            const imgData = canvas.toDataURL('image/png', 0.9); // Slightly compress PNG
+            const imgData = canvas.toDataURL('image/png', 0.9); 
             const imgProps = doc.getImageProperties(imgData);
             let imgHeight = (imgProps.height * contentWidth) / imgProps.width;
             let imgWidth = contentWidth;
 
-            // Ensure chart image is not excessively tall
-            const maxChartHeight = pageHeight * 0.4; // Max 40% of page height for a single chart
+            const maxChartHeight = pageHeight * 0.4; 
             if (imgHeight > maxChartHeight) {
                 imgHeight = maxChartHeight;
                 imgWidth = (imgProps.width * imgHeight) / imgProps.height;
             }
-
 
             if (yPos + imgHeight > pageHeight - margin) {
               doc.addPage();
@@ -256,9 +254,9 @@ export default function DashboardPage() {
             yPos += imgHeight + 7;
           } catch (error) {
             console.error(`Error capturing chart ${elementId}:`, error);
-            doc.setTextColor(255,0,0); // Red color for error message
+            doc.setTextColor(255,0,0); 
             doc.text(`Erro ao renderizar o gráfico: ${title}`, margin, yPos);
-            doc.setTextColor(0); // Reset to black
+            doc.setTextColor(0); 
             yPos += 7;
           }
         } else {
@@ -309,12 +307,7 @@ export default function DashboardPage() {
             )}
             Baixar Relatório PDF
           </Button>
-          <Link href="/collection-analyzer">
-            <Button>
-              <BarChartBig className="mr-2 h-5 w-5" />
-              Ir para Gap Analyzer
-            </Button>
-          </Link>
+          {/* Link para Gap Analyzer foi removido */}
         </div>
       </div>
 
@@ -363,12 +356,12 @@ export default function DashboardPage() {
             </Card>
             <Card className="shadow-lg hover:shadow-xl transition-shadow">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Pedidos</CardTitle>
-                <ClipboardList className="h-5 w-5 text-blue-500" />
+                <CardTitle className="text-sm font-medium">Regulador</CardTitle> 
+                <Activity className="h-5 w-5 text-orange-500" /> 
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-foreground">{aggregatedData.totalOrderedStock.toLocaleString()}</div>
-                <p className="text-xs text-muted-foreground">unidades em pedidos</p>
+                <div className="text-2xl font-bold text-foreground">{aggregatedData.totalRegulatorStock.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">unidades no depósito Regulador</p>
               </CardContent>
             </Card>
             <Card className="shadow-lg hover:shadow-xl transition-shadow">
@@ -522,3 +515,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+

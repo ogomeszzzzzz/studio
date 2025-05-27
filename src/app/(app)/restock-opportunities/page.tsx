@@ -35,7 +35,6 @@ export default function RestockOpportunitiesPage() {
 
   const handleDataParsed = useCallback((data: Product[]) => {
     setAllProducts(data);
-    // Initial filter application will be triggered by useEffect or button click
   }, []);
 
   const availableCollections = useMemo(() => {
@@ -49,11 +48,10 @@ export default function RestockOpportunitiesPage() {
     const effectiveThreshold = parseInt(lowStockThreshold, 10);
     
     const currentThreshold = isNaN(effectiveThreshold) ? DEFAULT_LOW_STOCK_THRESHOLD : effectiveThreshold;
-    if (isNaN(effectiveThreshold) && lowStockThreshold.trim() !== '') { // Only toast if user entered something invalid
+    if (isNaN(effectiveThreshold) && lowStockThreshold.trim() !== '') { 
         toast({ title: "Aviso", description: `Limite de baixo estoque inválido, usando padrão: ${DEFAULT_LOW_STOCK_THRESHOLD}.`, variant: "default" });
     }
 
-    // 1. Apply base filters (collection, dates, etc.)
     if (baseFilters) {
       if (baseFilters.collection && baseFilters.collection !== ALL_COLLECTIONS_VALUE) {
         tempFiltered = tempFiltered.filter(p => p.collection === baseFilters.collection);
@@ -99,10 +97,9 @@ export default function RestockOpportunitiesPage() {
       }
     }
     
-    // 2. Apply the core restock opportunity filter
     tempFiltered = tempFiltered.filter(p => 
         p.stock <= currentThreshold && 
-        (p.readyToShip > 0 || p.order > 0)
+        (p.readyToShip > 0 || p.regulatorStock > 0) // Usando regulatorStock
     );
     
     setFilteredProducts(tempFiltered);
@@ -119,24 +116,22 @@ export default function RestockOpportunitiesPage() {
     applyAllFilters();
    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allProducts, lowStockThreshold, baseFilters]); 
+  }, [allProducts, lowStockThreshold, baseFilters]); // Adicionado baseFilters
 
   const handleProcessingStart = () => setIsLoading(true);
   const handleProcessingEnd = () => {
-    if (allProducts.length > 0) {
-        applyAllFilters();
-    } else {
-        setFilteredProducts([]);
-        setIsLoading(false); 
-    }
+    // Não chama applyAllFilters aqui, pois o useEffect já cuidará disso
+    // quando allProducts for atualizado. Apenas ajusta isLoading.
+    setIsLoading(false); 
   };
 
   const summaryStats = useMemo(() => {
     const totalSkusToRestock = filteredProducts.length;
-    const totalUnitsAvailableForRestock = filteredProducts.reduce((sum, p) => sum + p.readyToShip + p.order, 0);
+    // Usando regulatorStock em vez de order
+    const totalUnitsAvailableForRestock = filteredProducts.reduce((sum, p) => sum + p.readyToShip + p.regulatorStock, 0);
     const potentialStockAtRiskUnits = filteredProducts.reduce((sum, p) => {
-      if (p.stock === 0) return sum + p.readyToShip + p.order; // All units are at risk if stock is zero
-      return sum + Math.max(0, (p.readyToShip + p.order) - p.stock); // Units that exceed current stock
+      if (p.stock === 0) return sum + p.readyToShip + p.regulatorStock; 
+      return sum + Math.max(0, (p.readyToShip + p.regulatorStock) - p.stock);
     }, 0);
 
     return {
@@ -162,8 +157,8 @@ export default function RestockOpportunitiesPage() {
       "Produto-Derivação": p.productDerivation,
       "Estoque Atual": p.stock,
       "Pronta Entrega": p.readyToShip,
-      "Pedido": p.order,
-      "Coleção": p.collection,
+      "Regulador": p.regulatorStock, // Exportando Regulator
+      "Coleção (Desc. Linha Comercial)": p.collection, // Coleção vindo de "Descrição Linha Comercial"
       "Descrição (Estampa)": p.description, 
       "Tamanho": p.size,
       "Tipo Produto": p.productType,
@@ -190,7 +185,7 @@ export default function RestockOpportunitiesPage() {
                 Oportunidades de Reabastecimento
             </h1>
             <p className="text-muted-foreground">
-                Identifique produtos com baixo estoque que possuem unidades em "Pronta Entrega" ou "Pedido" para reposição.
+                Identifique produtos com baixo estoque que possuem unidades em "Pronta Entrega" ou "Regulador" para reposição.
             </p>
         </div>
       </div>
@@ -199,9 +194,9 @@ export default function RestockOpportunitiesPage() {
         onDataParsed={handleDataParsed} 
         onProcessingStart={handleProcessingStart}
         onProcessingEnd={handleProcessingEnd}
-        collectionColumnKey="COLEÇÃO" 
+        collectionColumnKey="Descrição Linha Comercial" // Usando Descrição Linha Comercial para 'collection'
         cardTitle="1. Carregar Dados do Excel"
-        cardDescription="Faça o upload da planilha de produtos. Os dados serão processados para identificar oportunidades."
+        cardDescription="Faça o upload da planilha de produtos. A coluna 'Descrição Linha Comercial' será usada para 'Coleção'."
       />
 
       {allProducts.length > 0 && (
@@ -214,7 +209,7 @@ export default function RestockOpportunitiesPage() {
               </CardTitle>
               <CardDescription>
                 Ajuste o limite de estoque para considerar um item como "baixo" e aplique filtros adicionais se necessário.
-                As oportunidades são itens com estoque atual &lt;= ao limite definido E com unidades em "Pronta Entrega" ou "Pedido".
+                As oportunidades são itens com estoque atual &lt;= ao limite definido E com unidades em "Pronta Entrega" ou "Regulador".
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -248,7 +243,7 @@ export default function RestockOpportunitiesPage() {
                     </Button>
                 </div>
                 <FilterControlsSection
-                    products={allProducts}
+                    products={allProducts} // Passando allProducts para popular as coleções disponíveis
                     onFilterChange={handleBaseFilterChange}
                     availableCollections={availableCollections}
                 />
@@ -284,7 +279,7 @@ export default function RestockOpportunitiesPage() {
                         </CardHeader>
                         <CardContent>
                             <div className="text-2xl font-bold text-green-600">{summaryStats.totalUnitsAvailableForRestock.toLocaleString()}</div>
-                            <p className="text-xs text-muted-foreground">Total em Pronta Entrega + Pedidos.</p>
+                            <p className="text-xs text-muted-foreground">Total em Pronta Entrega + Regulador.</p>
                         </CardContent>
                     </Card>
                     <Card className="border-destructive border-l-4">
@@ -294,7 +289,7 @@ export default function RestockOpportunitiesPage() {
                         </CardHeader>
                         <CardContent>
                             <div className="text-2xl font-bold text-destructive">{summaryStats.potentialStockAtRiskUnits.toLocaleString()}</div>
-                            <p className="text-xs text-muted-foreground">Unidades de Pronta Entrega/Pedido que podem faltar.</p>
+                            <p className="text-xs text-muted-foreground">Unidades de Pronta Entrega/Regulador que podem faltar.</p>
                         </CardContent>
                     </Card>
                 </div>
@@ -316,9 +311,9 @@ export default function RestockOpportunitiesPage() {
                     showProductDerivationColumn={true} 
                     showStockColumn={true}
                     showReadyToShipColumn={true}
-                    showOrderColumn={true}
-                    showCollectionColumn={true}
-                    showDescriptionColumn={true} 
+                    showRegulatorStockColumn={true} // Mostrando Regulador
+                    showCollectionColumn={true} // Coleção virá de Descrição Linha Comercial
+                    showDescriptionColumn={false} // Estampa não é prioritária aqui
                     showSizeColumn={true}        
                     showProductTypeColumn={true} 
                     showStartDateColumn={false} 
@@ -335,7 +330,7 @@ export default function RestockOpportunitiesPage() {
                         </CardHeader>
                         <CardContent>
                             <p className="text-muted-foreground">
-                                Nenhum produto com estoque atual &le; <span className="font-semibold">{parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD}</span> unidades e com disponibilidade em "Pronta Entrega" ou "Pedido" foi encontrado com os filtros atuais.
+                                Nenhum produto com estoque atual &le; <span className="font-semibold">{parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD}</span> unidades e com disponibilidade em "Pronta Entrega" ou "Regulador" foi encontrado com os filtros atuais.
                             </p>
                             <p className="text-muted-foreground mt-2">
                                 Tente ajustar o "Estoque Máximo para Oportunidade" ou os filtros gerais e clique em "Aplicar Critérios e Filtros".
@@ -357,7 +352,7 @@ export default function RestockOpportunitiesPage() {
           </CardHeader>
           <CardContent>
             <p className="text-muted-foreground">
-              Carregue um arquivo Excel no passo "1. Carregar Dados do Excel" para identificar produtos com baixo estoque que podem ser reabastecidos a partir da "Pronta Entrega" ou "Pedidos".
+              Carregue um arquivo Excel no passo "1. Carregar Dados do Excel" para identificar produtos com baixo estoque que podem ser reabastecidos a partir da "Pronta Entrega" ou "Regulador".
             </p>
           </CardContent>
         </Card>
@@ -365,4 +360,3 @@ export default function RestockOpportunitiesPage() {
     </div>
   );
 }
-

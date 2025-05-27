@@ -48,21 +48,19 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
 
           return {
             vtexId: row['ID VTEX'] ?? '',
-            // Prioritize "Nome do Produto", fallback to "Nome"
-            name: row['Nome do Produto'] ?? row['Nome'] ?? '',
+            name: row['Nome Produto'] ?? row['Nome do Produto'] ?? row['Nome'] ?? '', // Prioriza "Nome Produto"
             productId: row['Produto'] ?? undefined,
             derivation: row['Derivação'] ?? undefined,
             productDerivation: row['Produto-Derivação'] ?? undefined,
             stock: Number(row['Estoque']) || 0,
             readyToShip: Number(row['Pronta Entrega']) || 0,
-            order: Number(row['Pedido']) || 0,
-            // This should be the print/pattern from the "Descrição" column
+            regulatorStock: Number(row['Regulador']) || 0, // Lendo da coluna "Regulador"
             description: row['Descrição'] ?? '',
             size: row['Tamanho'] ?? 'Não Especificado',
-            productType: row['Tipo. Produto'] ?? 'Não Especificado',
+            productType: row['Tipo. Produto'] ?? 'Não Especificado', // Coluna F
             complement: row['Compl.'] ?? undefined,
             commercialLine: row['Linha Comercial'] ?? '',
-            collection: collectionValue,
+            collection: collectionValue, // Usará collectionColumnKey (ex: "Descrição Linha Comercial")
             commercialLineDescription: row['Descrição Linha Comercial'] ?? undefined,
             isCurrentCollection: toBoolean(row['Coleção Atual']),
             collectionStartDate: startDate,

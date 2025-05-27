@@ -20,7 +20,7 @@ interface ProductDataTableSectionProps {
   showNameColumn?: boolean;
   showStockColumn?: boolean;
   showReadyToShipColumn?: boolean;
-  showOrderColumn?: boolean;
+  showRegulatorStockColumn?: boolean; // Nova prop
   showCollectionColumn?: boolean;
   showStartDateColumn?: boolean;
   showEndDateColumn?: boolean;
@@ -30,7 +30,7 @@ interface ProductDataTableSectionProps {
   showProductTypeColumn?: boolean;
   showProductDerivationColumn?: boolean; 
   cardTitle?: string;
-  cardDescription?: string; // Added for more context
+  cardDescription?: string; 
   cardIcon?: React.ElementType;
 }
 
@@ -72,7 +72,7 @@ export function ProductDataTableSection({
   showNameColumn = true,
   showStockColumn = true,
   showReadyToShipColumn = false,
-  showOrderColumn = false,
+  showRegulatorStockColumn = false, // Default para false
   showCollectionColumn = true,
   showStartDateColumn = true,
   showEndDateColumn = true,
@@ -158,7 +158,7 @@ export function ProductDataTableSection({
   const TableSkeleton = () => {
     const colCount = [
         showVtexIdColumn, showNameColumn, showProductDerivationColumn, showStockColumn, 
-        showReadyToShipColumn, showOrderColumn, showCollectionColumn, showDescriptionColumn, 
+        showReadyToShipColumn, showRegulatorStockColumn, showCollectionColumn, showDescriptionColumn, 
         showSizeColumn, showProductTypeColumn, showStartDateColumn, showEndDateColumn, showStatusColumn
     ].filter(Boolean).length || 1;
 
@@ -177,9 +177,9 @@ export function ProductDataTableSection({
 
 
   return (
-    <Card className="shadow-sm"> {/* Reduced shadow for a cleaner look within another card */}
-      <CardHeader className="pt-4 pb-2"> {/* Adjusted padding */}
-        <CardTitle className="flex items-center text-lg"> {/* Slightly smaller title */}
+    <Card className="shadow-sm"> 
+      <CardHeader className="pt-4 pb-2"> 
+        <CardTitle className="flex items-center text-lg"> 
           <CardIcon className="mr-2 h-5 w-5 text-primary" />
           {cardTitle}
         </CardTitle>
@@ -187,7 +187,7 @@ export function ProductDataTableSection({
           {cardDescription}
         </CardDescription>
       </CardHeader>
-      <CardContent className="pt-2"> {/* Adjusted padding */}
+      <CardContent className="pt-2"> 
         {(products.length === 0 && !isLoading) ? (
           <p className="text-center text-muted-foreground py-6">Nenhum produto corresponde aos critérios selecionados.</p>
         ) : (
@@ -201,7 +201,7 @@ export function ProductDataTableSection({
                     {showProductDerivationColumn && <TableHead onClick={() => handleSort('productDerivation')} className="cursor-pointer hover:bg-muted/50 min-w-[180px] whitespace-nowrap">Produto-Derivação {renderSortIcon('productDerivation')}</TableHead>}
                     {showStockColumn && <TableHead onClick={() => handleSort('stock')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap">Est. Atual {renderSortIcon('stock')}</TableHead>}
                     {showReadyToShipColumn && <TableHead onClick={() => handleSort('readyToShip')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap font-semibold text-green-600">Pronta Ent. {renderSortIcon('readyToShip')}</TableHead>}
-                    {showOrderColumn && <TableHead onClick={() => handleSort('order')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap font-semibold text-blue-600">Pedido {renderSortIcon('order')}</TableHead>}
+                    {showRegulatorStockColumn && <TableHead onClick={() => handleSort('regulatorStock')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap font-semibold text-orange-600">Regulador {renderSortIcon('regulatorStock')}</TableHead>}
                     {showCollectionColumn && <TableHead onClick={() => handleSort('collection')} className="cursor-pointer hover:bg-muted/50 min-w-[150px]">Coleção {renderSortIcon('collection')}</TableHead>}
                     {showDescriptionColumn && <TableHead onClick={() => handleSort('description')} className="cursor-pointer hover:bg-muted/50 min-w-[150px]">Estampa {renderSortIcon('description')}</TableHead>}
                     {showSizeColumn && <TableHead onClick={() => handleSort('size')} className="cursor-pointer hover:bg-muted/50 min-w-[100px]">Tamanho {renderSortIcon('size')}</TableHead>}
@@ -221,7 +221,7 @@ export function ProductDataTableSection({
                         {showProductDerivationColumn && <TableCell className="whitespace-nowrap">{product.productDerivation}</TableCell>}
                         {showStockColumn && <TableCell className="text-right">{product.stock.toLocaleString()}</TableCell>}
                         {showReadyToShipColumn && <TableCell className="text-right font-semibold text-green-700">{product.readyToShip.toLocaleString()}</TableCell>}
-                        {showOrderColumn && <TableCell className="text-right font-semibold text-blue-700">{product.order.toLocaleString()}</TableCell>}
+                        {showRegulatorStockColumn && <TableCell className="text-right font-semibold text-orange-700">{product.regulatorStock.toLocaleString()}</TableCell>}
                         {showCollectionColumn && <TableCell>{product.collection}</TableCell>}
                         {showDescriptionColumn && <TableCell>{product.description}</TableCell>}
                         {showSizeColumn && <TableCell>{product.size}</TableCell>}

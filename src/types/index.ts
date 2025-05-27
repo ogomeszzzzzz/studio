@@ -7,13 +7,13 @@ export interface Product {
   productDerivation?: string;
   stock: number;
   readyToShip: number;
-  order: number;
+  regulatorStock: number; // Substituindo 'order'
   description: string; // Represents print/pattern from Excel "Descrição"
   size?: string; // From Excel "Tamanho" column
-  productType?: string; // Derived from Excel "Nome" column
+  productType?: string; // Derived from Excel "Tipo. Produto" column
   complement?: string;
   commercialLine: string;
-  collection: string; // This field's source is determined by parser arg
+  collection: string; // This field's source is determined by parser arg (e.g., "Descrição Linha Comercial" or "COLEÇÃO")
   commercialLineDescription?: string;
   isCurrentCollection: boolean;
   collectionStartDate: Date | null;
