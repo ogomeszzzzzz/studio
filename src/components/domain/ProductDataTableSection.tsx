@@ -28,6 +28,7 @@ interface ProductDataTableSectionProps {
   showDescriptionColumn?: boolean; // Estampa
   showSizeColumn?: boolean;
   showProductTypeColumn?: boolean;
+  showProductDerivationColumn?: boolean; // Nova coluna
   cardTitle?: string;
   cardIcon?: React.ElementType;
 }
@@ -75,9 +76,10 @@ export function ProductDataTableSection({
   showStartDateColumn = true,
   showEndDateColumn = true,
   showStatusColumn = true,
-  showDescriptionColumn = false, // Estampa
+  showDescriptionColumn = false, 
   showSizeColumn = false,
   showProductTypeColumn = false,
+  showProductDerivationColumn = false, // Prop para nova coluna
   cardTitle = "Dados dos Produtos",
   cardIcon: CardIcon = ListChecks,
 }: ProductDataTableSectionProps) {
@@ -88,8 +90,8 @@ export function ProductDataTableSection({
   const sortedProducts = useMemo(() => {
     if (!sortKey) return products;
     return [...products].sort((a, b) => {
-      const valA = a[sortKey as keyof Product]; // Explicit cast
-      const valB = b[sortKey as keyof Product]; // Explicit cast
+      const valA = a[sortKey as keyof Product]; 
+      const valB = b[sortKey as keyof Product]; 
 
       let comparison = 0;
       if (valA instanceof Date && valB instanceof Date) {
@@ -100,8 +102,11 @@ export function ProductDataTableSection({
         comparison = valA.localeCompare(valB);
       } else if (typeof valA === 'boolean' && typeof valB === 'boolean') {
         comparison = valA === valB ? 0 : (valA ? -1 : 1);
+      } else if (valA === null || valA === undefined) {
+        comparison = (valB === null || valB === undefined) ? 0 : 1; // nulls/undefined last
+      } else if (valB === null || valB === undefined) {
+        comparison = -1; // nulls/undefined last
       }
-
 
       return sortOrder === 'asc' ? comparison : -comparison;
     });
@@ -154,6 +159,7 @@ export function ProductDataTableSection({
       <TableCell colSpan={
         (showVtexIdColumn ? 1 : 0) +
         (showNameColumn ? 1 : 0) +
+        (showProductDerivationColumn ? 1: 0) + // Contar nova coluna
         (showStockColumn ? 1 : 0) +
         (showReadyToShipColumn ? 1 : 0) +
         (showOrderColumn ? 1 : 0) +
@@ -196,7 +202,8 @@ export function ProductDataTableSection({
                 <TableHeader>
                   <TableRow>
                     {showVtexIdColumn && <TableHead onClick={() => handleSort('vtexId')} className="cursor-pointer hover:bg-muted/50 min-w-[100px]">ID VTEX {renderSortIcon('vtexId')}</TableHead>}
-                    {showNameColumn && <TableHead onClick={() => handleSort('name')} className="cursor-pointer hover:bg-muted/50 min-w-[200px]">Nome {renderSortIcon('name')}</TableHead>}
+                    {showNameColumn && <TableHead onClick={() => handleSort('name')} className="cursor-pointer hover:bg-muted/50 min-w-[200px]">Nome Produto {renderSortIcon('name')}</TableHead>}
+                    {showProductDerivationColumn && <TableHead onClick={() => handleSort('productDerivation')} className="cursor-pointer hover:bg-muted/50 min-w-[150px]">Produto-Derivação {renderSortIcon('productDerivation')}</TableHead>}
                     {showStockColumn && <TableHead onClick={() => handleSort('stock')} className="cursor-pointer hover:bg-muted/50 text-right">Estoque {renderSortIcon('stock')}</TableHead>}
                     {showReadyToShipColumn && <TableHead onClick={() => handleSort('readyToShip')} className="cursor-pointer hover:bg-muted/50 text-right">Pronta Entrega {renderSortIcon('readyToShip')}</TableHead>}
                     {showOrderColumn && <TableHead onClick={() => handleSort('order')} className="cursor-pointer hover:bg-muted/50 text-right">Pedido {renderSortIcon('order')}</TableHead>}
@@ -213,9 +220,10 @@ export function ProductDataTableSection({
                   {isLoading ? <TableSkeleton /> : paginatedProducts.map((product, index) => {
                     const status = getCollectionStatus(product);
                     return (
-                      <TableRow key={`${product.vtexId}-${product.name}-${index}-${currentPage}`}>
+                      <TableRow key={`${product.vtexId}-${product.name}-${product.productDerivation}-${index}-${currentPage}`}>
                         {showVtexIdColumn && <TableCell>{product.vtexId}</TableCell>}
                         {showNameColumn && <TableCell className="font-medium">{product.name}</TableCell>}
+                        {showProductDerivationColumn && <TableCell>{product.productDerivation}</TableCell>}
                         {showStockColumn && <TableCell className="text-right">{product.stock}</TableCell>}
                         {showReadyToShipColumn && <TableCell className="text-right">{product.readyToShip}</TableCell>}
                         {showOrderColumn && <TableCell className="text-right">{product.order}</TableCell>}
@@ -275,5 +283,4 @@ export function ProductDataTableSection({
     </Card>
   );
 }
-
     

@@ -29,8 +29,7 @@ export default function RestockOpportunitiesPage() {
 
   const handleDataParsed = useCallback((data: Product[]) => {
     setAllProducts(data);
-    // Apply initial restock-specific filtering immediately after data parsing
-    // This will be re-applied by applyAllFilters called in onProcessingEnd
+    // Initial filter application will be triggered by useEffect or button click
   }, []);
 
   const availableCollections = useMemo(() => {
@@ -39,27 +38,24 @@ export default function RestockOpportunitiesPage() {
   }, [allProducts]);
 
   const applyAllFilters = useCallback(() => {
+    setIsLoading(true); // Indicate loading during filtering
     let tempFiltered = [...allProducts];
     const effectiveThreshold = parseInt(lowStockThreshold, 10);
+    
+    const currentThreshold = isNaN(effectiveThreshold) ? DEFAULT_LOW_STOCK_THRESHOLD : effectiveThreshold;
     if (isNaN(effectiveThreshold)) {
         toast({ title: "Aviso", description: `Limite de baixo estoque inválido, usando padrão: ${DEFAULT_LOW_STOCK_THRESHOLD}.`, variant: "default" });
     }
-    const currentThreshold = isNaN(effectiveThreshold) ? DEFAULT_LOW_STOCK_THRESHOLD : effectiveThreshold;
-
 
     // 1. Apply base filters (collection, dates, etc.)
     if (baseFilters) {
       if (baseFilters.collection && baseFilters.collection !== ALL_COLLECTIONS_VALUE) {
         tempFiltered = tempFiltered.filter(p => p.collection === baseFilters.collection);
       }
-      if (baseFilters.stockMin) { 
+      if (baseFilters.stockMin && baseFilters.stockMin.trim() !== '') { 
         tempFiltered = tempFiltered.filter(p => p.stock >= parseInt(baseFilters.stockMin!, 10));
       }
-      // stockMax from general filters is not directly used here; lowStockThreshold takes precedence for the primary logic.
-      // However, if a user explicitly sets a stockMax in general filters, it might interact unexpectedly.
-      // For "Restock Opportunities", the main stock upper bound is lowStockThreshold.
-      // We could choose to ignore baseFilters.stockMax or let it apply. For now, let it apply.
-      if (baseFilters.stockMax) {
+      if (baseFilters.stockMax && baseFilters.stockMax.trim() !== '') {
         tempFiltered = tempFiltered.filter(p => p.stock <= parseInt(baseFilters.stockMax!, 10));
       }
 
@@ -104,27 +100,33 @@ export default function RestockOpportunitiesPage() {
     );
     
     setFilteredProducts(tempFiltered);
+    setIsLoading(false); // Filtering complete
   }, [allProducts, baseFilters, lowStockThreshold, toast]);
 
 
   const handleBaseFilterChange = useCallback((filters: FilterState) => {
     setBaseFilters(filters);
-    // applyAllFilters will be called by the "Apply Filters" button
+    // Filters will be applied by the button or useEffect
   }, []);
   
-  // Apply filters when lowStockThreshold or allProducts change and after initial load
+  // Apply filters when relevant state changes and after initial load
   useEffect(() => {
    if(allProducts.length > 0) {
     applyAllFilters();
    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allProducts, lowStockThreshold]); // Removed applyAllFilters from deps to avoid loop, explicit call is preferred
+  }, [allProducts, lowStockThreshold, baseFilters]); // Added baseFilters to dependencies
 
   const handleProcessingStart = () => setIsLoading(true);
   const handleProcessingEnd = () => {
-    setIsLoading(false);
-    // Re-apply filters after new data is processed and loading ends.
-    applyAllFilters();
+    // applyAllFilters will be called by the useEffect when allProducts changes
+    // If allProducts hasn't changed but we want to re-filter (e.g. after initial load with default filters)
+    // ensure applyAllFilters is called.
+    if (allProducts.length > 0) {
+        applyAllFilters();
+    } else {
+        setIsLoading(false); // Explicitly set loading to false if no products
+    }
   };
 
   const handleExportToExcel = () => {
@@ -139,16 +141,17 @@ export default function RestockOpportunitiesPage() {
 
     const dataToExport = filteredProducts.map(p => ({
       "ID VTEX": p.vtexId,
-      "Nome": p.name,
+      "Nome Produto": p.name,
+      "Produto-Derivação": p.productDerivation,
       "Estoque": p.stock,
       "Pronta Entrega": p.readyToShip,
       "Pedido": p.order,
       "Coleção": p.collection,
-      "Descrição": p.description, // Estampa
+      "Descrição (Estampa)": p.description, 
       "Tamanho": p.size,
       "Tipo Produto": p.productType,
-      "Data Início Coleção": p.collectionStartDate ? p.collectionStartDate.toLocaleDateString('pt-BR') : p.rawCollectionStartDate || 'N/A',
-      "Data Fim Coleção": p.collectionEndDate ? p.collectionEndDate.toLocaleDateString('pt-BR') : p.rawCollectionEndDate || 'N/A',
+      "Data Início Coleção": p.collectionStartDate && isValid(new Date(p.collectionStartDate)) ? new Date(p.collectionStartDate).toLocaleDateString('pt-BR') : p.rawCollectionStartDate || 'N/A',
+      "Data Fim Coleção": p.collectionEndDate && isValid(new Date(p.collectionEndDate)) ? new Date(p.collectionEndDate).toLocaleDateString('pt-BR') : p.rawCollectionEndDate || 'N/A',
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
@@ -167,7 +170,7 @@ export default function RestockOpportunitiesPage() {
         onDataParsed={handleDataParsed} 
         onProcessingStart={handleProcessingStart}
         onProcessingEnd={handleProcessingEnd}
-        collectionColumnKey="COLEÇÃO" 
+        collectionColumnKey="COLEÇÃO" // Consistent with Gap Analyzer for collection definition
         cardTitle="Upload de Dados para Oportunidades de Reabastecimento"
         cardDescription="Carregue o arquivo Excel. Itens com baixo estoque e disponibilidade em 'Pronta Entrega' ou 'Pedido' serão destacados."
       />
@@ -178,11 +181,11 @@ export default function RestockOpportunitiesPage() {
             <CardHeader>
               <CardTitle className="flex items-center">
                 <PackageSearch className="mr-2 h-5 w-5 text-primary" />
-                Definir Limite de Baixo Estoque e Aplicar Filtros
+                Definir Limite de Baixo Estoque e Aplicar Filtros Gerais
               </CardTitle>
               <CardDescription>
                 Produtos com estoque igual ou inferior a este valor (e com Pronta Entrega ou Pedido > 0) serão mostrados.
-                Abaixo, você também pode aplicar filtros gerais de coleção, datas, etc.
+                Abaixo, você também pode aplicar filtros de coleção, datas, etc. Clique em "Aplicar Filtros" para atualizar.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col sm:flex-row items-end gap-4">
@@ -207,8 +210,8 @@ export default function RestockOpportunitiesPage() {
             availableCollections={availableCollections}
           />
           
-          <div className="flex justify-end mb-4">
-            <Button onClick={handleExportToExcel} disabled={filteredProducts.length === 0}>
+          <div className="flex justify-end my-4">
+            <Button onClick={handleExportToExcel} disabled={filteredProducts.length === 0 || isLoading}>
               <Download className="mr-2 h-5 w-5" />
               Exportar para Excel
             </Button>
@@ -216,18 +219,19 @@ export default function RestockOpportunitiesPage() {
 
           <ProductDataTableSection
             products={filteredProducts}
-            isLoading={isLoading && filteredProducts.length === 0}
+            isLoading={isLoading && filteredProducts.length === 0} // Show skeleton only if loading AND no products
             cardIcon={PackageSearch}
             cardTitle="Oportunidades de Reabastecimento Identificadas"
             showVtexIdColumn={true}
             showNameColumn={true}
+            showProductDerivationColumn={true} // Exibir Produto-Derivação
             showStockColumn={true}
             showReadyToShipColumn={true}
             showOrderColumn={true}
             showCollectionColumn={true}
-            showDescriptionColumn={true} // Mostrar Estampa
-            showSizeColumn={true}        // Mostrar Tamanho
-            showProductTypeColumn={true} // Mostrar Tipo Produto
+            showDescriptionColumn={true} 
+            showSizeColumn={true}        
+            showProductTypeColumn={true} 
             showStartDateColumn={true} 
             showEndDateColumn={true}  
             showStatusColumn={true}   
@@ -247,7 +251,7 @@ export default function RestockOpportunitiesPage() {
       {allProducts.length > 0 && filteredProducts.length === 0 && !isLoading && (
          <Card className="shadow-lg my-6">
             <CardHeader>
-                <CardTitle className="flex items-center text-destructive">
+                <CardTitle className="flex items-center text-accent-foreground"> {/* Changed to accent for less alarming color */}
                     <AlertTriangle className="mr-2 h-5 w-5" />
                     Nenhuma Oportunidade Encontrada
                 </CardTitle>
@@ -258,7 +262,7 @@ export default function RestockOpportunitiesPage() {
                     e disponibilidade em "Pronta Entrega" ou "Pedido" foi encontrado com os filtros atuais.
                 </p>
                 <p className="text-muted-foreground mt-2">
-                    Tente ajustar o limite de baixo estoque ou os filtros gerais.
+                    Tente ajustar o limite de baixo estoque ou os filtros gerais e clique em "Aplicar Todos os Filtros".
                 </p>
             </CardContent>
         </Card>
@@ -266,5 +270,3 @@ export default function RestockOpportunitiesPage() {
     </div>
   );
 }
-
-    
