@@ -1,8 +1,7 @@
 
 'use client';
 
-import { useEffect } from 'react';
-import { useFormState } from 'react-dom';
+import { useEffect, useActionState } from 'react'; // Changed import
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,7 +13,7 @@ import { UserPlus, LogIn } from 'lucide-react';
 
 export default function RegisterPage() {
   const { toast } = useToast();
-  const [state, formAction] = useFormState(registerUser, { message: '', status: '' });
+  const [state, formAction] = useActionState(registerUser, { message: '', status: '' }); // Changed hook
 
   useEffect(() => {
     if (state?.status === 'success' && state.message) {
@@ -24,6 +23,26 @@ export default function RegisterPage() {
       toast({ title: 'Erro de Registro', description: state.message, variant: 'destructive' });
     }
   }, [state, toast]);
+
+  // Client-side password confirmation check
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    const formData = new FormData(event.currentTarget);
+    const password = formData.get('password') as string;
+    const confirmPassword = formData.get('confirmPassword') as string;
+
+    if (password !== confirmPassword) {
+      event.preventDefault(); // Prevent form submission
+      toast({
+        title: 'Erro de Validação',
+        description: 'As senhas não coincidem.',
+        variant: 'destructive',
+      });
+    } else {
+      // If passwords match, let the formAction proceed
+      // formAction is already attached to the form, so it will be called
+    }
+  };
+
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-background p-4">
@@ -36,7 +55,7 @@ export default function RegisterPage() {
           <CardDescription>Preencha os campos abaixo para se registrar.</CardDescription>
         </CardHeader>
         <CardContent>
-          <form action={formAction} className="space-y-6">
+          <form action={formAction} onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input id="email" name="email" type="email" placeholder="seu@email.com" required 

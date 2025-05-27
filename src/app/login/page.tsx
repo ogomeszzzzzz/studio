@@ -1,9 +1,8 @@
 
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useActionState } from 'react'; // Changed import
 import { useRouter } from 'next/navigation';
-import { useFormState } from 'react-dom';
 import { signInWithEmailAndPassword, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
@@ -33,7 +32,7 @@ async function loginUserAction(prevState: any, formData: FormData) {
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const [state, formAction] = useFormState(loginUserAction, { message: '', status: '' });
+  const [state, formAction] = useActionState(loginUserAction, { message: '', status: '' }); // Changed hook
 
  useEffect(() => {
     const unsubscribe = onAuthStateChanged(clientAuth, (user) => {
@@ -43,7 +42,7 @@ export default function LoginPage() {
       }
     });
     return () => unsubscribe();
-  }, [router]);
+  }, [router]); // Added router to dependency array as it's used in checkApprovalAndRedirect
 
 
   const checkApprovalAndRedirect = async (user: FirebaseUser) => {
