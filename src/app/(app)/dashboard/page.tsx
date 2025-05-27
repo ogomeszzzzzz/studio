@@ -1,18 +1,20 @@
 
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import {
   BarChartBig, ShoppingBag, AlertTriangle, FileSpreadsheet,
-  Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler
+  Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler,
+  Download, Loader2 // Adicionado Download e Loader2
 } from 'lucide-react';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import type { Product } from '@/types';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
-import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart"
+import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart";
+import { useToast } from '@/hooks/use-toast'; // Adicionado useToast
 
 interface AggregatedCollectionData {
   name: string;
@@ -21,22 +23,22 @@ interface AggregatedCollectionData {
 }
 
 interface AggregatedSizeData {
-  name: string; // Size name e.g. 'P', 'M', or from Excel 'Tamanho'
+  name: string;
   stock: number;
 }
 
 interface AggregatedPrintData {
-  name: string; // Print/Pattern Description from Excel 'Descrição'
-  stock: number;
-}
-interface AggregatedProductTypeData {
-  name: string; // Product Type from Excel 'Tipo. Produto'
+  name: string;
   stock: number;
 }
 
+interface AggregatedProductTypeData {
+  name: string;
+  stock: number;
+}
 
 interface ZeroStockData {
-  name: string; // Collection name
+  name: string;
   count: number;
 }
 
@@ -50,18 +52,18 @@ const chartConfigBase = {
   count: {
     label: "Contagem",
   }
-} satisfies ChartConfig
+} satisfies ChartConfig;
 
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
-
 
 export default function DashboardPage() {
   const [dashboardProducts, setDashboardProducts] = useState<Product[]>([]);
   const [isProcessingExcel, setIsProcessingExcel] = useState(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false); // Estado para o PDF
+  const { toast } = useToast(); // Hook para notificações
 
   const handleDashboardDataParsed = useCallback((data: Product[]) => {
     setDashboardProducts(data);
-    // Diagnostic log:
     if (data.length > 0) {
       console.log("--- DIAGNÓSTICO ESTAMPA ---");
       console.log("Amostra dos valores de 'product.description' lidos do Excel (deveriam ser as estampas da coluna 'Descrição'):");
@@ -93,7 +95,7 @@ export default function DashboardPage() {
 
     const stockByCollectionMap = new Map<string, { stock: number; skus: number }>();
     const stockBySizeMap = new Map<string, { stock: number }>();
-    const stockByPrintMap = new Map<string, { stock: number }>(); // Uses product.description
+    const stockByPrintMap = new Map<string, { stock: number }>();
     const stockByProductTypeMap = new Map<string, { stock: number }>();
     const zeroStockSkusByCollectionMap = new Map<string, { count: number }>();
 
@@ -109,28 +111,23 @@ export default function DashboardPage() {
       const printKey = product.description || 'Não Especificada'; // From Excel 'Descrição' - FOR STAMPS
       const typeKey = product.productType || 'Não Especificado'; // From Excel 'Tipo. Produto'
 
-      // Stock by Collection ('Descrição Linha Comercial')
       const currentCol = stockByCollectionMap.get(collectionKey) || { stock: 0, skus: 0 };
       currentCol.stock += product.stock;
       currentCol.skus += 1;
       stockByCollectionMap.set(collectionKey, currentCol);
 
-      // Stock by Size (from Excel 'Tamanho')
       const currentSize = stockBySizeMap.get(sizeKey) || { stock: 0 };
       currentSize.stock += product.stock;
       stockBySizeMap.set(sizeKey, currentSize);
 
-      // Stock by Print (product.description, from Excel 'Descrição')
       const currentPrint = stockByPrintMap.get(printKey) || { stock: 0 };
       currentPrint.stock += product.stock;
       stockByPrintMap.set(printKey, currentPrint);
 
-      // Stock by Product Type (from Excel 'Tipo. Produto')
       const currentType = stockByProductTypeMap.get(typeKey) || { stock: 0 };
       currentType.stock += product.stock;
       stockByProductTypeMap.set(typeKey, currentType);
 
-      // Zero Stock SKUs
       if (product.stock === 0) {
         const currentZeroCol = zeroStockSkusByCollectionMap.get(collectionKey) || { count: 0 };
         currentZeroCol.count += 1;
@@ -145,7 +142,7 @@ export default function DashboardPage() {
     return {
       stockByCollection: Array.from(stockByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
       stockBySize: Array.from(stockBySizeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
-      stockByPrint: Array.from(stockByPrintMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock).slice(0, 15), // Top 15 prints
+      stockByPrint: Array.from(stockByPrintMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock).slice(0, 15),
       stockByProductType: Array.from(stockByProductTypeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
       zeroStockSkusByCollection: Array.from(zeroStockSkusByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.count - a.count),
       totalStock,
@@ -173,6 +170,128 @@ export default function DashboardPage() {
   const stockByProductTypeChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByProductType), [aggregatedData.stockByProductType]);
   const zeroStockSkusChartConfig = useMemo(() => createChartConfig(aggregatedData.zeroStockSkusByCollection), [aggregatedData.zeroStockSkusByCollection]);
 
+  const generateDashboardPdf = async () => {
+    if (dashboardProducts.length === 0) {
+      toast({ title: "Sem Dados", description: "Carregue dados antes de gerar o PDF.", variant: "destructive" });
+      return;
+    }
+
+    setIsGeneratingPdf(true);
+    toast({ title: "Gerando PDF...", description: "Por favor, aguarde." });
+
+    try {
+      const { default: jsPDF } = await import('jspdf');
+      const { default: html2canvas } = await import('html2canvas');
+      const { default: autoTable } = await import('jspdf-autotable');
+
+      const doc = new jsPDF('p', 'mm', 'a4');
+      let yPos = 15;
+      const pageHeight = doc.internal.pageSize.height;
+      const pageWidth = doc.internal.pageSize.width;
+      const margin = 10;
+      const contentWidth = pageWidth - 2 * margin;
+
+      doc.setFontSize(18);
+      doc.text("Relatório do Dashboard de Performance", pageWidth / 2, yPos, { align: "center" });
+      yPos += 10;
+
+      doc.setFontSize(10);
+      doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`, pageWidth / 2, yPos, { align: "center" });
+      yPos += 10;
+
+      doc.setFontSize(12);
+      doc.text("Resumo Geral:", margin, yPos);
+      yPos += 6;
+
+      const summaryTableBody = [
+        ["Estoque Total", aggregatedData.totalStock.toLocaleString()],
+        ["Pronta Entrega", aggregatedData.totalReadyToShipStock.toLocaleString()],
+        ["Pedidos", aggregatedData.totalOrderedStock.toLocaleString()],
+        ["Total SKUs", aggregatedData.totalSkus.toLocaleString()],
+        ["Total SKUs Zerados", aggregatedData.totalZeroStockSkus.toLocaleString()],
+      ];
+
+      autoTable(doc, {
+        startY: yPos,
+        head: [["Métrica", "Valor"]],
+        body: summaryTableBody,
+        theme: 'grid',
+        styles: { fontSize: 9, cellPadding: 1.5 },
+        headStyles: { fillColor: [63, 81, 181], textColor: 255, fontSize: 10 },
+        margin: { left: margin, right: margin },
+      });
+      yPos = (doc as any).lastAutoTable.finalY + 10;
+
+      const addChartToPdf = async (elementId: string, title: string) => {
+        if (yPos > pageHeight - 50) { 
+          doc.addPage();
+          yPos = margin + 5;
+        }
+        doc.setFontSize(13);
+        doc.text(title, margin, yPos);
+        yPos += 6;
+
+        const chartElement = document.getElementById(elementId);
+        if (chartElement) {
+          try {
+            const canvas = await html2canvas(chartElement, { scale: 1.5, useCORS: true, logging: false });
+            const imgData = canvas.toDataURL('image/png', 0.9); // Slightly compress PNG
+            const imgProps = doc.getImageProperties(imgData);
+            let imgHeight = (imgProps.height * contentWidth) / imgProps.width;
+            let imgWidth = contentWidth;
+
+            // Ensure chart image is not excessively tall
+            const maxChartHeight = pageHeight * 0.4; // Max 40% of page height for a single chart
+            if (imgHeight > maxChartHeight) {
+                imgHeight = maxChartHeight;
+                imgWidth = (imgProps.width * imgHeight) / imgProps.height;
+            }
+
+
+            if (yPos + imgHeight > pageHeight - margin) {
+              doc.addPage();
+              yPos = margin;
+            }
+            doc.addImage(imgData, 'PNG', margin, yPos, imgWidth, imgHeight);
+            yPos += imgHeight + 7;
+          } catch (error) {
+            console.error(`Error capturing chart ${elementId}:`, error);
+            doc.setTextColor(255,0,0); // Red color for error message
+            doc.text(`Erro ao renderizar o gráfico: ${title}`, margin, yPos);
+            doc.setTextColor(0); // Reset to black
+            yPos += 7;
+          }
+        } else {
+          console.warn(`Chart element with ID ${elementId} not found.`);
+          doc.setTextColor(200,0,0);
+          doc.text(`Gráfico "${title}" não encontrado.`, margin, yPos);
+          doc.setTextColor(0);
+          yPos +=7;
+        }
+      };
+
+      const chartIdsAndTitles = [
+        { id: 'chart-stock-by-collection', title: 'Estoque por Descrição Linha Comercial' },
+        { id: 'chart-stock-by-size', title: 'Estoque por Tamanho (Excel)' },
+        { id: 'chart-stock-by-print', title: 'Estoque por Estampa (Top 15 - Coluna Descrição)' },
+        { id: 'chart-stock-by-product-type', title: 'Estoque por Tipo de Produto (Coluna Tipo. Produto)' },
+        { id: 'chart-zero-stock-skus', title: 'SKUs Zerados por Descrição Linha Comercial' },
+      ];
+
+      for (const chartInfo of chartIdsAndTitles) {
+        await addChartToPdf(chartInfo.id, chartInfo.title);
+      }
+
+      doc.save(`relatorio_dashboard_${new Date().toISOString().split('T')[0]}.pdf`);
+      toast({ title: "PDF Gerado!", description: "O download do relatório foi iniciado." });
+    } catch (error) {
+      console.error("Erro ao gerar PDF:", error);
+      toast({ title: "Erro ao Gerar PDF", description: "Não foi possível gerar o relatório. Verifique o console.", variant: "destructive" });
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
 
   return (
     <div className="space-y-8">
@@ -181,19 +300,29 @@ export default function DashboardPage() {
           <h1 className="text-3xl font-bold tracking-tight text-foreground">Dashboard de Performance</h1>
           <p className="text-muted-foreground">Visão geral dos dados da sua coleção com base na coluna "Descrição Linha Comercial".</p>
         </div>
-        <Link href="/collection-analyzer">
-          <Button>
-            <BarChartBig className="mr-2 h-5 w-5" />
-            Ir para Gap Analyzer
+        <div className="flex gap-2">
+          <Button onClick={generateDashboardPdf} disabled={isGeneratingPdf || dashboardProducts.length === 0}>
+            {isGeneratingPdf ? (
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+            ) : (
+              <Download className="mr-2 h-5 w-5" />
+            )}
+            Baixar Relatório PDF
           </Button>
-        </Link>
+          <Link href="/collection-analyzer">
+            <Button>
+              <BarChartBig className="mr-2 h-5 w-5" />
+              Ir para Gap Analyzer
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <ExcelUploadSection
         onDataParsed={handleDashboardDataParsed}
         onProcessingStart={handleProcessingStart}
         onProcessingEnd={handleProcessingEnd}
-        collectionColumnKey="Descrição Linha Comercial" // For collection grouping on dashboard
+        collectionColumnKey="Descrição Linha Comercial"
         cardTitle="Upload de Dados para Dashboard"
         cardDescription="Carregue o arquivo Excel. A coluna 'Descrição Linha Comercial' será usada para agrupar coleções neste dashboard."
       />
@@ -208,7 +337,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       )}
-
 
       {dashboardProducts.length > 0 && (
         <>
@@ -266,7 +394,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-2">
-            <Card className="shadow-lg hover:shadow-xl transition-shadow">
+            <Card id="chart-stock-by-collection" className="shadow-lg hover:shadow-xl transition-shadow">
               <CardHeader>
                 <CardTitle className="flex items-center"><ShoppingBag className="mr-2 h-5 w-5 text-primary" />Estoque por Descrição Linha Comercial</CardTitle>
                 <CardDescription>Distribuição de estoque e SKUs pela coluna "Descrição Linha Comercial" do Excel.</CardDescription>
@@ -291,9 +419,9 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
 
-            <Card className="shadow-lg hover:shadow-xl transition-shadow">
+            <Card id="chart-stock-by-size" className="shadow-lg hover:shadow-xl transition-shadow">
               <CardHeader>
-                <CardTitle className="flex items-center"><Ruler className="mr-2 h-5 w-5 text-accent" />Estoque por Tamanho</CardTitle>
+                <CardTitle className="flex items-center"><Ruler className="mr-2 h-5 w-5 text-accent" />Estoque por Tamanho (Excel)</CardTitle>
                 <CardDescription>Distribuição de estoque por tamanho de produto (coluna "Tamanho" do Excel).</CardDescription>
               </CardHeader>
               <CardContent className="h-[400px]">
@@ -318,10 +446,10 @@ export default function DashboardPage() {
           </div>
 
           <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-2">
-            <Card className="shadow-lg hover:shadow-xl transition-shadow">
+            <Card id="chart-stock-by-print" className="shadow-lg hover:shadow-xl transition-shadow">
               <CardHeader>
-                <CardTitle className="flex items-center"><Palette className="mr-2 h-5 w-5" style={{color: 'hsl(var(--chart-4))'}} />Estoque por Estampa (Top 15)</CardTitle>
-                <CardDescription>Distribuição de estoque pelas principais estampas (coluna "Descrição" do Excel).</CardDescription>
+                <CardTitle className="flex items-center"><Palette className="mr-2 h-5 w-5" style={{color: 'hsl(var(--chart-4))'}} />Estoque por Estampa (Top 15 - Coluna Descrição)</CardTitle>
+                <CardDescription>Distribuição de estoque pelas principais estampas (extraído da coluna H: 'Descrição' do Excel).</CardDescription>
               </CardHeader>
               <CardContent className="h-[400px]">
                 {aggregatedData.stockByPrint.length > 0 ? (
@@ -341,9 +469,9 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
 
-            <Card className="shadow-lg hover:shadow-xl transition-shadow">
+            <Card id="chart-stock-by-product-type" className="shadow-lg hover:shadow-xl transition-shadow">
               <CardHeader>
-                <CardTitle className="flex items-center"><Box className="mr-2 h-5 w-5" style={{color: 'hsl(var(--chart-5))'}} />Estoque por Tipo de Produto</CardTitle>
+                <CardTitle className="flex items-center"><Box className="mr-2 h-5 w-5" style={{color: 'hsl(var(--chart-5))'}} />Estoque por Tipo de Produto (Coluna Tipo. Produto)</CardTitle>
                 <CardDescription>Distribuição de estoque por tipo de produto (coluna "Tipo. Produto" do Excel).</CardDescription>
               </CardHeader>
               <CardContent className="h-[400px]">
@@ -367,7 +495,7 @@ export default function DashboardPage() {
             </Card>
           </div>
 
-          <Card className="shadow-lg hover:shadow-xl transition-shadow">
+          <Card id="chart-zero-stock-skus" className="shadow-lg hover:shadow-xl transition-shadow">
             <CardHeader>
               <CardTitle className="flex items-center"><TrendingDown className="mr-2 h-5 w-5 text-destructive" />SKUs Zerados por Descrição Linha Comercial</CardTitle>
               <CardDescription>Contagem de SKUs com estoque zero em cada descrição linha comercial (coluna "Descrição Linha Comercial" do Excel).</CardDescription>
