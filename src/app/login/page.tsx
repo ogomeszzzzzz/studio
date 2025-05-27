@@ -4,7 +4,7 @@
 import { useEffect, useActionState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signInWithEmailAndPassword, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import type { FirebaseError } from 'firebase/app'; // Import FirebaseError type
+import { FirebaseError } from 'firebase/app'; // Changed from import type
 import { doc, getDoc } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
