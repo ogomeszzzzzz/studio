@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { Product } from '@/types';
 import { format, isValid, addDays, isBefore } from 'date-fns';
-import { ArrowUpDown, ListChecks, ChevronLeft, ChevronRight, PackageSearch } from 'lucide-react';
+import { ArrowUpDown, ListChecks, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
@@ -25,6 +25,9 @@ interface ProductDataTableSectionProps {
   showStartDateColumn?: boolean;
   showEndDateColumn?: boolean;
   showStatusColumn?: boolean;
+  showDescriptionColumn?: boolean; // Estampa
+  showSizeColumn?: boolean;
+  showProductTypeColumn?: boolean;
   cardTitle?: string;
   cardIcon?: React.ElementType;
 }
@@ -37,7 +40,7 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
   today.setHours(0,0,0,0); 
 
   if (product.collectionEndDate && isValid(product.collectionEndDate)) {
-    const endDate = new Date(product.collectionEndDate); // Ensure it's a Date object
+    const endDate = new Date(product.collectionEndDate); 
     endDate.setHours(0,0,0,0); 
 
     if (isBefore(endDate, today)) {
@@ -72,6 +75,9 @@ export function ProductDataTableSection({
   showStartDateColumn = true,
   showEndDateColumn = true,
   showStatusColumn = true,
+  showDescriptionColumn = false, // Estampa
+  showSizeColumn = false,
+  showProductTypeColumn = false,
   cardTitle = "Dados dos Produtos",
   cardIcon: CardIcon = ListChecks,
 }: ProductDataTableSectionProps) {
@@ -82,8 +88,8 @@ export function ProductDataTableSection({
   const sortedProducts = useMemo(() => {
     if (!sortKey) return products;
     return [...products].sort((a, b) => {
-      const valA = a[sortKey];
-      const valB = b[sortKey];
+      const valA = a[sortKey as keyof Product]; // Explicit cast
+      const valB = b[sortKey as keyof Product]; // Explicit cast
 
       let comparison = 0;
       if (valA instanceof Date && valB instanceof Date) {
@@ -93,7 +99,7 @@ export function ProductDataTableSection({
       } else if (typeof valA === 'string' && typeof valB === 'string') {
         comparison = valA.localeCompare(valB);
       } else if (typeof valA === 'boolean' && typeof valB === 'boolean') {
-        comparison = valA === valB ? 0 : (valA ? -1 : 1)
+        comparison = valA === valB ? 0 : (valA ? -1 : 1);
       }
 
 
@@ -125,7 +131,7 @@ export function ProductDataTableSection({
 
 
   const handleSort = (key: SortKey) => {
-    if (!key) return; // Do not sort if key is empty (e.g. for columns that shouldn't be sortable)
+    if (!key) return; 
     if (sortKey === key) {
       setSortOrder(prevOrder => (prevOrder === 'asc' ? 'desc' : 'asc'));
     } else {
@@ -154,7 +160,10 @@ export function ProductDataTableSection({
         (showCollectionColumn ? 1 : 0) +
         (showStartDateColumn ? 1 : 0) +
         (showEndDateColumn ? 1 : 0) +
-        (showStatusColumn ? 1 : 0) || 1 // At least 1 colSpan
+        (showStatusColumn ? 1 : 0) +
+        (showDescriptionColumn ? 1 : 0) +
+        (showSizeColumn ? 1 : 0) +
+        (showProductTypeColumn ? 1 : 0) || 1 
       }>
         <div className="space-y-2">
           {[...Array(5)].map((_, i) => (
@@ -179,7 +188,7 @@ export function ProductDataTableSection({
       </CardHeader>
       <CardContent>
         {(products.length === 0 && !isLoading) ? (
-          <p className="text-center text-muted-foreground py-8">Nenhum dado de produto para exibir. Faça o upload de um arquivo Excel e processe-o.</p>
+          <p className="text-center text-muted-foreground py-8">Nenhum dado de produto para exibir. Faça o upload de um arquivo Excel e processe-o, ou ajuste os filtros.</p>
         ) : (
           <>
             <div className="overflow-x-auto">
@@ -192,6 +201,9 @@ export function ProductDataTableSection({
                     {showReadyToShipColumn && <TableHead onClick={() => handleSort('readyToShip')} className="cursor-pointer hover:bg-muted/50 text-right">Pronta Entrega {renderSortIcon('readyToShip')}</TableHead>}
                     {showOrderColumn && <TableHead onClick={() => handleSort('order')} className="cursor-pointer hover:bg-muted/50 text-right">Pedido {renderSortIcon('order')}</TableHead>}
                     {showCollectionColumn && <TableHead onClick={() => handleSort('collection')} className="cursor-pointer hover:bg-muted/50">Coleção {renderSortIcon('collection')}</TableHead>}
+                    {showDescriptionColumn && <TableHead onClick={() => handleSort('description')} className="cursor-pointer hover:bg-muted/50">Estampa {renderSortIcon('description')}</TableHead>}
+                    {showSizeColumn && <TableHead onClick={() => handleSort('size')} className="cursor-pointer hover:bg-muted/50">Tamanho {renderSortIcon('size')}</TableHead>}
+                    {showProductTypeColumn && <TableHead onClick={() => handleSort('productType')} className="cursor-pointer hover:bg-muted/50">Tipo Produto {renderSortIcon('productType')}</TableHead>}
                     {showStartDateColumn && <TableHead onClick={() => handleSort('collectionStartDate')} className="cursor-pointer hover:bg-muted/50">Data Início {renderSortIcon('collectionStartDate')}</TableHead>}
                     {showEndDateColumn && <TableHead onClick={() => handleSort('collectionEndDate')} className="cursor-pointer hover:bg-muted/50">Data Fim {renderSortIcon('collectionEndDate')}</TableHead>}
                     {showStatusColumn && <TableHead>Status</TableHead>}
@@ -201,13 +213,16 @@ export function ProductDataTableSection({
                   {isLoading ? <TableSkeleton /> : paginatedProducts.map((product, index) => {
                     const status = getCollectionStatus(product);
                     return (
-                      <TableRow key={`${product.vtexId}-${index}-${currentPage}`}>
+                      <TableRow key={`${product.vtexId}-${product.name}-${index}-${currentPage}`}>
                         {showVtexIdColumn && <TableCell>{product.vtexId}</TableCell>}
                         {showNameColumn && <TableCell className="font-medium">{product.name}</TableCell>}
                         {showStockColumn && <TableCell className="text-right">{product.stock}</TableCell>}
                         {showReadyToShipColumn && <TableCell className="text-right">{product.readyToShip}</TableCell>}
                         {showOrderColumn && <TableCell className="text-right">{product.order}</TableCell>}
                         {showCollectionColumn && <TableCell>{product.collection}</TableCell>}
+                        {showDescriptionColumn && <TableCell>{product.description}</TableCell>}
+                        {showSizeColumn && <TableCell>{product.size}</TableCell>}
+                        {showProductTypeColumn && <TableCell>{product.productType}</TableCell>}
                         {showStartDateColumn && <TableCell>
                           {product.collectionStartDate && isValid(new Date(product.collectionStartDate))
                             ? format(new Date(product.collectionStartDate), 'dd/MM/yyyy')
@@ -260,3 +275,5 @@ export function ProductDataTableSection({
     </Card>
   );
 }
+
+    
