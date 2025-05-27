@@ -2,8 +2,8 @@
 'use server';
 
 import { randomBytes } from 'crypto';
-import { UserProfile } from '@/types';
-import { adminAuth, adminFirestore } from '@/lib/firebase/config';
+import type { UserProfile } from '@/types';
+import { adminAuth, adminFirestore } from '@/lib/firebase/adminConfig'; // Updated import
 import { sendMail } from '@/lib/nodemailer';
 import {FieldValue} from 'firebase-admin/firestore';
 
@@ -26,7 +26,8 @@ export async function registerUser(prevState: any, formData: FormData) {
   }
 
   if (!adminAuth || !adminFirestore) {
-    return { message: 'Configuração do servidor Firebase ausente.', status: 'error' };
+    console.error('Firebase Admin not initialized. adminAuth:', !!adminAuth, 'adminFirestore:', !!adminFirestore);
+    return { message: 'Configuração do servidor Firebase ausente. Verifique os logs do servidor.', status: 'error' };
   }
 
   try {
@@ -73,7 +74,8 @@ export async function registerUser(prevState: any, formData: FormData) {
 
 export async function approveUserByToken(token: string): Promise<{ success: boolean; message: string }> {
   if (!adminFirestore || !adminAuth) {
-    return { success: false, message: 'Configuração do servidor Firebase ausente.' };
+     console.error('Firebase Admin not initialized for approval. adminAuth:', !!adminAuth, 'adminFirestore:', !!adminFirestore);
+    return { success: false, message: 'Configuração do servidor Firebase ausente. Verifique os logs do servidor.' };
   }
   try {
     const usersRef = adminFirestore.collection('users');
