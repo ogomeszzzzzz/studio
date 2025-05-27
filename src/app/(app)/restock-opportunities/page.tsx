@@ -99,7 +99,7 @@ export default function RestockOpportunitiesPage() {
     
     tempFiltered = tempFiltered.filter(p => 
         p.stock <= currentThreshold && 
-        (p.readyToShip > 0 || p.regulatorStock > 0) // Usando regulatorStock
+        (p.readyToShip > 0 || p.regulatorStock > 0)
     );
     
     setFilteredProducts(tempFiltered);
@@ -116,18 +116,15 @@ export default function RestockOpportunitiesPage() {
     applyAllFilters();
    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allProducts, lowStockThreshold, baseFilters]); // Adicionado baseFilters
+  }, [allProducts, lowStockThreshold, baseFilters]);
 
   const handleProcessingStart = () => setIsLoading(true);
   const handleProcessingEnd = () => {
-    // Não chama applyAllFilters aqui, pois o useEffect já cuidará disso
-    // quando allProducts for atualizado. Apenas ajusta isLoading.
     setIsLoading(false); 
   };
 
   const summaryStats = useMemo(() => {
     const totalSkusToRestock = filteredProducts.length;
-    // Usando regulatorStock em vez de order
     const totalUnitsAvailableForRestock = filteredProducts.reduce((sum, p) => sum + p.readyToShip + p.regulatorStock, 0);
     const potentialStockAtRiskUnits = filteredProducts.reduce((sum, p) => {
       if (p.stock === 0) return sum + p.readyToShip + p.regulatorStock; 
@@ -157,8 +154,8 @@ export default function RestockOpportunitiesPage() {
       "Produto-Derivação": p.productDerivation,
       "Estoque Atual": p.stock,
       "Pronta Entrega": p.readyToShip,
-      "Regulador": p.regulatorStock, // Exportando Regulator
-      "Coleção (Desc. Linha Comercial)": p.collection, // Coleção vindo de "Descrição Linha Comercial"
+      "Regulador": p.regulatorStock,
+      "Coleção (Desc. Linha Comercial)": p.collection,
       "Descrição (Estampa)": p.description, 
       "Tamanho": p.size,
       "Tipo Produto": p.productType,
@@ -194,7 +191,7 @@ export default function RestockOpportunitiesPage() {
         onDataParsed={handleDataParsed} 
         onProcessingStart={handleProcessingStart}
         onProcessingEnd={handleProcessingEnd}
-        collectionColumnKey="Descrição Linha Comercial" // Usando Descrição Linha Comercial para 'collection'
+        collectionColumnKey="Descrição Linha Comercial"
         cardTitle="1. Carregar Dados do Excel"
         cardDescription="Faça o upload da planilha de produtos. A coluna 'Descrição Linha Comercial' será usada para 'Coleção'."
       />
@@ -243,7 +240,7 @@ export default function RestockOpportunitiesPage() {
                     </Button>
                 </div>
                 <FilterControlsSection
-                    products={allProducts} // Passando allProducts para popular as coleções disponíveis
+                    products={allProducts}
                     onFilterChange={handleBaseFilterChange}
                     availableCollections={availableCollections}
                 />
@@ -311,9 +308,9 @@ export default function RestockOpportunitiesPage() {
                     showProductDerivationColumn={true} 
                     showStockColumn={true}
                     showReadyToShipColumn={true}
-                    showRegulatorStockColumn={true} // Mostrando Regulador
-                    showCollectionColumn={true} // Coleção virá de Descrição Linha Comercial
-                    showDescriptionColumn={false} // Estampa não é prioritária aqui
+                    showRegulatorStockColumn={true}
+                    showCollectionColumn={true}
+                    showDescriptionColumn={false} 
                     showSizeColumn={true}        
                     showProductTypeColumn={true} 
                     showStartDateColumn={false} 
@@ -360,3 +357,5 @@ export default function RestockOpportunitiesPage() {
     </div>
   );
 }
+
+    
