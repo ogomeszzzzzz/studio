@@ -28,7 +28,7 @@ interface ProductDataTableSectionProps {
   showDescriptionColumn?: boolean; // Estampa
   showSizeColumn?: boolean;
   showProductTypeColumn?: boolean;
-  showProductDerivationColumn?: boolean; // Nova coluna
+  showProductDerivationColumn?: boolean; 
   cardTitle?: string;
   cardIcon?: React.ElementType;
 }
@@ -79,7 +79,7 @@ export function ProductDataTableSection({
   showDescriptionColumn = false, 
   showSizeColumn = false,
   showProductTypeColumn = false,
-  showProductDerivationColumn = false, // Prop para nova coluna
+  showProductDerivationColumn = false,
   cardTitle = "Dados dos Produtos",
   cardIcon: CardIcon = ListChecks,
 }: ProductDataTableSectionProps) {
@@ -159,7 +159,7 @@ export function ProductDataTableSection({
       <TableCell colSpan={
         (showVtexIdColumn ? 1 : 0) +
         (showNameColumn ? 1 : 0) +
-        (showProductDerivationColumn ? 1: 0) + // Contar nova coluna
+        (showProductDerivationColumn ? 1: 0) +
         (showStockColumn ? 1 : 0) +
         (showReadyToShipColumn ? 1 : 0) +
         (showOrderColumn ? 1 : 0) +
