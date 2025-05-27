@@ -9,7 +9,7 @@ export interface Product {
   readyToShip: number; // Changed to number
   order: number; // Changed to number
   description: string; // Represents print/pattern
-  size?: string;
+  size?: string; // Original size from Excel, will be overridden for chart by identifiedSize
   complement?: string;
   commercialLine: string; // Now consistently populated
   collection: string; // This field's source (e.g. 'COLEÇÃO' or 'Linha Comercial') is determined by parser arg
@@ -23,6 +23,7 @@ export interface Product {
   rawCollectionStartDate?: string;
   rawCollectionEndDate?: string;
   identifiedType?: string; // For AI-identified product type
+  identifiedSize?: string; // For AI-identified product size
 }
 
 export interface FilterState {
@@ -46,4 +47,10 @@ export interface UserProfile {
 export interface CategorizedProduct {
   originalName: string;
   identifiedType: string;
+}
+
+// For AI Product Size Identification
+export interface CategorizedProductSize {
+  originalName: string;
+  identifiedSize: string;
 }

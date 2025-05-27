@@ -7,13 +7,13 @@ import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { 
   BarChartBig, ShoppingBag, PackageSearch, AlertTriangle, FileSpreadsheet, 
-  Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Cpu, Loader2
+  Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Cpu, Ruler, Loader2
 } from 'lucide-react';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
-import type { Product, CategorizedProduct } from '@/types';
+import type { Product, CategorizedProduct, CategorizedProductSize } from '@/types';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, PieChart, Pie, Cell, CartesianGrid } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart"
-import { getAIProductCategorization } from '@/app/actions/product-analysis';
+import { getAIProductCategorization, getAIProductSizeCategorization } from '@/app/actions/product-analysis';
 import { useToast } from '@/hooks/use-toast';
 
 interface AggregatedCollectionData {
@@ -23,7 +23,7 @@ interface AggregatedCollectionData {
 }
 
 interface AggregatedSizeData {
-  name: string; // Size name e.g. 'P', 'M'
+  name: string; // Size name e.g. 'P', 'M', or AI identified size
   stock: number;
 }
 
@@ -60,13 +60,19 @@ const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3
 export default function DashboardPage() {
   const [dashboardProducts, setDashboardProducts] = useState<Product[]>([]);
   const [isProcessingExcel, setIsProcessingExcel] = useState(false);
+  
   const [categorizedProductTypes, setCategorizedProductTypes] = useState<CategorizedProduct[]>([]);
   const [isCategorizingProducts, setIsCategorizingProducts] = useState(false);
+  
+  const [categorizedProductSizes, setCategorizedProductSizes] = useState<CategorizedProductSize[]>([]);
+  const [isCategorizingSizes, setIsCategorizingSizes] = useState(false);
+  
   const { toast } = useToast();
 
   const handleDashboardDataParsed = useCallback((data: Product[]) => {
     setDashboardProducts(data);
     setCategorizedProductTypes([]); // Reset AI categories when new data is loaded
+    setCategorizedProductSizes([]); // Reset AI sizes when new data is loaded
   }, []);
 
   const handleProcessingStart = () => setIsProcessingExcel(true);
@@ -74,18 +80,17 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (dashboardProducts.length > 0) {
+      const productNames = dashboardProducts.map(p => p.name).filter(name => name && name.trim() !== '');
+      if (productNames.length === 0) {
+        return;
+      }
+
       const fetchProductCategories = async () => {
         setIsCategorizingProducts(true);
-        const productNames = dashboardProducts.map(p => p.name).filter(name => name && name.trim() !== '');
-        if (productNames.length === 0) {
-          setIsCategorizingProducts(false);
-          return;
-        }
-        
         const result = await getAIProductCategorization(productNames);
         if ('error' in result) {
           toast({
-            title: "Erro na Categorização por IA",
+            title: "Erro na Categorização de Tipos por IA",
             description: result.error,
             variant: "destructive",
           });
@@ -93,28 +98,66 @@ export default function DashboardPage() {
         } else {
           setCategorizedProductTypes(result.categorizedProducts);
            toast({
-            title: "Categorização por IA Concluída",
+            title: "Categorização de Tipos por IA Concluída",
             description: `${result.categorizedProducts.length} tipos de produtos identificados.`,
           });
         }
         setIsCategorizingProducts(false);
       };
+
+      const fetchProductSizes = async () => {
+        setIsCategorizingSizes(true);
+        const result = await getAIProductSizeCategorization(productNames);
+        if ('error' in result) {
+           toast({
+            title: "Erro na Categorização de Tamanhos por IA",
+            description: result.error,
+            variant: "destructive",
+          });
+          setCategorizedProductSizes([]);
+        } else {
+          setCategorizedProductSizes(result.categorizedProductSizes);
+           toast({
+            title: "Categorização de Tamanhos por IA Concluída",
+            description: `${result.categorizedProductSizes.length} tamanhos de produtos identificados.`,
+          });
+        }
+        setIsCategorizingSizes(false);
+      };
+
       fetchProductCategories();
+      fetchProductSizes();
     }
   }, [dashboardProducts, toast]);
 
-  const productsWithAiTypes = useMemo(() => {
-    if (categorizedProductTypes.length === 0) return dashboardProducts;
-    const typeMap = new Map(categorizedProductTypes.map(item => [item.originalName, item.identifiedType]));
-    return dashboardProducts.map(product => ({
-      ...product,
-      identifiedType: typeMap.get(product.name) || 'Outros'
-    }));
-  }, [dashboardProducts, categorizedProductTypes]);
+  const productsWithAiDetails = useMemo(() => {
+    let tempProducts = [...dashboardProducts];
+    
+    if (categorizedProductTypes.length > 0) {
+      const typeMap = new Map(categorizedProductTypes.map(item => [item.originalName, item.identifiedType]));
+      tempProducts = tempProducts.map(product => ({
+        ...product,
+        identifiedType: typeMap.get(product.name) || 'Outros (Tipo)'
+      }));
+    } else {
+        tempProducts = tempProducts.map(product => ({...product, identifiedType: 'Não Categorizado (IA)'}));
+    }
+
+    if (categorizedProductSizes.length > 0) {
+      const sizeMap = new Map(categorizedProductSizes.map(item => [item.originalName, item.identifiedSize]));
+      tempProducts = tempProducts.map(product => ({
+        ...product,
+        identifiedSize: sizeMap.get(product.name) || 'Outros (Tamanho)'
+      }));
+    } else {
+        tempProducts = tempProducts.map(product => ({...product, identifiedSize: 'Não Especificado (IA)'}));
+    }
+    return tempProducts;
+  }, [dashboardProducts, categorizedProductTypes, categorizedProductSizes]);
 
 
   const aggregatedData = useMemo(() => {
-    if (productsWithAiTypes.length === 0) {
+    if (productsWithAiDetails.length === 0) {
       return {
         stockByCollection: [],
         stockBySize: [],
@@ -130,20 +173,21 @@ export default function DashboardPage() {
     }
 
     const stockByCollectionMap = new Map<string, { stock: number; skus: number }>();
-    const stockBySizeMap = new Map<string, { stock: number }>();
+    const stockBySizeMap = new Map<string, { stock: number }>(); // Will use identifiedSize
     const stockByPrintMap = new Map<string, { stock: number }>();
     const stockByAiProductTypeMap = new Map<string, { stock: number }>();
     const zeroStockSkusByCollectionMap = new Map<string, { count: number }>();
     
     let totalStock = 0;
-    let totalSkus = productsWithAiTypes.length;
+    let totalSkus = productsWithAiDetails.length;
     let totalZeroStockSkus = 0;
     let totalReadyToShipStock = 0;
     let totalOrderedStock = 0;
 
-    productsWithAiTypes.forEach(product => {
+    productsWithAiDetails.forEach(product => {
       const collectionKey = product.collection || 'Não Especificada';
-      const sizeKey = product.size || 'Não Especificado';
+      // Use AI identified size, fallback to original size if AI not available, then 'Não Especificado (IA)'
+      const sizeKey = product.identifiedSize || product.size || 'Não Especificado (IA)';
       const printKey = product.description || 'Não Especificada'; // Using 'description' for print/pattern
       const aiTypeKey = product.identifiedType || 'Não Categorizado (IA)';
 
@@ -153,7 +197,7 @@ export default function DashboardPage() {
       currentCol.skus += 1;
       stockByCollectionMap.set(collectionKey, currentCol);
 
-      // Stock by Size
+      // Stock by Size (using AI identified size)
       const currentSize = stockBySizeMap.get(sizeKey) || { stock: 0 };
       currentSize.stock += product.stock;
       stockBySizeMap.set(sizeKey, currentSize);
@@ -192,7 +236,7 @@ export default function DashboardPage() {
       totalReadyToShipStock,
       totalOrderedStock,
     };
-  }, [productsWithAiTypes]);
+  }, [productsWithAiDetails]);
   
   // Chart Configs
   const createChartConfig = (data: {name: string}[]) => {
@@ -212,6 +256,7 @@ export default function DashboardPage() {
   const stockByAiProductTypeChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByAiProductType), [aggregatedData.stockByAiProductType]);
   const zeroStockSkusChartConfig = useMemo(() => createChartConfig(aggregatedData.zeroStockSkusByCollection), [aggregatedData.zeroStockSkusByCollection]);
 
+  const isAnyAICategorizationRunning = isCategorizingProducts || isCategorizingSizes;
 
   return (
     <div className="space-y-8">
@@ -248,22 +293,26 @@ export default function DashboardPage() {
         </Card>
       )}
       
-      {isCategorizingProducts && (
+      {isAnyAICategorizationRunning && (
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center">
               <Loader2 className="mr-2 h-5 w-5 animate-spin text-primary" />
-              Categorizando Produtos com IA...
+              Analisando Produtos com IA...
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-muted-foreground">Aguarde enquanto a inteligência artificial analisa e categoriza os nomes dos produtos.</p>
+            <p className="text-muted-foreground">
+              Aguarde enquanto a inteligência artificial analisa e categoriza os nomes dos produtos por tipo e tamanho.
+              {isCategorizingProducts && " (Processando tipos...)"}
+              {isCategorizingSizes && " (Processando tamanhos...)"}
+            </p>
           </CardContent>
         </Card>
       )}
 
 
-      {productsWithAiTypes.length > 0 && (
+      {productsWithAiDetails.length > 0 && (
         <>
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             <Card className="shadow-lg hover:shadow-xl transition-shadow">
@@ -346,24 +395,34 @@ export default function DashboardPage() {
 
             <Card className="shadow-lg hover:shadow-xl transition-shadow">
               <CardHeader>
-                <CardTitle className="flex items-center"><PackageSearch className="mr-2 h-5 w-5 text-accent" />Estoque por Tamanho</CardTitle>
-                <CardDescription>Distribuição de estoque por tamanho de produto.</CardDescription>
+                <CardTitle className="flex items-center"><Ruler className="mr-2 h-5 w-5 text-accent" />Estoque por Tamanho (IA)</CardTitle>
+                <CardDescription>Distribuição de estoque por tamanho de produto identificado pela IA.</CardDescription>
               </CardHeader>
               <CardContent className="h-[400px]">
-                {aggregatedData.stockBySize.length > 0 ? (
+                {!isCategorizingSizes && aggregatedData.stockBySize.length > 0 ? (
                    <ChartContainer config={stockBySizeChartConfig} className="h-full w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={aggregatedData.stockBySize} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                        <BarChart data={aggregatedData.stockBySize} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" horizontal={false}/>
                             <XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/>
-                            <YAxis dataKey="name" type="category" width={60} tick={{fontSize: 12}}/>
+                            <YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/>
                             <Tooltip content={<ChartTooltipContent />} />
                             <Legend />
                             <Bar dataKey="stock" name="Estoque" fill="hsl(var(--accent))" radius={[0, 4, 4, 0]} />
                         </BarChart>
                     </ResponsiveContainer>
                    </ChartContainer>
-                ) : <p className="text-muted-foreground text-center pt-10">Sem dados de estoque por tamanho.</p>}
+                ) : !isCategorizingSizes && aggregatedData.stockBySize.length === 0 && productsWithAiDetails.length > 0 ? (
+                    <p className="text-muted-foreground text-center pt-10">Não foi possível categorizar os tamanhos por IA ou não há dados.</p>
+                ) : isCategorizingSizes ? (
+                    <div className="flex flex-col items-center justify-center h-full">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        <p className="mt-2 text-muted-foreground">Analisando tamanhos de produto...</p>
+                     </div>
+                ) : (
+                    <p className="text-muted-foreground text-center pt-10">Carregue dados para ver a análise por tamanho.</p>
+                )
+                }
               </CardContent>
             </Card>
           </div>
@@ -411,7 +470,7 @@ export default function DashboardPage() {
                         </BarChart>
                     </ResponsiveContainer>
                    </ChartContainer>
-                ) : !isCategorizingProducts && aggregatedData.stockByAiProductType.length === 0 && productsWithAiTypes.length > 0 ? (
+                ) : !isCategorizingProducts && aggregatedData.stockByAiProductType.length === 0 && productsWithAiDetails.length > 0 ? (
                      <p className="text-muted-foreground text-center pt-10">Não foi possível categorizar os produtos por IA ou não há dados.</p>
                 ): isCategorizingProducts ? (
                      <div className="flex flex-col items-center justify-center h-full">
