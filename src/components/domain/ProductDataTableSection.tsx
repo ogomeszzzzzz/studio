@@ -114,18 +114,19 @@ export function ProductDataTableSection({
     });
   }, [products, sortKey, sortOrder]);
 
+  const totalPages = Math.ceil(sortedProducts.length / itemsPerPage);
+
   useEffect(() => {
-    const newTotalPages = Math.ceil(sortedProducts.length / itemsPerPage);
-    if (currentPage > newTotalPages && newTotalPages > 0) {
-      setCurrentPage(newTotalPages);
-    } else if (newTotalPages === 0 && sortedProducts.length > 0) { 
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    } else if (totalPages === 0 && sortedProducts.length > 0) { 
       setCurrentPage(1);
-    } else if (newTotalPages === 0 && sortedProducts.length === 0) { 
+    } else if (totalPages === 0 && sortedProducts.length === 0) { 
       setCurrentPage(1);
-    } else if (currentPage === 0 && newTotalPages > 0) { 
+    } else if (currentPage === 0 && totalPages > 0) { 
         setCurrentPage(1);
     }
-  }, [sortedProducts, currentPage, itemsPerPage]);
+  }, [sortedProducts, currentPage, itemsPerPage, totalPages]);
 
 
   const paginatedProducts = useMemo(() => {
