@@ -5,7 +5,6 @@ import type { Product } from '@/types';
 
 const parseDate = (dateStr: string | number | undefined): Date | null => {
   if (typeof dateStr === 'number') {
-    // Handle Excel date serial numbers
     const excelEpoch = new Date(Date.UTC(1899, 11, 30));
     const excelDate = new Date(excelEpoch.getTime() + dateStr * 24 * 60 * 60 * 1000);
     if (isValid(excelDate)) return excelDate;
@@ -27,9 +26,49 @@ const toBoolean = (value: string | number | undefined): boolean => {
   return Boolean(value);
 };
 
-// collectionColumnKey: The key in the Excel row object to use for the 'collection' field.
-// Defaults to 'COLEÇÃO' for backward compatibility with Collection Analyzer.
-// For Dashboard, it will be 'Linha Comercial'.
+const KNOWN_PRODUCT_TYPES = [
+  "Jogo de Cama",
+  "Lençol Avulso",
+  "Lençol com Elástico",
+  "Lençol Superior",
+  "Fronha Avulsa",
+  "Cobre Leito",
+  "Kit Colcha",
+  "Jogo de Colcha",
+  "Protetor de Colchão",
+  "Protetor de Travesseiro",
+  "Saia para Cama Box",
+  "Porta Travesseiro",
+  "Toalha de Banho",
+  "Toalha de Rosto",
+  "Toalha de Piso",
+  // Single word types that should be prioritized if found alone or as start
+  "Edredom",
+  "Fronha",
+  "Travesseiro",
+  "Toalha",
+  "Roupão",
+  "Cortina",
+  "Almofada",
+  "Manta",
+  "Tapete"
+].sort((a, b) => b.length - a.length); // Sort by length descending to match longer phrases first
+
+const deriveProductType = (productName: string): string => {
+  if (!productName || typeof productName !== 'string') return 'Outros';
+  const nameUpper = productName.toUpperCase();
+
+  for (const type of KNOWN_PRODUCT_TYPES) {
+    if (nameUpper.startsWith(type.toUpperCase())) {
+      return type;
+    }
+  }
+  // Fallback to the first word if no known type matches
+  const firstWord = productName.split(' ')[0];
+  return firstWord || 'Outros';
+};
+
+
 export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇÃO'): Promise<Product[]> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -43,33 +82,31 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
         const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: false });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        // Use raw: false to get raw values, especially for dates, then parse them manually.
-        // defval: null ensures empty cells are null, not undefined, which can be more consistent.
         const jsonData = XLSX.utils.sheet_to_json<any>(worksheet, { raw: false, defval: null });
 
         const products: Product[] = jsonData.map((row: any) => {
           const startDate = parseDate(row['Início Coleção']);
           const endDate = parseDate(row['Fim Coleção']);
-          
-          // Determine the collection value based on the provided key
           const collectionValue = row[collectionColumnKey] ?? '';
+          const productName = row['Nome'] ?? '';
 
           return {
             vtexId: row['ID VTEX'] ?? '',
-            name: row['Nome'] ?? '',
+            name: productName,
             productId: row['Produto'] ?? undefined,
             derivation: row['Derivação'] ?? undefined,
             productDerivation: row['Produto-Derivação'] ?? undefined,
             stock: Number(row['Estoque']) || 0,
-            readyToShip: Number(row['Pronta Entrega']) || 0, // Convert to number
-            order: Number(row['Pedido']) || 0, // Convert to number
-            description: row['Descrição'] ?? '', // Keep as string for print/pattern
-            size: row['Tamanho'] ?? undefined,
+            readyToShip: Number(row['Pronta Entrega']) || 0,
+            order: Number(row['Pedido']) || 0,
+            description: row['Descrição'] ?? '', // For print/pattern
+            size: row['Tamanho'] ?? 'Não Especificado', // From Excel "Tamanho"
+            productType: deriveProductType(productName), // Derived from "Nome"
             complement: row['Compl.'] ?? undefined,
-            commercialLine: row['Linha Comercial'] ?? '', // Keep commercialLine populated
-            collection: collectionValue, // This is now dynamic
+            commercialLine: row['Linha Comercial'] ?? '',
+            collection: collectionValue,
             commercialLineDescription: row['Descrição Linha Comercial'] ?? undefined,
-            isCurrentCollection: toBoolean(row['Coleção Atual']), // This might need re-evaluation based on 'Linha Comercial' context
+            isCurrentCollection: toBoolean(row['Coleção Atual']),
             collectionStartDate: startDate,
             collectionEndDate: endDate,
             rawCollectionStartDate: row['Início Coleção'] ? String(row['Início Coleção']) : undefined,
