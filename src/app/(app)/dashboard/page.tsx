@@ -57,8 +57,6 @@ interface SkuStockStatusData {
   value: number;
 }
 
-type VtexIdStatusFilter = "all" | "withVtexId" | "withoutVtexId";
-
 const ALL_COLLECTIONS_VALUE = "_ALL_DASHBOARD_COLLECTIONS_";
 const FIRESTORE_BATCH_LIMIT = 450;
 
@@ -117,7 +115,7 @@ export default function DashboardPage() {
   const [isSavingFirestore, setIsSavingFirestore] = useState(false);
 
   const [selectedCollection, setSelectedCollection] = useState<string>(ALL_COLLECTIONS_VALUE);
-  const [vtexIdStatusFilterDashboard, setVtexIdStatusFilterDashboard] = useState<VtexIdStatusFilter>("all");
+  // Removed vtexIdStatusFilterDashboard state
 
 
   useEffect(() => {
@@ -237,19 +235,9 @@ export default function DashboardPage() {
     if (selectedCollection !== ALL_COLLECTIONS_VALUE) {
       products = products.filter(p => p.collection === selectedCollection);
     }
-
-    // INVERTED LOGIC: When "Com ID" is selected, show non-numbers. When "Sem ID" is selected, show numbers.
-    if (vtexIdStatusFilterDashboard === "withVtexId") { // "Com ID VTEX (Número)" should show items that ARE numbers. User says it's inverted.
-      products = products.filter(p => 
-        typeof p.vtexId !== 'number' || (typeof p.vtexId === 'number' && isNaN(p.vtexId)) // Actual: Show non-numbers
-      );
-    } else if (vtexIdStatusFilterDashboard === "withoutVtexId") { // "Sem ID VTEX (Texto/#N/D)" should show non-numbers. User says it's inverted.
-      products = products.filter(p => 
-        typeof p.vtexId === 'number' && !isNaN(p.vtexId) // Actual: Show numbers
-      );
-    }
+    // Removed vtexIdStatusFilterDashboard logic
     return products;
-  }, [dashboardProducts, selectedCollection, vtexIdStatusFilterDashboard]);
+  }, [dashboardProducts, selectedCollection]);
 
   const aggregatedData = useMemo(() => {
     if (filteredProductsForDashboard.length === 0) {
@@ -428,10 +416,7 @@ export default function DashboardPage() {
       if(selectedCollection !== ALL_COLLECTIONS_VALUE) {
         appliedFiltersText.push(`Coleção: ${selectedCollection}`);
       }
-      if(vtexIdStatusFilterDashboard !== "all") {
-        const statusText = vtexIdStatusFilterDashboard === "withVtexId" ? "Com ID VTEX (Número)" : "Sem ID VTEX (Texto/#N/D)"; // This label might be counter-intuitive now
-        appliedFiltersText.push(`Status ID VTEX: ${statusText}`);
-      }
+      // Removed vtexIdStatusFilter from PDF title
       
       doc.setFontSize(18);
       doc.text(reportTitle, pageWidth / 2, yPos, { align: "center" });
@@ -562,10 +547,7 @@ export default function DashboardPage() {
       if (selectedCollection !== ALL_COLLECTIONS_VALUE) {
         pdfFileName += `_${selectedCollection.replace(/[^a-zA-Z0-9]/g, '_')}`;
       }
-      if (vtexIdStatusFilterDashboard !== "all") {
-        // This label might be counter-intuitive now due to inverted logic
-        pdfFileName += `_${vtexIdStatusFilterDashboard === "withVtexId" ? 'ComIdVtex' : 'SemIdVtex'}`;
-      }
+      // Removed vtexIdStatusFilter from PDF file name
       pdfFileName += '.pdf';
 
       doc.save(pdfFileName);
@@ -617,7 +599,7 @@ export default function DashboardPage() {
           <CardHeader>
             <CardTitle className="flex items-center"><ListFilter className="mr-2 h-5 w-5 text-primary" />Filtros do Dashboard</CardTitle>
           </CardHeader>
-          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <CardContent className="grid grid-cols-1 md:grid-cols-1 gap-4"> {/* Changed to md:grid-cols-1 */}
             <div>
               <Label htmlFor="collectionFilterDashboard">Filtrar por Coleção (Desc. Linha Comercial)</Label>
               <Select
@@ -636,23 +618,7 @@ export default function DashboardPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div>
-                <Label htmlFor="vtexIdStatusFilterDashboard">Filtrar por Status ID VTEX</Label>
-                <Select 
-                  value={vtexIdStatusFilterDashboard} 
-                  onValueChange={(value) => setVtexIdStatusFilterDashboard(value as VtexIdStatusFilter)}
-                  disabled={isLoadingFirestore || isSavingFirestore || isGeneratingPdf}
-                >
-                    <SelectTrigger id="vtexIdStatusFilterDashboard" aria-label="Filtrar por Status ID VTEX">
-                        <SelectValue placeholder="Status ID VTEX" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">Todos</SelectItem>
-                        <SelectItem value="withVtexId">Com ID VTEX (Número)</SelectItem>
-                        <SelectItem value="withoutVtexId">Sem ID VTEX (Texto/#N/D)</SelectItem>
-                    </SelectContent>
-                </Select>
-            </div>
+            {/* Removed vtexIdStatusFilterDashboard Select */}
           </CardContent>
         </Card>
       )}
@@ -694,20 +660,14 @@ export default function DashboardPage() {
         </Card>
       )}
       
-      {!isLoadingFirestore && !isSavingFirestore && dashboardProducts.length > 0 && filteredProductsForDashboard.length === 0 && (selectedCollection !== ALL_COLLECTIONS_VALUE || vtexIdStatusFilterDashboard !== "all") && (
+      {!isLoadingFirestore && !isSavingFirestore && dashboardProducts.length > 0 && filteredProductsForDashboard.length === 0 && selectedCollection !== ALL_COLLECTIONS_VALUE && (
          <Card className="shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center"><Filter className="mr-2 h-6 w-6 text-primary" />Nenhum produto encontrado</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-muted-foreground">Nenhum produto encontrado para os filtros selecionados.
-              {selectedCollection !== ALL_COLLECTIONS_VALUE && <> Coleção: <span className="font-semibold">{selectedCollection}</span>.</>}
-              {vtexIdStatusFilterDashboard !== "all" && <> Status ID VTEX: <span className="font-semibold">{
-                vtexIdStatusFilterDashboard === "withVtexId" ? 
-                "Com ID (Número)" : // This label might be counter-intuitive if logic is inverted
-                "Sem ID (Texto/#N/D)" // This label might be counter-intuitive if logic is inverted
-              }</span>.</>}
-              Por favor, ajuste os filtros ou selecione "Todas as Coleções" / "Todos" os status.
+            <p className="text-muted-foreground">Nenhum produto encontrado para a coleção selecionada: <span className="font-semibold">{selectedCollection}</span>.
+              Por favor, ajuste o filtro ou selecione "Todas as Coleções".
             </p>
           </CardContent>
         </Card>

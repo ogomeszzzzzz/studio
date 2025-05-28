@@ -30,7 +30,7 @@ const ALL_PRODUCT_TYPES_VALUE = "_ALL_PRODUCT_TYPES_";
 const DEFAULT_LOW_STOCK_THRESHOLD = 10;
 const FIRESTORE_BATCH_LIMIT = 450; 
 
-type VtexIdStatusFilter = "all" | "withVtexId" | "withoutVtexId";
+// Removed VtexIdStatusFilter type
 
 const productToFirestore = (product: Product): any => {
   return {
@@ -56,7 +56,7 @@ export default function RestockOpportunitiesPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [lowStockThreshold, setLowStockThreshold] = useState<string>(DEFAULT_LOW_STOCK_THRESHOLD.toString());
-  const [vtexIdStatusFilter, setVtexIdStatusFilter] = useState<VtexIdStatusFilter>("all");
+  // Removed vtexIdStatusFilter state
   const { toast } = useToast();
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -183,7 +183,7 @@ export default function RestockOpportunitiesPage() {
 
   const applyAllFilters = useCallback(() => {
     setIsLoading(true);
-    console.log("Applying filters with baseFilters:", baseFilters, "lowStockThreshold:", lowStockThreshold, "vtexIdStatusFilter:", vtexIdStatusFilter);
+    console.log("Applying filters with baseFilters:", baseFilters, "lowStockThreshold:", lowStockThreshold);
     let tempFiltered = [...allProducts];
     const effectiveThreshold = parseInt(lowStockThreshold, 10);
 
@@ -192,16 +192,7 @@ export default function RestockOpportunitiesPage() {
         toast({ title: "Aviso", description: `Limite de baixo estoque inválido, usando padrão: ${DEFAULT_LOW_STOCK_THRESHOLD}.`, variant: "default" });
     }
 
-    // INVERTED LOGIC: When "Com ID" is selected, show non-numbers. When "Sem ID" is selected, show numbers.
-    if (vtexIdStatusFilter === "withVtexId") { // "Com ID VTEX (Número)" should show items that ARE numbers. User says it's inverted.
-      tempFiltered = tempFiltered.filter(p => 
-        typeof p.vtexId !== 'number' || (typeof p.vtexId === 'number' && isNaN(p.vtexId)) // Actual: Show non-numbers
-      );
-    } else if (vtexIdStatusFilter === "withoutVtexId") { // "Sem ID VTEX (Texto/#N/D)" should show non-numbers. User says it's inverted.
-      tempFiltered = tempFiltered.filter(p => 
-        typeof p.vtexId === 'number' && !isNaN(p.vtexId) // Actual: Show numbers
-      );
-    }
+    // Removed vtexIdStatusFilter logic
 
     if (baseFilters) {
       if (baseFilters.collection && baseFilters.collection !== ALL_COLLECTIONS_VALUE) {
@@ -232,7 +223,7 @@ export default function RestockOpportunitiesPage() {
     console.log("Filtered products count:", tempFiltered.length);
     setFilteredProducts(tempFiltered);
     setIsLoading(false);
-  }, [allProducts, baseFilters, lowStockThreshold, vtexIdStatusFilter, toast]);
+  }, [allProducts, baseFilters, lowStockThreshold, toast]);
 
 
   const handleBaseFilterChange = useCallback((filters: FilterState) => {
@@ -240,12 +231,12 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-   if(!isLoadingFirestore && (allProducts.length > 0 || baseFilters !== null || vtexIdStatusFilter !== "all" || lowStockThreshold !== DEFAULT_LOW_STOCK_THRESHOLD.toString())) {
+   if(!isLoadingFirestore && (allProducts.length > 0 || baseFilters !== null || lowStockThreshold !== DEFAULT_LOW_STOCK_THRESHOLD.toString())) {
     applyAllFilters();
    } else if (!isLoadingFirestore && allProducts.length === 0) { 
     setFilteredProducts([]);
    }
-  }, [allProducts, lowStockThreshold, baseFilters, vtexIdStatusFilter, applyAllFilters, isLoadingFirestore]);
+  }, [allProducts, lowStockThreshold, baseFilters, applyAllFilters, isLoadingFirestore]);
 
   const handleProcessingStart = () => setIsProcessingExcel(true);
   const handleProcessingEnd = () => setIsProcessingExcel(false);
@@ -379,7 +370,7 @@ export default function RestockOpportunitiesPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end"> {/* Changed to md:grid-cols-2 */}
                     <div>
                         <Label htmlFor="lowStockThreshold" className="flex items-center font-semibold">
                             Estoque Atual Máximo
@@ -404,33 +395,7 @@ export default function RestockOpportunitiesPage() {
                         className="mt-1 text-base"
                         />
                     </div>
-                    <div>
-                        <Label htmlFor="vtexIdStatusFilter" className="flex items-center font-semibold">
-                            Status Cadastro (ID VTEX)
-                             <TooltipProvider>
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <HelpCircle className="ml-1.5 h-4 w-4 text-muted-foreground cursor-help" />
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                        <p>Filtrar por itens com ou sem cadastro de ID VTEX.</p>
-                                        <p>"Com ID VTEX" significa que o campo ID VTEX é um número válido.</p>
-                                        <p>"Sem ID VTEX" significa que é texto (ex: #N/D), vazio ou NaN.</p>
-                                    </TooltipContent>
-                                </Tooltip>
-                            </TooltipProvider>
-                        </Label>
-                        <Select value={vtexIdStatusFilter} onValueChange={(value) => setVtexIdStatusFilter(value as VtexIdStatusFilter)}>
-                            <SelectTrigger id="vtexIdStatusFilter" className="mt-1 text-base">
-                                <SelectValue placeholder="Selecionar status do ID VTEX" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">Todos (Com e Sem ID VTEX)</SelectItem>
-                                <SelectItem value="withVtexId">Com ID VTEX (Número)</SelectItem>
-                                <SelectItem value="withoutVtexId">Sem ID VTEX (Texto/#N/D)</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
+                    {/* Removed vtexIdStatusFilter Select */}
                     <Button onClick={applyAllFilters} className="w-full md:w-auto py-2.5 text-base self-end" disabled={isLoading || isSavingFirestore}>
                         {isLoading ? (
                             <Loader2 className="mr-2 h-5 w-5 animate-spin" />
@@ -528,12 +493,10 @@ export default function RestockOpportunitiesPage() {
                         </CardHeader>
                         <CardContent>
                             <p className="text-muted-foreground">
-                                Nenhum produto com estoque atual &le; <span className="font-semibold">{parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD}</span> unidades, com disponibilidade em "Pronta Entrega" ou "Regulador", E sem "Pedidos em Aberto" foi encontrado com os filtros atuais (incluindo status do ID VTEX: {
-                                    vtexIdStatusFilter === "withVtexId" ? "Com ID VTEX (Número)" : vtexIdStatusFilter === "withoutVtexId" ? "Sem ID VTEX (Texto/#N/D)" : "Todos"
-                                }).
+                                Nenhum produto com estoque atual &le; <span className="font-semibold">{parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD}</span> unidades, com disponibilidade em "Pronta Entrega" ou "Regulador", E sem "Pedidos em Aberto" foi encontrado com os filtros atuais.
                             </p>
                             <p className="text-muted-foreground mt-2">
-                                Tente ajustar o "Estoque Atual Máximo", o status do ID VTEX, ou os filtros adicionais e clique em "Aplicar Critérios e Filtros".
+                                Tente ajustar o "Estoque Atual Máximo" ou os filtros adicionais e clique em "Aplicar Critérios e Filtros".
                             </p>
                         </CardContent>
                     </Card>
