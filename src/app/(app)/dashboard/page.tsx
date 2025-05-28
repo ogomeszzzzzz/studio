@@ -186,7 +186,7 @@ export default function DashboardPage() {
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
     await saveProductsToFirestore(parsedProducts);
-  }, [currentUser]); 
+  }, [currentUser, saveProductsToFirestore]); // Added saveProductsToFirestore to dependencies
 
 
   const handleProcessingStart = () => setIsProcessingExcel(true);
@@ -479,7 +479,8 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {!isLoadingFirestore && !isSavingFirestore && dashboardProducts.length === 0 && !isProcessingExcel && (
+      {!isLoadingFirestore && !isSavingFirestore &&
+      dashboardProducts.length === 0 && !isProcessingExcel && (
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center"><Database className="mr-2 h-6 w-6 text-primary" />Sem dados para exibir</CardTitle>
@@ -706,3 +707,5 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
