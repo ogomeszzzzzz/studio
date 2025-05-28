@@ -5,15 +5,15 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
-  BarChartBig, ShoppingBag, AlertTriangle, FileSpreadsheet,
+  ShoppingBag, AlertTriangle, FileSpreadsheet,
   Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler,
-  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon, DivideSquare
+  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import type { Product } from '@/types';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, PieChart, Pie, Cell, ReferenceLine } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart";
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
@@ -166,12 +166,10 @@ export default function DashboardPage() {
     try {
       const productsColRef = collection(firestore, 'users', currentUser.uid, 'products');
       
-      // 1. Delete existing products in chunks
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
       
       if (!existingDocsSnapshot.empty) {
-        const deletePromises: Promise<void>[] = [];
         console.log(`DashboardPage: Deleting ${existingDocsSnapshot.docs.length} existing documents in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < existingDocsSnapshot.docs.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
@@ -180,15 +178,12 @@ export default function DashboardPage() {
             batch.delete(docSnapshot.ref);
             totalDeleted++;
           });
-          deletePromises.push(batch.commit());
+          await batch.commit();
         }
-        await Promise.all(deletePromises);
         console.log(`DashboardPage: Successfully deleted ${totalDeleted} existing products.`);
       }
 
-      // 2. Add new products in chunks
       if (productsToSave.length > 0) {
-        const addPromises: Promise<void>[] = [];
         console.log(`DashboardPage: Adding ${productsToSave.length} new products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
@@ -198,9 +193,8 @@ export default function DashboardPage() {
             batch.set(newDocRef, productToFirestore(product));
             totalAdded++;
           });
-          addPromises.push(batch.commit());
+          await batch.commit();
         }
-        await Promise.all(addPromises);
         console.log(`DashboardPage: Successfully added ${totalAdded} new products.`);
       }
       
@@ -369,10 +363,11 @@ export default function DashboardPage() {
         },
     };
     aggregatedData.collectionRupturePercentage.forEach((item) => {
-        config[item.name] = { 
-            label: item.name,
-            color: "hsl(var(--destructive))", 
-        };
+        if (!config[item.name]) { // Check if already exists to avoid overwriting rupturePercentage
+          config[item.name] = { 
+              label: item.name,
+          };
+        }
     });
     return config;
   }, [aggregatedData.collectionRupturePercentage]);
@@ -396,7 +391,7 @@ export default function DashboardPage() {
     }
 
     setIsGeneratingPdf(true);
-    toast({ title: "Gerando PDF...", description: "Por favor, aguarde." });
+    toast({ title: "Gerando PDF...", description: "Por favor, aguarde. Isso pode levar alguns instantes." });
 
     try {
       const doc = new jsPDF('p', 'mm', 'a4');
@@ -420,8 +415,8 @@ export default function DashboardPage() {
       yPos += 10;
 
       doc.setFontSize(12);
-      doc.text("Resumo Geral:", margin, yPos);
-      yPos += 6;
+      doc.text("Resumo Geral dos Indicadores:", margin, yPos);
+      yPos += 7;
 
       const summaryTableBody = [
         ["Estoque Total", aggregatedData.totalStock.toLocaleString()],
@@ -437,83 +432,108 @@ export default function DashboardPage() {
         head: [["Métrica", "Valor"]],
         body: summaryTableBody,
         theme: 'grid',
-        styles: { fontSize: 9, cellPadding: 1.5 },
-        headStyles: { fillColor: [63, 81, 181], textColor: 255, fontSize: 10 },
+        styles: { fontSize: 9, cellPadding: 1.5, halign: 'left' },
+        headStyles: { fillColor: [63, 81, 181], textColor: 255, fontSize: 10, fontStyle: 'bold', halign: 'center' },
+        columnStyles: { 0: { fontStyle: 'bold' }, 1: { halign: 'right' }},
         margin: { left: margin, right: margin },
       });
       yPos = (doc as any).lastAutoTable.finalY + 10;
 
-      const addChartToPdf = async (elementId: string, title: string) => {
-        if (yPos > pageHeight - 50 && doc.getNumberOfPages() > 1) { 
+      const addChartToPdf = async (elementId: string, chartTitle: string) => {
+        const chartElement = document.getElementById(elementId);
+        if (!chartElement || chartElement.offsetParent === null) {
+          console.warn(`Elemento do gráfico ${elementId} não encontrado ou não visível. Pulando no PDF.`);
+          doc.setTextColor(150, 150, 150);
+          doc.setFontSize(10);
+          doc.text(`Gráfico "${chartTitle}" não disponível ou sem dados.`, margin, yPos);
+          doc.setTextColor(0);
+          yPos += 8;
+          return;
+        }
+        
+        // Add space and title before capturing
+        if (yPos + 10 > pageHeight - margin) { // Space for title + some chart height
              doc.addPage();
-             yPos = margin + 5;
-        } else if (yPos > pageHeight - 50) { 
-            doc.addPage();
-            yPos = margin + 5;
+             yPos = margin;
         }
         doc.setFontSize(13);
-        doc.text(title, margin, yPos);
-        yPos += 6;
+        doc.setFont('helvetica', 'bold');
+        doc.text(chartTitle, margin, yPos);
+        doc.setFont('helvetica', 'normal');
+        yPos += 8;
 
-        const chartElement = document.getElementById(elementId);
-        if (chartElement) {
-          try {
-            const canvas = await html2canvas(chartElement, { scale: 1.5, useCORS: true, logging: false });
-            const imgData = canvas.toDataURL('image/png', 0.9);
-            const imgProps = doc.getImageProperties(imgData);
-            let imgHeight = (imgProps.height * contentWidth) / imgProps.width;
-            let imgWidth = contentWidth;
 
-            const maxChartHeight = pageHeight * 0.4; 
-            if (imgHeight > maxChartHeight) {
-                imgHeight = maxChartHeight;
-                imgWidth = (imgProps.width * imgHeight) / imgProps.height;
-            }
+        try {
+          const canvas = await html2canvas(chartElement, { 
+            scale: 1.5, 
+            useCORS: true, 
+            logging: false,
+            backgroundColor: '#ffffff' // Ensure background for transparent charts
+          });
+          const imgData = canvas.toDataURL('image/png', 0.95); // Higher quality PNG
+          
+          const imgProps = doc.getImageProperties(imgData);
+          let imgHeight = (imgProps.height * contentWidth) / imgProps.width;
+          let imgWidth = contentWidth;
 
-            if (yPos + imgHeight > pageHeight - margin) {
-              doc.addPage();
-              yPos = margin;
-            }
-            doc.addImage(imgData, 'PNG', margin, yPos, imgWidth, imgHeight);
-            yPos += imgHeight + 7;
-          } catch (error) {
-            console.error(`Error capturing chart ${elementId}:`, error);
-            doc.setTextColor(255,0,0);
-            doc.text(`Erro ao renderizar o gráfico: ${title}`, margin, yPos);
-            doc.setTextColor(0);
-            yPos += 7;
+          const maxChartHeight = pageHeight * 0.45; // Max height to avoid oversized charts
+          if (imgHeight > maxChartHeight) {
+              imgHeight = maxChartHeight;
+              imgWidth = (imgProps.width * imgHeight) / imgProps.height;
           }
-        } else {
-          console.warn(`Chart element with ID ${elementId} not found.`);
-          doc.setTextColor(200,0,0);
-          doc.text(`Gráfico "${title}" não encontrado.`, margin, yPos);
+
+          if (yPos + imgHeight > pageHeight - margin) {
+            doc.addPage();
+            yPos = margin;
+            // Re-add title on new page if chart starts here
+            doc.setFontSize(13);
+            doc.setFont('helvetica', 'bold');
+            doc.text(chartTitle, margin, yPos);
+            doc.setFont('helvetica', 'normal');
+            yPos += 8;
+          }
+          doc.addImage(imgData, 'PNG', margin, yPos, imgWidth, imgHeight);
+          yPos += imgHeight + 10; // Increased spacing after chart
+        } catch (error) {
+          console.error(`Erro ao capturar gráfico ${elementId}:`, error);
+          doc.setTextColor(255,0,0);
+          doc.setFontSize(10);
+          doc.text(`Erro ao renderizar o gráfico: ${chartTitle}. Verifique o console.`, margin, yPos);
           doc.setTextColor(0);
-          yPos +=7;
+          yPos += 8;
         }
       };
 
-      const chartIdsAndTitles = [
-        { id: 'chart-stock-by-collection', title: 'Estoque por Descrição Linha Comercial' },
-        { id: 'chart-sku-stock-status', title: 'Distribuição de SKUs (Estoque vs. Zerado)' },
-        { id: 'chart-rupture-by-collection', title: 'Ruptura (%) por Descrição Linha Comercial' },
-        { id: 'chart-skus-by-size', title: 'SKUs por Tamanho (Excel)' },
-        { id: 'chart-stock-by-print', title: 'Estoque por Estampa (Top 15 - Coluna Descrição)' },
-        { id: 'chart-skus-by-product-type', title: 'SKUs por Tipo de Produto (Coluna Tipo. Produto)' },
-        { id: 'chart-zero-stock-skus', title: 'SKUs Zerados por Descrição Linha Comercial' },
+      const chartSections = [
+        { id: 'chart-stock-by-collection', title: 'Estoque por Descrição Linha Comercial', data: aggregatedData.stockByCollection },
+        { id: 'chart-sku-stock-status', title: 'Distribuição de SKUs (Estoque vs. Zerado)', data: aggregatedData.skuStockStatus },
+        { id: 'chart-rupture-by-collection', title: 'Ruptura (%) por Descrição Linha Comercial', data: aggregatedData.collectionRupturePercentage },
+        { id: 'chart-skus-by-size', title: 'SKUs por Tamanho (Excel)', data: aggregatedData.skusBySize },
+        { id: 'chart-stock-by-print', title: 'Estoque por Estampa (Top 15 - Coluna Descrição)', data: aggregatedData.stockByPrint },
+        { id: 'chart-skus-by-product-type', title: 'SKUs por Tipo de Produto (Coluna Tipo. Produto)', data: aggregatedData.skusByProductType },
+        { id: 'chart-zero-stock-skus', title: 'SKUs Zerados por Descrição Linha Comercial', data: aggregatedData.zeroStockSkusByCollection },
       ];
 
-      for (const chartInfo of chartIdsAndTitles) {
-         const chartElement = document.getElementById(chartInfo.id);
-         if (chartElement && chartElement.offsetParent !== null) { 
+      for (const chartInfo of chartSections) {
+         // Check if there's data for the chart before attempting to add it
+         if (chartInfo.data && chartInfo.data.length > 0) { 
             await addChartToPdf(chartInfo.id, chartInfo.title);
+         } else {
+            // Optionally, add a note in PDF that this chart has no data
+            if (yPos + 10 > pageHeight - margin) { doc.addPage(); yPos = margin; }
+            doc.setFontSize(11);
+            doc.setTextColor(100);
+            doc.text(`Gráfico "${chartInfo.title}" não possui dados para exibir com os filtros atuais.`, margin, yPos);
+            doc.setTextColor(0);
+            yPos += 10;
          }
       }
 
-      doc.save(`relatorio_dashboard_${new Date().toISOString().split('T')[0]}${selectedCollection !== ALL_COLLECTIONS_VALUE ? '_' + selectedCollection.replace(/[^a-zA-Z0-9]/g, '_') : ''}.pdf`);
+      doc.save(`Relatorio_Dashboard_${new Date().toISOString().split('T')[0]}${selectedCollection !== ALL_COLLECTIONS_VALUE ? '_' + selectedCollection.replace(/[^a-zA-Z0-9]/g, '_') : ''}.pdf`);
       toast({ title: "PDF Gerado!", description: "O download do relatório foi iniciado." });
     } catch (error) {
       console.error("Erro ao gerar PDF:", error);
-      toast({ title: "Erro ao Gerar PDF", description: "Não foi possível gerar o relatório. Verifique o console.", variant: "destructive" });
+      toast({ title: "Erro ao Gerar PDF", description: `Não foi possível gerar o relatório: ${(error as Error).message}. Verifique o console.`, variant: "destructive" });
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -550,7 +570,7 @@ export default function DashboardPage() {
               <Select
                 value={selectedCollection}
                 onValueChange={setSelectedCollection}
-                disabled={isLoadingFirestore || isSavingFirestore}
+                disabled={isLoadingFirestore || isSavingFirestore || isGeneratingPdf}
               >
                 <SelectTrigger id="collectionFilterDashboard" aria-label="Filtrar por Coleção">
                   <Filter className="mr-2 h-4 w-4 text-muted-foreground" />
@@ -565,13 +585,13 @@ export default function DashboardPage() {
               </Select>
             </div>
           )}
-          <Button onClick={generateDashboardPdf} disabled={isGeneratingPdf || isSavingFirestore || filteredProductsForDashboard.length === 0}>
+          <Button onClick={generateDashboardPdf} disabled={isGeneratingPdf || isSavingFirestore || isLoadingFirestore || filteredProductsForDashboard.length === 0}>
             {isGeneratingPdf ? (
               <Loader2 className="mr-2 h-5 w-5 animate-spin" />
             ) : (
               <Download className="mr-2 h-5 w-5" />
             )}
-            Baixar PDF
+            Baixar Relatório PDF
           </Button>
         </div>
       </div>
@@ -881,3 +901,6 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+
+    
