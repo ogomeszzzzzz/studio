@@ -7,13 +7,13 @@ import { Button } from '@/components/ui/button';
 import {
   BarChartBig, ShoppingBag, AlertTriangle, FileSpreadsheet,
   Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler,
-  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon
+  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon, DivideSquare
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import type { Product } from '@/types';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, PieChart, Pie, Cell, ReferenceLine } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart";
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
@@ -29,17 +29,14 @@ interface AggregatedCollectionData {
   skus: number;
 }
 
-interface AggregatedSizeData {
+interface AggregatedCategorySkuData {
   name: string;
-  stock: number;
+  totalSkus: number;
+  skusWithStock: number;
+  skusWithoutStock: number;
 }
 
 interface AggregatedPrintData {
-  name: string;
-  stock: number;
-}
-
-interface AggregatedProductTypeData {
   name: string;
   stock: number;
 }
@@ -74,11 +71,19 @@ const chartConfigBase = {
   rupturePercentage: {
     label: "Ruptura (%)",
     color: "hsl(var(--destructive))",
+  },
+  skusWithStock: {
+    label: "SKUs c/ Estoque",
+    color: "hsl(var(--chart-2))", // Greenish
+  },
+  skusWithoutStock: {
+    label: "SKUs s/ Estoque",
+    color: "hsl(var(--destructive))", // Reddish
   }
 } satisfies ChartConfig;
 
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
-const PIE_COLORS = ["hsl(var(--primary))", "hsl(var(--destructive))"]; // Primary for stocked, Destructive for zero stock
+const PIE_COLORS = ["hsl(var(--primary))", "hsl(var(--destructive))"]; 
 
 const productToFirestore = (product: Product): any => {
   return {
@@ -127,7 +132,7 @@ export default function DashboardPage() {
         setIsLoadingFirestore(true);
         try {
           const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
-          const snapshot = await getDocs(query(productsCol)); // Use query to ensure it's a Query
+          const snapshot = await getDocs(query(productsCol)); 
           const productsFromDb = snapshot.docs.map(doc => productFromFirestore(doc.data()));
           setDashboardProducts(productsFromDb);
           if (productsFromDb.length > 0) {
@@ -197,7 +202,7 @@ export default function DashboardPage() {
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
     await saveProductsToFirestore(parsedProducts);
-  }, [currentUser, saveProductsToFirestore]); // saveProductsToFirestore is now memoized
+  }, [currentUser, saveProductsToFirestore]); 
 
 
   const handleProcessingStart = () => setIsProcessingExcel(true);
@@ -219,9 +224,9 @@ export default function DashboardPage() {
     if (filteredProductsForDashboard.length === 0) {
       return {
         stockByCollection: [],
-        stockBySize: [],
+        skusByProductType: [],
+        skusBySize: [],
         stockByPrint: [],
-        stockByProductType: [],
         zeroStockSkusByCollection: [],
         collectionRupturePercentage: [],
         skuStockStatus: [],
@@ -234,9 +239,9 @@ export default function DashboardPage() {
     }
 
     const stockByCollectionMap = new Map<string, { stock: number; skus: number }>();
-    const stockBySizeMap = new Map<string, { stock: number }>();
+    const skusByProductTypeMap = new Map<string, { totalSkus: number; skusWithStock: number; skusWithoutStock: number }>();
+    const skusBySizeMap = new Map<string, { totalSkus: number; skusWithStock: number; skusWithoutStock: number }>();
     const stockByPrintMap = new Map<string, { stock: number }>();
-    const stockByProductTypeMap = new Map<string, { stock: number }>();
     const zeroStockSkusByCollectionMap = new Map<string, { count: number }>();
 
     let totalStock = 0;
@@ -247,26 +252,30 @@ export default function DashboardPage() {
 
     filteredProductsForDashboard.forEach(product => {
       const collectionKey = product.collection || 'Não Especificada';
+      const typeKey = product.productType || 'Não Especificado';
       const sizeKey = product.size || 'Não Especificado';
       const printKey = product.description || 'Não Especificada'; 
-      const typeKey = product.productType || 'Não Especificado';
 
       const currentCol = stockByCollectionMap.get(collectionKey) || { stock: 0, skus: 0 };
       currentCol.stock += product.stock;
       currentCol.skus += 1;
       stockByCollectionMap.set(collectionKey, currentCol);
+      
+      const currentType = skusByProductTypeMap.get(typeKey) || { totalSkus: 0, skusWithStock: 0, skusWithoutStock: 0 };
+      currentType.totalSkus += 1;
+      if (product.stock > 0) currentType.skusWithStock += 1;
+      else currentType.skusWithoutStock += 1;
+      skusByProductTypeMap.set(typeKey, currentType);
 
-      const currentSize = stockBySizeMap.get(sizeKey) || { stock: 0 };
-      currentSize.stock += product.stock;
-      stockBySizeMap.set(sizeKey, currentSize);
+      const currentSize = skusBySizeMap.get(sizeKey) || { totalSkus: 0, skusWithStock: 0, skusWithoutStock: 0 };
+      currentSize.totalSkus += 1;
+      if (product.stock > 0) currentSize.skusWithStock += 1;
+      else currentSize.skusWithoutStock += 1;
+      skusBySizeMap.set(sizeKey, currentSize);
 
       const currentPrint = stockByPrintMap.get(printKey) || { stock: 0 };
       currentPrint.stock += product.stock;
       stockByPrintMap.set(printKey, currentPrint);
-
-      const currentType = stockByProductTypeMap.get(typeKey) || { stock: 0 };
-      currentType.stock += product.stock;
-      stockByProductTypeMap.set(typeKey, currentType);
 
       if (product.stock === 0) {
         const currentZeroCol = zeroStockSkusByCollectionMap.get(collectionKey) || { count: 0 };
@@ -298,9 +307,9 @@ export default function DashboardPage() {
 
     return {
       stockByCollection: Array.from(stockByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
-      stockBySize: Array.from(stockBySizeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
+      skusByProductType: Array.from(skusByProductTypeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.totalSkus - a.totalSkus),
+      skusBySize: Array.from(skusBySizeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.totalSkus - a.totalSkus),
       stockByPrint: Array.from(stockByPrintMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock).slice(0, 15),
-      stockByProductType: Array.from(stockByProductTypeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
       zeroStockSkusByCollection: Array.from(zeroStockSkusByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.count - a.count),
       collectionRupturePercentage: collectionRupturePercentageData,
       skuStockStatus: skuStockStatusData,
@@ -312,22 +321,26 @@ export default function DashboardPage() {
     };
   }, [filteredProductsForDashboard]);
 
-  const createChartConfig = (data: {name: string}[]) => {
-    const config: ChartConfig = {...chartConfigBase};
+  const createChartConfig = (data: {name: string}[], useBaseColors: boolean = false) => {
+    const config: ChartConfig = {...chartConfigBase}; // Start with base for skusWithStock, skusWithoutStock
     data.forEach((item, index) => {
-      config[item.name] = {
-        label: item.name,
-        color: COLORS[index % COLORS.length],
-      };
+      if (!config[item.name] && useBaseColors) { // Only add if not already in base and we want varied colors
+        config[item.name] = {
+          label: item.name,
+          color: COLORS[index % COLORS.length],
+        };
+      } else if (!config[item.name]) { // For stacked charts, the individual category names might not need specific colors if bars are standard
+         config[item.name] = { label: item.name };
+      }
     });
     return config;
   };
 
-  const stockByCollectionChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByCollection), [aggregatedData.stockByCollection]);
-  const stockBySizeChartConfig = useMemo(() => createChartConfig(aggregatedData.stockBySize), [aggregatedData.stockBySize]);
-  const stockByPrintChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByPrint), [aggregatedData.stockByPrint]);
-  const stockByProductTypeChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByProductType), [aggregatedData.stockByProductType]);
-  const zeroStockSkusChartConfig = useMemo(() => createChartConfig(aggregatedData.zeroStockSkusByCollection), [aggregatedData.zeroStockSkusByCollection]);
+  const stockByCollectionChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByCollection, true), [aggregatedData.stockByCollection]);
+  const skusByProductTypeChartConfig = useMemo(() => createChartConfig(aggregatedData.skusByProductType), [aggregatedData.skusByProductType]);
+  const skusBySizeChartConfig = useMemo(() => createChartConfig(aggregatedData.skusBySize), [aggregatedData.skusBySize]);
+  const stockByPrintChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByPrint, true), [aggregatedData.stockByPrint]);
+  const zeroStockSkusChartConfig = useMemo(() => createChartConfig(aggregatedData.zeroStockSkusByCollection, true), [aggregatedData.zeroStockSkusByCollection]);
   
   const collectionRuptureChartConfig = useMemo(() => {
     const config: ChartConfig = {
@@ -431,7 +444,7 @@ export default function DashboardPage() {
             let imgHeight = (imgProps.height * contentWidth) / imgProps.width;
             let imgWidth = contentWidth;
 
-            const maxChartHeight = pageHeight * 0.4; // Max 40% of page height for a chart
+            const maxChartHeight = pageHeight * 0.4; 
             if (imgHeight > maxChartHeight) {
                 imgHeight = maxChartHeight;
                 imgWidth = (imgProps.width * imgHeight) / imgProps.height;
@@ -463,15 +476,14 @@ export default function DashboardPage() {
         { id: 'chart-stock-by-collection', title: 'Estoque por Descrição Linha Comercial' },
         { id: 'chart-sku-stock-status', title: 'Distribuição de SKUs (Estoque vs. Zerado)' },
         { id: 'chart-rupture-by-collection', title: 'Ruptura (%) por Descrição Linha Comercial' },
-        { id: 'chart-stock-by-size', title: 'Estoque por Tamanho (Excel)' },
+        { id: 'chart-skus-by-size', title: 'SKUs por Tamanho (Excel)' },
         { id: 'chart-stock-by-print', title: 'Estoque por Estampa (Top 15 - Coluna Descrição)' },
-        { id: 'chart-stock-by-product-type', title: 'Estoque por Tipo de Produto (Coluna Tipo. Produto)' },
+        { id: 'chart-skus-by-product-type', title: 'SKUs por Tipo de Produto (Coluna Tipo. Produto)' },
         { id: 'chart-zero-stock-skus', title: 'SKUs Zerados por Descrição Linha Comercial' },
       ];
 
       for (const chartInfo of chartIdsAndTitles) {
          const chartElement = document.getElementById(chartInfo.id);
-         // Only add chart to PDF if it's visible (not hidden due to no data)
          if (chartElement && chartElement.offsetParent !== null) { 
             await addChartToPdf(chartInfo.id, chartInfo.title);
          }
@@ -494,7 +506,7 @@ export default function DashboardPage() {
     const y = cy + radius * Math.sin(-midAngle * RADIAN);
     const percentage = (percent * 100).toFixed(0);
 
-    if (percentage === "0") return null; // Don't render label for 0%
+    if (percentage === "0") return null; 
 
     return (
       <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize="12px" fontWeight="bold">
@@ -738,22 +750,23 @@ export default function DashboardPage() {
               </Card>
             )}
 
-            {aggregatedData.stockBySize.length > 0 && (
-              <Card id="chart-stock-by-size" className="shadow-lg hover:shadow-xl transition-shadow">
+            {aggregatedData.skusBySize.length > 0 && (
+              <Card id="chart-skus-by-size" className="shadow-lg hover:shadow-xl transition-shadow">
                 <CardHeader>
-                  <CardTitle className="flex items-center"><Ruler className="mr-2 h-5 w-5 text-accent" />Estoque por Tamanho (Excel)</CardTitle>
-                  <CardDescription>Distribuição de estoque por tamanho de produto (coluna "Tamanho" do Excel).</CardDescription>
+                  <CardTitle className="flex items-center"><Ruler className="mr-2 h-5 w-5 text-accent" />SKUs por Tamanho (Excel)</CardTitle>
+                  <CardDescription>Distribuição de SKUs (com e sem estoque) por tamanho (coluna "Tamanho" do Excel).</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[400px]">
-                  <ChartContainer config={stockBySizeChartConfig} className="h-full w-full">
+                  <ChartContainer config={skusBySizeChartConfig} className="h-full w-full">
                       <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={aggregatedData.stockBySize} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}>
+                          <BarChart data={aggregatedData.skusBySize} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}>
                               <CartesianGrid strokeDasharray="3 3" horizontal={false}/>
                               <XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/>
                               <YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/>
                               <Tooltip content={<ChartTooltipContent />} />
                               <Legend />
-                              <Bar dataKey="stock" name="Estoque" fill="hsl(var(--accent))" radius={[0, 4, 4, 0]} />
+                              <Bar dataKey="skusWithStock" name="SKUs c/ Estoque" fill="hsl(var(--chart-2))" stackId="size" radius={[0, 4, 4, 0]} />
+                              <Bar dataKey="skusWithoutStock" name="SKUs s/ Estoque" fill="hsl(var(--destructive))" stackId="size" radius={[0, 4, 4, 0]}/>
                           </BarChart>
                       </ResponsiveContainer>
                     </ChartContainer>
@@ -786,22 +799,23 @@ export default function DashboardPage() {
               </Card>
             )}
 
-            {aggregatedData.stockByProductType.length > 0 && (
-              <Card id="chart-stock-by-product-type" className="shadow-lg hover:shadow-xl transition-shadow">
+            {aggregatedData.skusByProductType.length > 0 && (
+              <Card id="chart-skus-by-product-type" className="shadow-lg hover:shadow-xl transition-shadow">
                 <CardHeader>
-                  <CardTitle className="flex items-center"><Box className="mr-2 h-5 w-5" style={{color: 'hsl(var(--chart-5))'}} />Estoque por Tipo de Produto (Coluna Tipo. Produto)</CardTitle>
-                  <CardDescription>Distribuição de estoque por tipo de produto (coluna "Tipo. Produto" do Excel).</CardDescription>
+                  <CardTitle className="flex items-center"><Box className="mr-2 h-5 w-5" style={{color: 'hsl(var(--chart-5))'}} />SKUs por Tipo de Produto (Coluna Tipo. Produto)</CardTitle>
+                  <CardDescription>Distribuição de SKUs (com e sem estoque) por tipo (coluna "Tipo. Produto" do Excel).</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[400px]">
-                  <ChartContainer config={stockByProductTypeChartConfig} className="h-full w-full">
+                  <ChartContainer config={skusByProductTypeChartConfig} className="h-full w-full">
                       <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={aggregatedData.stockByProductType} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}>
+                          <BarChart data={aggregatedData.skusByProductType} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}>
                               <CartesianGrid strokeDasharray="3 3" horizontal={false}/>
                               <XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/>
                               <YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/>
                               <Tooltip content={<ChartTooltipContent />} />
                               <Legend />
-                              <Bar dataKey="stock" name="Estoque" fill="hsl(var(--chart-5))" radius={[0, 4, 4, 0]} />
+                              <Bar dataKey="skusWithStock" name="SKUs c/ Estoque" fill="hsl(var(--chart-2))" stackId="type" radius={[0, 4, 4, 0]} />
+                              <Bar dataKey="skusWithoutStock" name="SKUs s/ Estoque" fill="hsl(var(--destructive))" stackId="type" radius={[0, 4, 4, 0]}/>
                           </BarChart>
                       </ResponsiveContainer>
                     </ChartContainer>
@@ -837,3 +851,6 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+
+    
