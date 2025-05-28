@@ -2,20 +2,28 @@
 import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
-  output: 'export', // Adicionado para exportação estática
-  // basePath: '/studio', // REMOVIDO - GitHub Pages lida com o nome do repositório como base path
+  output: 'export', // Ensures static HTML export
+  
+  // If deploying to a subpath on GitHub Pages (e.g., your-username.github.io/your-repo-name),
+  // you might need to uncomment and set basePath:
+  // basePath: '/your-repo-name', 
+
   typescript: {
-    ignoreBuildErrors: true,
+    // Recommended to resolve TypeScript errors before building
+    ignoreBuildErrors: true, 
   },
   eslint: {
-    ignoreDuringBuilds: true,
+    // Recommended to resolve ESLint issues before building
+    ignoreDuringBuilds: true, 
   },
   images: {
-    // remotePatterns for placehold.co removed as it's not actively used.
-    unoptimized: true, // Adicionado para exports estáticos
+    // Required for static export if using next/image
+    unoptimized: true, 
   },
+  
+  // Server Actions are not supported with `output: 'export'`
   // experimental: {
-  //   serverActions: true, // Server actions não são suportadas em 'output: export'
+  //   serverActions: true, 
   // },
 };
 
