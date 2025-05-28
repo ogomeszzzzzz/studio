@@ -27,21 +27,22 @@ const toBoolean = (value: string | number | undefined): boolean => {
 };
 
 const getRowValue = (row: any, primaryKey: string, fallbacks: string[] = [], defaultValue: any = '') => {
-  const keysToCheck = [primaryKey, ...fallbacks];
-  for (const key of keysToCheck) {
-    if (row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== '') {
-      return row[key];
+  const keysToTry = [primaryKey, ...fallbacks];
+  const rowKeys = Object.keys(row);
+
+  for (const tryKey of keysToTry) {
+    // Try exact match first
+    if (Object.prototype.hasOwnProperty.call(row, tryKey) && row[tryKey] !== null && row[tryKey] !== undefined) {
+       if (typeof row[tryKey] === 'string' && row[tryKey].trim() === '') continue; // Treat empty strings as not found for this general helper, specific logic can override
+      return row[tryKey];
+    }
+    // Try case-insensitive match
+    const actualKey = rowKeys.find(k => k.trim().toLowerCase() === tryKey.trim().toLowerCase());
+    if (actualKey && row[actualKey] !== null && row[actualKey] !== undefined) {
+      if (typeof row[actualKey] === 'string' && row[actualKey].trim() === '') continue;
+      return row[actualKey];
     }
   }
-  
-  // Fallback to case-insensitive search for the primary key
-  const rowKeys = Object.keys(row);
-  const primaryKeyUpper = primaryKey.toUpperCase();
-  const foundKey = rowKeys.find(k => k.toUpperCase() === primaryKeyUpper);
-  if (foundKey && row[foundKey] !== undefined && row[foundKey] !== null && String(row[foundKey]).trim() !== '') {
-    return row[foundKey];
-  }
-
   return defaultValue;
 };
 
@@ -56,7 +57,7 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
           reject(new Error('Could not read file content.'));
           return;
         }
-        const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: false }); // Keep cellDates false to handle dates manually
+        const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: false });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json<any>(worksheet, { raw: false, defval: null });
@@ -66,23 +67,31 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
           const endDate = parseDate(getRowValue(row, 'Fim Coleção', ['Fim Colecao']));
           const collectionValue = getRowValue(row, collectionColumnKey, [], '');
           
-          // Explicitly check for ID VTEX variations
-          let vtexIdValue: string | number = '';
-          if (row['ID VTEX'] !== undefined && row['ID VTEX'] !== null) vtexIdValue = row['ID VTEX'];
-          else if (row['Id Vtex'] !== undefined && row['Id Vtex'] !== null) vtexIdValue = row['Id Vtex'];
-          else if (row['IDVtex'] !== undefined && row['IDVtex'] !== null) vtexIdValue = row['IDVtex'];
-          else if (row['ID_VTEX'] !== undefined && row['ID_VTEX'] !== null) vtexIdValue = row['ID_VTEX'];
-          else { // Last resort: case-insensitive search if common variations fail
-             const rowKeys = Object.keys(row);
-             const vtexKey = rowKeys.find(k => k.toUpperCase() === 'ID VTEX');
-             if (vtexKey && row[vtexKey] !== undefined && row[vtexKey] !== null) {
-                 vtexIdValue = row[vtexKey];
-             }
+          const rawVtexId = getRowValue(row, 'ID VTEX', ['Id Vtex', 'IDVtex', 'ID_VTEX'], ''); 
+          let processedVtexId: string | number = ''; 
+
+          if (rawVtexId !== null && rawVtexId !== undefined && String(rawVtexId).trim() !== '') {
+              if (typeof rawVtexId === 'number' && !isNaN(rawVtexId)) {
+                  processedVtexId = rawVtexId; 
+              } else if (typeof rawVtexId === 'string') {
+                  const trimmedVal = rawVtexId.trim();
+                  // Check if the string can be cleanly converted to a number
+                  // It should only contain digits, optionally a decimal point or a leading minus sign
+                  if (/^[-+]?\d*\.?\d+$/.test(trimmedVal) && !isNaN(Number(trimmedVal))) {
+                      processedVtexId = Number(trimmedVal);
+                  } else {
+                      processedVtexId = trimmedVal; // Keep as string (e.g., "#N/D", "ABC")
+                  }
+              } else {
+                  processedVtexId = String(rawVtexId); // Fallback for other types like boolean
+              }
+          } else {
+             processedVtexId = ''; // If rawVtexId is null, undefined, or empty string after trim
           }
 
 
           return {
-            vtexId: vtexIdValue,
+            vtexId: processedVtexId,
             name: getRowValue(row, 'Nome Produto', ['Nome do Produto', 'Nome']),
             productId: getRowValue(row, 'Produto'),
             derivation: getRowValue(row, 'Derivação'),
