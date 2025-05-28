@@ -3,6 +3,7 @@ import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
   /* config options here */
+  output: 'export', // Adicionado para exportação estática
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -18,9 +19,10 @@ const nextConfig: NextConfig = {
         pathname: '/**',
       },
     ],
+    unoptimized: true, // Adicionado para exports estáticos
   },
   // experimental: {
-  //   serverActions: true, // Ensure server actions are enabled, though usually true by default in recent Next.js
+  //   serverActions: true, // Server actions não são suportadas em 'output: export'
   // },
 };
 
