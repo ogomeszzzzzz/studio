@@ -152,7 +152,7 @@ export default function DashboardPage() {
   }, [currentUser, toast]);
 
 
-  const saveProductsToFirestore = async (productsToSave: Product[]) => {
+  const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
     if (!currentUser) {
       toast({ title: "Usuário não autenticado", description: "Faça login para salvar os dados.", variant: "destructive" });
       return;
@@ -198,11 +198,11 @@ export default function DashboardPage() {
     } finally {
       setIsSavingFirestore(false);
     }
-  };
+  }, [currentUser, toast]);
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
     await saveProductsToFirestore(parsedProducts);
-  }, [currentUser, saveProductsToFirestore]); 
+  }, [saveProductsToFirestore]); 
 
 
   const handleProcessingStart = () => setIsProcessingExcel(true);
@@ -235,6 +235,7 @@ export default function DashboardPage() {
         totalZeroStockSkus: 0,
         totalReadyToShipStock: 0,
         totalRegulatorStock: 0,
+        totalOpenOrders: 0, // Novo
       };
     }
 
@@ -249,6 +250,7 @@ export default function DashboardPage() {
     let totalZeroStockSkus = 0;
     let totalReadyToShipStock = 0;
     let totalRegulatorStock = 0;
+    let totalOpenOrders = 0; // Novo
 
     filteredProductsForDashboard.forEach(product => {
       const collectionKey = product.collection || 'Não Especificada';
@@ -286,6 +288,7 @@ export default function DashboardPage() {
       totalStock += product.stock;
       totalReadyToShipStock += product.readyToShip;
       totalRegulatorStock += product.regulatorStock;
+      totalOpenOrders += product.openOrders; // Novo
     });
     
     const collectionRupturePercentageData: CollectionRuptureData[] = Array.from(stockByCollectionMap.entries()).map(([name, collData]) => {
@@ -318,18 +321,19 @@ export default function DashboardPage() {
       totalZeroStockSkus,
       totalReadyToShipStock,
       totalRegulatorStock,
+      totalOpenOrders, // Novo
     };
   }, [filteredProductsForDashboard]);
 
   const createChartConfig = (data: {name: string}[], useBaseColors: boolean = false) => {
-    const config: ChartConfig = {...chartConfigBase}; // Start with base for skusWithStock, skusWithoutStock
+    const config: ChartConfig = {...chartConfigBase}; 
     data.forEach((item, index) => {
-      if (!config[item.name] && useBaseColors) { // Only add if not already in base and we want varied colors
+      if (!config[item.name] && useBaseColors) { 
         config[item.name] = {
           label: item.name,
           color: COLORS[index % COLORS.length],
         };
-      } else if (!config[item.name]) { // For stacked charts, the individual category names might not need specific colors if bars are standard
+      } else if (!config[item.name]) {
          config[item.name] = { label: item.name };
       }
     });
@@ -408,6 +412,7 @@ export default function DashboardPage() {
         ["Estoque Total", aggregatedData.totalStock.toLocaleString()],
         ["Pronta Entrega", aggregatedData.totalReadyToShipStock.toLocaleString()],
         ["Regulador", aggregatedData.totalRegulatorStock.toLocaleString()],
+        ["Pedidos em Aberto", aggregatedData.totalOpenOrders.toLocaleString()], // Novo
         ["Total SKUs", aggregatedData.totalSkus.toLocaleString()],
         ["Total SKUs Zerados", aggregatedData.totalZeroStockSkus.toLocaleString()],
       ];
@@ -606,7 +611,7 @@ export default function DashboardPage() {
 
       {!isLoadingFirestore && !isSavingFirestore && filteredProductsForDashboard.length > 0 && (
         <>
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6"> {/* Ajustado para 6 colunas para o novo card */}
             <Card className="shadow-lg hover:shadow-xl transition-shadow">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Estoque Total</CardTitle>
@@ -635,6 +640,16 @@ export default function DashboardPage() {
               <CardContent>
                 <div className="text-2xl font-bold text-foreground">{aggregatedData.totalRegulatorStock.toLocaleString()}</div>
                 <p className="text-xs text-muted-foreground">unidades no depósito Regulador</p>
+              </CardContent>
+            </Card>
+            <Card className="shadow-lg hover:shadow-xl transition-shadow"> {/* Novo Card */}
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Pedidos em Aberto</CardTitle>
+                <ClipboardList className="h-5 w-5 text-blue-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-foreground">{aggregatedData.totalOpenOrders.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">unidades com pedido em aberto</p>
               </CardContent>
             </Card>
             <Card className="shadow-lg hover:shadow-xl transition-shadow">
@@ -851,6 +866,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-
-    

@@ -8,6 +8,7 @@ export interface Product {
   stock: number;
   readyToShip: number;
   regulatorStock: number;
+  openOrders: number; // Novo campo para Pedidos em Aberto
   description: string; 
   size?: string; 
   productType?: string; 
@@ -28,12 +29,7 @@ export interface FilterState {
   collection: string;
   stockMin: string;
   stockMax: string;
-  productType: string; // Added productType
-  // Removed date fields:
-  // startDateFrom: Date | undefined;
-  // startDateTo: Date | undefined;
-  // endDateFrom: Date | undefined;
-  // endDateTo: Date | undefined;
+  productType: string;
 }
 
 export interface UserProfile {

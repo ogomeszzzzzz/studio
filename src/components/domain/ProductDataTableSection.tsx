@@ -21,6 +21,7 @@ interface ProductDataTableSectionProps {
   showStockColumn?: boolean;
   showReadyToShipColumn?: boolean;
   showRegulatorStockColumn?: boolean;
+  showOpenOrdersColumn?: boolean; // Novo
   showCollectionColumn?: boolean;
   showStartDateColumn?: boolean;
   showEndDateColumn?: boolean;
@@ -43,7 +44,6 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
 
   const endDateInput = product.collectionEndDate;
   
-  // Check if endDateInput is already a Date object, if not, try to parse it
   let endDate: Date | null = null;
   if (endDateInput instanceof Date && isValid(endDateInput)) {
     endDate = endDateInput;
@@ -52,7 +52,7 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
     if (isValid(parsedDate)) {
       endDate = parsedDate;
     }
-  } else if (typeof endDateInput === 'number') { // Handle Excel serial dates if they come as numbers
+  } else if (typeof endDateInput === 'number') { 
       const excelEpoch = new Date(Date.UTC(1899, 11, 30));
       const d = new Date(excelEpoch.getTime() + endDateInput * 24 * 60 * 60 * 1000);
       if (isValid(d)) endDate = d;
@@ -68,13 +68,13 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
         : { text: 'Coleção Passada (Sem Estoque)', variant: 'outline', colorClass: 'border-muted-foreground text-muted-foreground' };
     }
     if (isBefore(endDate, addDays(today, 30))) {
-      return { text: 'Próximo ao Fim', variant: 'default', colorClass: 'bg-amber-500 text-white' }; // Using amber for accent-like
+      return { text: 'Próximo ao Fim', variant: 'default', colorClass: 'bg-amber-500 text-white' }; 
     }
   }
-  if (product.isCurrentCollection === false && product.stock > 0) { // Explicitly check for false
+  if (product.isCurrentCollection === false && product.stock > 0) { 
      return { text: 'Não Atual (Em Estoque)', variant: 'secondary' };
   }
-  if (product.isCurrentCollection === true) { // Explicitly check for true
+  if (product.isCurrentCollection === true) { 
     return { text: 'Coleção Atual', variant: 'default', colorClass: 'bg-primary/80 text-primary-foreground' };
   }
   return { text: 'Status N/A', variant: 'outline' };
@@ -90,6 +90,7 @@ export function ProductDataTableSection({
   showStockColumn = true,
   showReadyToShipColumn = false,
   showRegulatorStockColumn = false,
+  showOpenOrdersColumn = false, // Novo
   showCollectionColumn = true,
   showStartDateColumn = true,
   showEndDateColumn = true,
@@ -139,7 +140,7 @@ export function ProductDataTableSection({
     } else if (currentPage === 0 && totalPages > 0) { 
         setCurrentPage(1);
     } else if (totalPages === 0 && sortedProducts.length === 0) { 
-        setCurrentPage(1); // Reset to page 1 if no products
+        setCurrentPage(1); 
     }
   }, [sortedProducts, currentPage, itemsPerPage, totalPages]);
 
@@ -173,13 +174,14 @@ export function ProductDataTableSection({
   const TableSkeleton = () => {
     const colCount = [
         showVtexIdColumn, showNameColumn, showProductDerivationColumn, showStockColumn, 
-        showReadyToShipColumn, showRegulatorStockColumn, showCollectionColumn, showDescriptionColumn, 
+        showReadyToShipColumn, showRegulatorStockColumn, showOpenOrdersColumn, // Novo
+        showCollectionColumn, showDescriptionColumn, 
         showSizeColumn, showProductTypeColumn, showStartDateColumn, showEndDateColumn, showStatusColumn
-    ].filter(Boolean).length || 1; // Ensure colCount is at least 1
+    ].filter(Boolean).length || 1; 
 
     return (
         <>
-            {[...Array(itemsPerPage > 10 ? 10 : itemsPerPage)].map((_, i) => ( // Show up to 10 skeleton rows or itemsPerPage
+            {[...Array(itemsPerPage > 10 ? 10 : itemsPerPage)].map((_, i) => ( 
                 <TableRow key={`skeleton-row-${i}`}>
                     <TableCell colSpan={colCount > 0 ? colCount : 1}>
                         <Skeleton className="h-8 w-full" />
@@ -217,6 +219,7 @@ export function ProductDataTableSection({
                     {showStockColumn && <TableHead onClick={() => handleSort('stock')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap px-2 py-3 text-xs sm:text-sm">Est. Atual {renderSortIcon('stock')}</TableHead>}
                     {showReadyToShipColumn && <TableHead onClick={() => handleSort('readyToShip')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap font-semibold text-green-600 px-2 py-3 text-xs sm:text-sm">Pronta Ent. {renderSortIcon('readyToShip')}</TableHead>}
                     {showRegulatorStockColumn && <TableHead onClick={() => handleSort('regulatorStock')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap font-semibold text-orange-600 px-2 py-3 text-xs sm:text-sm">Regulador {renderSortIcon('regulatorStock')}</TableHead>}
+                    {showOpenOrdersColumn && <TableHead onClick={() => handleSort('openOrders')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap font-semibold text-blue-600 px-2 py-3 text-xs sm:text-sm">Ped. Aberto {renderSortIcon('openOrders')}</TableHead>}
                     {showCollectionColumn && <TableHead onClick={() => handleSort('collection')} className="cursor-pointer hover:bg-muted/50 min-w-[150px] px-2 py-3 text-xs sm:text-sm">Coleção {renderSortIcon('collection')}</TableHead>}
                     {showDescriptionColumn && <TableHead onClick={() => handleSort('description')} className="cursor-pointer hover:bg-muted/50 min-w-[150px] px-2 py-3 text-xs sm:text-sm">Estampa {renderSortIcon('description')}</TableHead>}
                     {showSizeColumn && <TableHead onClick={() => handleSort('size')} className="cursor-pointer hover:bg-muted/50 min-w-[100px] px-2 py-3 text-xs sm:text-sm">Tamanho {renderSortIcon('size')}</TableHead>}
@@ -237,6 +240,7 @@ export function ProductDataTableSection({
                         {showStockColumn && <TableCell className="text-right px-2 py-2 text-xs sm:text-sm">{product.stock.toLocaleString()}</TableCell>}
                         {showReadyToShipColumn && <TableCell className="text-right font-semibold text-green-700 px-2 py-2 text-xs sm:text-sm">{product.readyToShip.toLocaleString()}</TableCell>}
                         {showRegulatorStockColumn && <TableCell className="text-right font-semibold text-orange-700 px-2 py-2 text-xs sm:text-sm">{product.regulatorStock.toLocaleString()}</TableCell>}
+                        {showOpenOrdersColumn && <TableCell className="text-right font-semibold text-blue-700 px-2 py-2 text-xs sm:text-sm">{product.openOrders.toLocaleString()}</TableCell>}
                         {showCollectionColumn && <TableCell className="px-2 py-2 text-xs sm:text-sm">{product.collection}</TableCell>}
                         {showDescriptionColumn && <TableCell className="px-2 py-2 text-xs sm:text-sm">{product.description}</TableCell>}
                         {showSizeColumn && <TableCell className="px-2 py-2 text-xs sm:text-sm">{product.size}</TableCell>}

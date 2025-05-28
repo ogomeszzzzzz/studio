@@ -5,10 +5,7 @@ import type { Product } from '@/types';
 
 const parseDate = (dateStr: string | number | undefined): Date | null => {
   if (typeof dateStr === 'number') {
-    // Handle Excel date serial numbers
-    // Excel's epoch starts on December 30, 1899 for Windows, or Jan 1, 1904 for Mac (less common)
-    // Assuming Windows epoch.
-    const excelEpoch = new Date(Date.UTC(1899, 11, 30)); // December 30, 1899
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
     const excelDate = new Date(excelEpoch.getTime() + dateStr * 24 * 60 * 60 * 1000);
     if (isValid(excelDate)) return excelDate;
   }
@@ -30,19 +27,19 @@ const toBoolean = (value: string | number | undefined): boolean => {
 };
 
 const getRowValue = (row: any, primaryKey: string, fallbacks: string[] = [], defaultValue: any = '') => {
-  if (row[primaryKey] !== undefined && row[primaryKey] !== null) {
+  if (row[primaryKey] !== undefined && row[primaryKey] !== null && String(row[primaryKey]).trim() !== '') {
     return row[primaryKey];
   }
   for (const fallbackKey of fallbacks) {
-    if (row[fallbackKey] !== undefined && row[fallbackKey] !== null) {
+    if (row[fallbackKey] !== undefined && row[fallbackKey] !== null && String(row[fallbackKey]).trim() !== '') {
       return row[fallbackKey];
     }
   }
-  // Try case-insensitive match for primaryKey as a last resort for common keys
+  
   const rowKeys = Object.keys(row);
   const primaryKeyUpper = primaryKey.toUpperCase();
   const foundKey = rowKeys.find(k => k.toUpperCase() === primaryKeyUpper);
-  if (foundKey && row[foundKey] !== undefined && row[foundKey] !== null) {
+  if (foundKey && row[foundKey] !== undefined && row[foundKey] !== null && String(row[foundKey]).trim() !== '') {
     return row[foundKey];
   }
 
@@ -69,22 +66,12 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
           const startDate = parseDate(getRowValue(row, 'Início Coleção', ['Inicio Colecao']));
           const endDate = parseDate(getRowValue(row, 'Fim Coleção', ['Fim Colecao']));
           const collectionValue = getRowValue(row, collectionColumnKey, [], '');
-          const productName = getRowValue(row, 'Nome Produto', ['Nome do Produto', 'Nome']);
           
-          // Robust way to get ID VTEX
-          let vtexIdValue = getRowValue(row, 'ID VTEX', ['Id Vtex', 'IDVtex', 'ID_VTEX']);
-          if (vtexIdValue === '' || vtexIdValue === null || vtexIdValue === undefined) {
-             // Check if a column named 'ID VTEX' (with space) exists
-             const keys = Object.keys(row);
-             const exactKey = keys.find(k => k.trim() === 'ID VTEX');
-             if (exactKey) {
-                vtexIdValue = row[exactKey];
-             }
-          }
-
-
+          const productName = getRowValue(row, 'Nome Produto', ['Nome do Produto', 'Nome']);
+          const vtexIdValue = getRowValue(row, 'ID VTEX', ['Id Vtex', 'IDVtex', 'ID_VTEX']);
+          
           return {
-            vtexId: vtexIdValue ?? '',
+            vtexId: vtexIdValue,
             name: productName,
             productId: getRowValue(row, 'Produto'),
             derivation: getRowValue(row, 'Derivação'),
@@ -92,7 +79,8 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
             stock: Number(getRowValue(row, 'Estoque', [], 0)) || 0,
             readyToShip: Number(getRowValue(row, 'Pronta Entrega', [], 0)) || 0,
             regulatorStock: Number(getRowValue(row, 'Regulador', [], 0)) || 0,
-            description: getRowValue(row, 'Descrição'), // For print/pattern
+            openOrders: Number(getRowValue(row, 'Pedidos em Aberto', ['Pedidos Abertos'], 0)) || 0, // Novo campo
+            description: getRowValue(row, 'Descrição'), 
             size: getRowValue(row, 'Tamanho', [], 'Não Especificado'),
             productType: getRowValue(row, 'Tipo. Produto', ['Tipo Produto'], 'Não Especificado'),
             complement: getRowValue(row, 'Compl.'),

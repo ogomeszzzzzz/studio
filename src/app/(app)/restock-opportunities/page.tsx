@@ -6,7 +6,7 @@ import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import { FilterControlsSection } from '@/components/domain/FilterControlsSection';
 import { ProductDataTableSection } from '@/components/domain/ProductDataTableSection';
 import type { Product, FilterState } from '@/types';
-import { PackageSearch, AlertTriangle, Download, TrendingUp, PackageCheck, ListFilter, HelpCircle, Loader2, Database } from 'lucide-react';
+import { PackageSearch, AlertTriangle, Download, TrendingUp, PackageCheck, ListFilter, HelpCircle, Loader2, Database, ClipboardList } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -74,7 +74,7 @@ export default function RestockOpportunitiesPage() {
 
   useEffect(() => {
     if (currentUser) {
-      console.log(`RestockOpportunitiesPage: Fetching products for user UID: ${currentUser.uid}`); // DIAGNOSTIC LOG
+      console.log(`RestockOpportunitiesPage: Fetching products for user UID: ${currentUser.uid}`); 
       const fetchProducts = async () => {
         setIsLoadingFirestore(true);
         try {
@@ -100,12 +100,12 @@ export default function RestockOpportunitiesPage() {
     }
   }, [currentUser, toast]);
 
-  const saveProductsToFirestore = async (productsToSave: Product[]) => {
+  const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
     if (!currentUser) {
       toast({ title: "Usuário não autenticado", description: "Faça login para salvar os dados.", variant: "destructive" });
       return;
     }
-    console.log(`RestockOpportunitiesPage: Saving products for user UID: ${currentUser.uid}`); // DIAGNOSTIC LOG
+    console.log(`RestockOpportunitiesPage: Saving products for user UID: ${currentUser.uid}`); 
     setIsSavingFirestore(true);
     try {
       const productsColRef = collection(firestore, 'users', currentUser.uid, 'products');
@@ -144,13 +144,13 @@ export default function RestockOpportunitiesPage() {
     } finally {
       setIsSavingFirestore(false);
     }
-  };
+  },[currentUser, toast]);
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
     setIsProcessingExcel(true); 
     await saveProductsToFirestore(parsedProducts);
     setIsProcessingExcel(false); 
-  }, [currentUser]);
+  }, [saveProductsToFirestore]);
 
 
   const availableCollections = useMemo(() => {
@@ -196,7 +196,8 @@ export default function RestockOpportunitiesPage() {
 
     tempFiltered = tempFiltered.filter(p =>
         p.stock <= currentThreshold &&
-        (p.readyToShip > 0 || p.regulatorStock > 0)
+        (p.readyToShip > 0 || p.regulatorStock > 0) &&
+        p.openOrders === 0 // Somente se não houver pedidos em aberto
     );
 
     setFilteredProducts(tempFiltered);
@@ -254,6 +255,7 @@ export default function RestockOpportunitiesPage() {
       "Estoque Atual": p.stock,
       "Pronta Entrega": p.readyToShip,
       "Regulador": p.regulatorStock,
+      "Pedidos em Aberto": p.openOrders, // Novo
       "Coleção (Desc. Linha Comercial)": p.collection,
       "Descrição (Estampa)": p.description,
       "Tamanho": p.size,
@@ -286,7 +288,7 @@ export default function RestockOpportunitiesPage() {
                 Oportunidades de Reabastecimento
             </h1>
             <p className="text-muted-foreground">
-                Identifique produtos com baixo estoque que possuem unidades em "Pronta Entrega" ou "Regulador" para reposição. Os dados são salvos em seu perfil.
+                Identifique produtos com baixo estoque que possuem unidades em "Pronta Entrega" ou "Regulador" para reposição, e que não possuam "Pedidos em Aberto".
             </p>
         </div>
       </div>
@@ -343,7 +345,7 @@ export default function RestockOpportunitiesPage() {
               </CardTitle>
               <CardDescription>
                 Ajuste o limite de estoque para considerar um item como "baixo" e aplique filtros adicionais.
-                As oportunidades são itens com estoque atual &lt;= ao limite definido E com unidades em "Pronta Entrega" ou "Regulador".
+                As oportunidades são itens com estoque atual &lt;= ao limite definido, COM unidades em "Pronta Entrega" ou "Regulador" E SEM "Pedidos em Aberto".
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -445,13 +447,14 @@ export default function RestockOpportunitiesPage() {
                     isLoading={(isLoading || isSavingFirestore || isLoadingFirestore) && filteredProducts.length === 0}
                     cardIcon={PackageSearch}
                     cardTitle="Produtos com Oportunidade de Reabastecimento"
-                    cardDescription="Lista de produtos com baixo estoque atual e disponibilidade em 'Pronta Entrega' ou 'Regulador'."
+                    cardDescription="Lista de produtos com baixo estoque atual, disponibilidade em 'Pronta Entrega' ou 'Regulador', e sem 'Pedidos em Aberto'."
                     showVtexIdColumn={true}
                     showNameColumn={true}
                     showProductDerivationColumn={true}
                     showStockColumn={true}
                     showReadyToShipColumn={true}
                     showRegulatorStockColumn={true}
+                    showOpenOrdersColumn={true} // Novo
                     showCollectionColumn={true}
                     showDescriptionColumn={true} 
                     showSizeColumn={true}
@@ -470,7 +473,7 @@ export default function RestockOpportunitiesPage() {
                         </CardHeader>
                         <CardContent>
                             <p className="text-muted-foreground">
-                                Nenhum produto com estoque atual &le; <span className="font-semibold">{parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD}</span> unidades E com disponibilidade em "Pronta Entrega" ou "Regulador" foi encontrado com os filtros atuais.
+                                Nenhum produto com estoque atual &le; <span className="font-semibold">{parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD}</span> unidades, com disponibilidade em "Pronta Entrega" ou "Regulador", E sem "Pedidos em Aberto" foi encontrado com os filtros atuais.
                             </p>
                             <p className="text-muted-foreground mt-2">
                                 Tente ajustar o "Estoque Atual Máximo para Oportunidade" ou os filtros adicionais e clique em "Aplicar Critérios e Filtros".
