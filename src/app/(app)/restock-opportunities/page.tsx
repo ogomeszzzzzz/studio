@@ -6,7 +6,7 @@ import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import { FilterControlsSection } from '@/components/domain/FilterControlsSection';
 import { ProductDataTableSection } from '@/components/domain/ProductDataTableSection';
 import type { Product, FilterState } from '@/types';
-import { PackageSearch, AlertTriangle, Download, TrendingUp, PackageCheck, ListFilter, HelpCircle, Loader2 } from 'lucide-react';
+import { PackageSearch, AlertTriangle, Download, TrendingUp, PackageCheck, ListFilter, HelpCircle, Loader2, Database } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,24 +19,132 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { clientAuth, firestore } from '@/lib/firebase/config'; // Added firestore
+import type { User } from 'firebase/auth'; // Added User type
+import { collection, getDocs, writeBatch, doc, Timestamp, query, deleteDoc, addDoc } from 'firebase/firestore'; // Added Firestore functions
 
 
 const ALL_COLLECTIONS_VALUE = "_ALL_COLLECTIONS_";
 const ALL_PRODUCT_TYPES_VALUE = "_ALL_PRODUCT_TYPES_";
 const DEFAULT_LOW_STOCK_THRESHOLD = 10;
 
+// Helper to convert Firestore Timestamps to JS Dates and vice-versa in Product objects
+const productToFirestore = (product: Product): any => {
+  return {
+    ...product,
+    collectionStartDate: product.collectionStartDate ? Timestamp.fromDate(product.collectionStartDate) : null,
+    collectionEndDate: product.collectionEndDate ? Timestamp.fromDate(product.collectionEndDate) : null,
+  };
+};
+
+const productFromFirestore = (data: any): Product => {
+  return {
+    ...data,
+    collectionStartDate: data.collectionStartDate ? (data.collectionStartDate as Timestamp).toDate() : null,
+    collectionEndDate: data.collectionEndDate ? (data.collectionEndDate as Timestamp).toDate() : null,
+  } as Product;
+};
+
+
 export default function RestockOpportunitiesPage() {
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [allProducts, setAllProducts] = useState<Product[]>([]); // This will hold products from Firestore or fresh upload
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
   const [baseFilters, setBaseFilters] = useState<FilterState | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // General loading for filters/initial parse
   const [isExporting, setIsExporting] = useState(false);
   const [lowStockThreshold, setLowStockThreshold] = useState<string>(DEFAULT_LOW_STOCK_THRESHOLD.toString());
   const { toast } = useToast();
 
-  const handleDataParsed = useCallback((data: Product[]) => {
-    setAllProducts(data);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
+  const [isSavingFirestore, setIsSavingFirestore] = useState(false);
+  const [isProcessingExcel, setIsProcessingExcel] = useState(false);
+
+
+  useEffect(() => {
+    const unsubscribe = clientAuth.onAuthStateChanged((user) => {
+      setCurrentUser(user);
+       if (!user) {
+        setAllProducts([]); // Clear products if user logs out
+        setFilteredProducts([]);
+        setIsLoadingFirestore(false);
+      }
+    });
+    return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (currentUser) {
+      const fetchProducts = async () => {
+        setIsLoadingFirestore(true);
+        try {
+          // Using the same 'products' collection as the dashboard
+          const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
+          const snapshot = await getDocs(productsCol);
+          const productsFromDb = snapshot.docs.map(doc => productFromFirestore(doc.data()));
+          setAllProducts(productsFromDb);
+           if (productsFromDb.length > 0) {
+            toast({ title: "Dados Carregados", description: "Dados de produtos carregados do banco de dados." });
+          }
+        } catch (error) {
+          console.error("Error fetching products from Firestore:", error);
+          toast({ title: "Erro ao Carregar Dados", description: "Não foi possível buscar os produtos do banco de dados.", variant: "destructive" });
+        } finally {
+          setIsLoadingFirestore(false);
+        }
+      };
+      fetchProducts();
+    } else {
+        setAllProducts([]); // Clear products if no user
+        setFilteredProducts([]);
+        setIsLoadingFirestore(false);
+    }
+  }, [currentUser, toast]);
+
+  const saveProductsToFirestore = async (productsToSave: Product[]) => {
+    if (!currentUser) {
+      toast({ title: "Usuário não autenticado", description: "Faça login para salvar os dados.", variant: "destructive" });
+      return;
+    }
+    setIsSavingFirestore(true);
+    try {
+      const productsColRef = collection(firestore, 'users', currentUser.uid, 'products');
+      
+      const existingProductsQuery = query(productsColRef);
+      const existingDocsSnapshot = await getDocs(existingProductsQuery);
+      
+      if (!existingDocsSnapshot.empty) {
+        const batchDelete = writeBatch(firestore);
+        existingDocsSnapshot.forEach(docSnapshot => batchDelete.delete(docSnapshot.ref));
+        await batchDelete.commit();
+      }
+
+      if (productsToSave.length > 0) {
+        const batchAdd = writeBatch(firestore);
+        productsToSave.forEach(product => {
+          const newDocRef = doc(productsColRef);
+          batchAdd.set(newDocRef, productToFirestore(product));
+        });
+        await batchAdd.commit();
+      }
+      
+      setAllProducts(productsToSave); // Update local state immediately
+      toast({ title: "Dados Salvos!", description: `${productsToSave.length} produtos foram salvos e atualizados.` });
+
+    } catch (error) {
+      console.error("Error saving products to Firestore:", error);
+      toast({ title: "Erro ao Salvar", description: "Não foi possível salvar os produtos.", variant: "destructive" });
+    } finally {
+      setIsSavingFirestore(false);
+    }
+  };
+
+  const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
+    setIsProcessingExcel(true); // Indicate excel processing has started
+    await saveProductsToFirestore(parsedProducts);
+    setIsProcessingExcel(false); // Indicate excel processing has ended
+  }, [currentUser]);
+
 
   const availableCollections = useMemo(() => {
     const collections = new Set(allProducts.map(p => p.collection).filter(Boolean).sort());
@@ -79,7 +187,6 @@ export default function RestockOpportunitiesPage() {
       }
     }
 
-    // Core logic for restock opportunities
     tempFiltered = tempFiltered.filter(p =>
         p.stock <= currentThreshold &&
         (p.readyToShip > 0 || p.regulatorStock > 0)
@@ -95,22 +202,24 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-   if(allProducts.length > 0) {
+   if(allProducts.length > 0) { // Only apply if there's data
     applyAllFilters();
+   } else if (!isLoadingFirestore) { // If not loading and no data, ensure filtered is empty
+    setFilteredProducts([]);
    }
-  }, [allProducts, lowStockThreshold, baseFilters, applyAllFilters]); // Adicionado applyAllFilters aqui
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allProducts, lowStockThreshold, baseFilters, applyAllFilters, isLoadingFirestore]);
 
-  const handleProcessingStart = () => setIsLoading(true);
-  const handleProcessingEnd = () => {
-    setIsLoading(false);
-  };
+  const handleProcessingStart = () => setIsProcessingExcel(true);
+  const handleProcessingEnd = () => setIsProcessingExcel(false);
+
 
   const summaryStats = useMemo(() => {
     const totalSkusToRestock = filteredProducts.length;
     const totalUnitsAvailableForRestock = filteredProducts.reduce((sum, p) => sum + p.readyToShip + p.regulatorStock, 0);
     const potentialStockAtRiskUnits = filteredProducts.reduce((sum, p) => {
       if (p.stock === 0) return sum + p.readyToShip + p.regulatorStock;
-      return sum + Math.max(0, (p.readyToShip + p.regulatorStock) - p.stock);
+      return sum + Math.max(0, (p.readyToShip + p.regulatorStock) - p.stock); // This logic might need review based on business rule
     }, 0);
 
     return {
@@ -171,21 +280,54 @@ export default function RestockOpportunitiesPage() {
                 Oportunidades de Reabastecimento
             </h1>
             <p className="text-muted-foreground">
-                Identifique produtos com baixo estoque que possuem unidades em "Pronta Entrega" ou "Regulador" para reposição.
+                Identifique produtos com baixo estoque que possuem unidades em "Pronta Entrega" ou "Regulador" para reposição. Os dados são salvos em seu perfil.
             </p>
         </div>
       </div>
 
       <ExcelUploadSection
-        onDataParsed={handleDataParsed}
+        onDataParsed={handleExcelDataProcessed}
         onProcessingStart={handleProcessingStart}
         onProcessingEnd={handleProcessingEnd}
         collectionColumnKey="Descrição Linha Comercial"
-        cardTitle="1. Carregar Dados do Excel"
-        cardDescription="Faça o upload da planilha de produtos. A coluna 'Descrição Linha Comercial' será usada para 'Coleção'."
+        cardTitle="1. Carregar/Atualizar Dados do Excel"
+        cardDescription="Faça o upload da planilha de produtos. Os dados substituirão os existentes em seu perfil."
+        isProcessingParent={isSavingFirestore || isProcessingExcel}
       />
+      
+      {(isLoadingFirestore || isSavingFirestore) && (
+         <Card className="shadow-lg">
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" /> 
+              {isSavingFirestore ? "Salvando dados..." : "Carregando dados..."}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground">Por favor, aguarde.</p>
+          </CardContent>
+        </Card>
+      )}
 
-      {allProducts.length > 0 && (
+
+      {!isLoadingFirestore && !isSavingFirestore && allProducts.length === 0 && !isProcessingExcel && (
+        <Card className="shadow-lg text-center py-10">
+          <CardHeader>
+            <CardTitle className="flex items-center justify-center text-xl">
+                <Database className="mr-2 h-7 w-7 text-primary" />
+                Comece Analisando as Oportunidades
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground">
+              Carregue um arquivo Excel no passo "1. Carregar Dados do Excel" para identificar produtos com baixo estoque que podem ser reabastecidos.
+            </p>
+             <p className="text-sm text-muted-foreground mt-2">Se você já carregou dados antes, eles serão buscados automaticamente. Caso contrário, esta mensagem indica que não há dados salvos.</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {!isLoadingFirestore && !isSavingFirestore && allProducts.length > 0 && (
         <>
           <Card className="shadow-md border-primary border-l-4">
             <CardHeader>
@@ -224,7 +366,7 @@ export default function RestockOpportunitiesPage() {
                         className="mt-1 text-base"
                         />
                     </div>
-                    <Button onClick={applyAllFilters} className="w-full md:w-auto py-2.5 text-base" disabled={isLoading}>
+                    <Button onClick={applyAllFilters} className="w-full md:w-auto py-2.5 text-base" disabled={isLoading || isSavingFirestore}>
                         {isLoading ? (
                             <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                         ) : (
@@ -234,7 +376,7 @@ export default function RestockOpportunitiesPage() {
                     </Button>
                 </div>
                 <FilterControlsSection
-                    products={allProducts}
+                    products={allProducts} // Pass allProducts here for filter options
                     onFilterChange={handleBaseFilterChange}
                     availableCollections={availableCollections}
                     availableProductTypes={availableProductTypes}
@@ -252,7 +394,7 @@ export default function RestockOpportunitiesPage() {
                     <CardDescription>
                         Visão geral e lista detalhada dos produtos que representam oportunidades de reabastecimento.
                     </CardDescription>
-                    <Button onClick={handleExportToExcel} disabled={filteredProducts.length === 0 || isExporting || isLoading} size="sm">
+                    <Button onClick={handleExportToExcel} disabled={filteredProducts.length === 0 || isExporting || isLoading || isSavingFirestore} size="sm">
                         {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                         {isExporting ? "Exportando..." : "Exportar Lista para Excel"}
                     </Button>
@@ -294,7 +436,7 @@ export default function RestockOpportunitiesPage() {
 
                 <ProductDataTableSection
                     products={filteredProducts}
-                    isLoading={isLoading && filteredProducts.length === 0}
+                    isLoading={(isLoading || isSavingFirestore || isLoadingFirestore) && filteredProducts.length === 0}
                     cardIcon={PackageSearch}
                     cardTitle="Produtos com Oportunidade de Reabastecimento"
                     cardDescription="Lista de produtos com baixo estoque atual e disponibilidade em 'Pronta Entrega' ou 'Regulador'."
@@ -305,14 +447,14 @@ export default function RestockOpportunitiesPage() {
                     showReadyToShipColumn={true}
                     showRegulatorStockColumn={true}
                     showCollectionColumn={true}
-                    showDescriptionColumn={true}
+                    showDescriptionColumn={true} // Estampa
                     showSizeColumn={true}
                     showProductTypeColumn={true}
-                    showStartDateColumn={false}
-                    showEndDateColumn={false}
-                    showStatusColumn={true}
+                    showStartDateColumn={false} // Datas não são o foco aqui
+                    showEndDateColumn={false}   // Datas não são o foco aqui
+                    showStatusColumn={true}    // Status da coleção pode ser útil
                 />
-                 {allProducts.length > 0 && filteredProducts.length === 0 && !isLoading && (
+                 {allProducts.length > 0 && filteredProducts.length === 0 && !isLoading && !isSavingFirestore && !isLoadingFirestore && (
                     <Card className="shadow-md my-6 border-blue-500/50 border-l-4">
                         <CardHeader>
                             <CardTitle className="flex items-center text-blue-700">
@@ -333,21 +475,6 @@ export default function RestockOpportunitiesPage() {
             </CardContent>
           </Card>
         </>
-      )}
-      {allProducts.length === 0 && !isLoading && (
-        <Card className="shadow-lg text-center py-10">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-center text-xl">
-                <TrendingUp className="mr-2 h-7 w-7 text-primary" />
-                Comece Analisando as Oportunidades
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground">
-              Carregue um arquivo Excel no passo "1. Carregar Dados do Excel" para identificar produtos com baixo estoque que podem ser reabastecidos a partir da "Pronta Entrega" ou "Regulador".
-            </p>
-          </CardContent>
-        </Card>
       )}
     </div>
   );

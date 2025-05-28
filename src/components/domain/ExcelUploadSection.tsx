@@ -9,24 +9,26 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useToast } from '@/hooks/use-toast';
 import type { Product } from '@/types';
 import { parseExcelData } from '@/lib/excel-parser';
-import { UploadCloud, Loader2 } from 'lucide-react';
+import { UploadCloud, Loader2, Save } from 'lucide-react';
 
 interface ExcelUploadSectionProps {
   onDataParsed: (data: Product[]) => void;
   onProcessingStart: () => void;
   onProcessingEnd: () => void;
-  collectionColumnKey?: string; // New prop
+  collectionColumnKey?: string;
   cardTitle?: string;
   cardDescription?: string;
+  isProcessingParent?: boolean; // New prop to reflect parent's saving state
 }
 
 export function ExcelUploadSection({ 
   onDataParsed, 
   onProcessingStart, 
   onProcessingEnd, 
-  collectionColumnKey = 'COLEÇÃO', // Default to 'COLEÇÃO'
+  collectionColumnKey = 'COLEÇÃO',
   cardTitle = "Upload Collection Data",
-  cardDescription = "Upload an Excel file with product details (ID VTEX, Name, Stock, Collection, Dates, etc.)."
+  cardDescription = "Upload an Excel file with product details (ID VTEX, Name, Stock, Collection, Dates, etc.).",
+  isProcessingParent = false, // Default to false
 }: ExcelUploadSectionProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isParsing, setIsParsing] = useState(false);
@@ -44,7 +46,7 @@ export function ExcelUploadSection({
           variant: "destructive",
         });
         setSelectedFile(null);
-        event.target.value = ''; // Reset file input
+        event.target.value = ''; 
       }
     }
   };
@@ -62,12 +64,12 @@ export function ExcelUploadSection({
     setIsParsing(true);
     onProcessingStart();
     try {
-      // Pass the collectionColumnKey to parseExcelData
       const data = await parseExcelData(selectedFile, collectionColumnKey);
-      onDataParsed(data);
+      onDataParsed(data); // This will now trigger saving to Firestore
+      // Toast for successful parsing is good, saving toast will come from parent
       toast({
-        title: "File Processed",
-        description: `${data.length} products loaded successfully.`,
+        title: "Arquivo Processado",
+        description: `${data.length} produtos carregados da planilha. Salvando no banco de dados...`,
       });
     } catch (error: any) {
       console.error("Error processing file:", error);
@@ -76,12 +78,17 @@ export function ExcelUploadSection({
         description: error.message || "An unknown error occurred while parsing the file.",
         variant: "destructive",
       });
-      onDataParsed([]); // Clear any previous data
+      onDataParsed([]); 
     } finally {
       setIsParsing(false);
       onProcessingEnd();
+      setSelectedFile(null); // Clear selected file after processing
+      const fileInput = document.getElementById('excel-upload-input') as HTMLInputElement;
+      if (fileInput) fileInput.value = '';
     }
   };
+
+  const effectiveIsProcessing = isParsing || isProcessingParent;
 
   return (
     <Card className="shadow-lg">
@@ -97,24 +104,32 @@ export function ExcelUploadSection({
       <CardContent className="space-y-4">
         <div className="flex flex-col sm:flex-row gap-4 items-center">
           <Input
+            id="excel-upload-input"
             type="file"
             accept=".xlsx, .xls"
             onChange={handleFileChange}
             className="flex-grow file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
             aria-label="Upload Excel file"
+            disabled={effectiveIsProcessing}
           />
-          <Button onClick={handleProcessFile} disabled={!selectedFile || isParsing} className="w-full sm:w-auto">
-            {isParsing ? (
+          <Button 
+            onClick={handleProcessFile} 
+            disabled={!selectedFile || effectiveIsProcessing} 
+            className="w-full sm:w-auto"
+          >
+            {effectiveIsProcessing ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Processing...
+                {isProcessingParent ? "Salvando Dados..." : "Processando Planilha..."}
               </>
             ) : (
-              "Process File"
+              <>
+               <Save className="mr-2 h-4 w-4" /> Processar e Salvar Dados
+              </>
             )}
           </Button>
         </div>
-        {selectedFile && <p className="text-sm text-muted-foreground">Selected file: {selectedFile.name}</p>}
+        {selectedFile && !effectiveIsProcessing && <p className="text-sm text-muted-foreground">Arquivo selecionado: {selectedFile.name}</p>}
       </CardContent>
     </Card>
   );

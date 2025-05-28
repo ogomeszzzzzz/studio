@@ -1,0 +1,16 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false; // User profile writes are via admin if any
+
+      // Subcollection for products, can be shared by dashboard and restock if data is the same
+      // Or use specific subcollections like 'dashboardProducts', 'restockProducts'
+      match /products/{productId} {
+        allow read, write, delete: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+  }
+}

@@ -1,13 +1,13 @@
 
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
   BarChartBig, ShoppingBag, AlertTriangle, FileSpreadsheet,
   Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler,
-  Download, Loader2, Activity, Percent
+  Download, Loader2, Activity, Percent, Database, Save
 } from 'lucide-react';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import type { Product } from '@/types';
@@ -17,7 +17,9 @@ import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import autoTable from 'jspdf-autotable';
-
+import { clientAuth, firestore } from '@/lib/firebase/config'; // Added firestore
+import type { User } from 'firebase/auth'; // Added User type
+import { collection, getDocs, writeBatch, doc, Timestamp, query, deleteDoc, addDoc } from 'firebase/firestore'; // Added Firestore functions
 
 interface AggregatedCollectionData {
   name: string;
@@ -69,16 +71,126 @@ const chartConfigBase = {
 
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
 
+// Helper to convert Firestore Timestamps to JS Dates and vice-versa in Product objects
+const productToFirestore = (product: Product): any => {
+  return {
+    ...product,
+    collectionStartDate: product.collectionStartDate ? Timestamp.fromDate(product.collectionStartDate) : null,
+    collectionEndDate: product.collectionEndDate ? Timestamp.fromDate(product.collectionEndDate) : null,
+  };
+};
+
+const productFromFirestore = (data: any): Product => {
+  return {
+    ...data,
+    collectionStartDate: data.collectionStartDate ? (data.collectionStartDate as Timestamp).toDate() : null,
+    collectionEndDate: data.collectionEndDate ? (data.collectionEndDate as Timestamp).toDate() : null,
+  } as Product;
+};
+
+
 export default function DashboardPage() {
   const [dashboardProducts, setDashboardProducts] = useState<Product[]>([]);
   const [isProcessingExcel, setIsProcessingExcel] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const { toast } = useToast();
 
-  const handleDashboardDataParsed = useCallback((data: Product[]) => {
-    setDashboardProducts(data);
-    // Removed diagnostic console.log for print data
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
+  const [isSavingFirestore, setIsSavingFirestore] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = clientAuth.onAuthStateChanged((user) => {
+      setCurrentUser(user);
+      if (!user) {
+        setDashboardProducts([]); // Clear products if user logs out
+        setIsLoadingFirestore(false);
+      }
+    });
+    return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (currentUser) {
+      const fetchProducts = async () => {
+        setIsLoadingFirestore(true);
+        try {
+          const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
+          const snapshot = await getDocs(productsCol);
+          const productsFromDb = snapshot.docs.map(doc => productFromFirestore(doc.data()));
+          setDashboardProducts(productsFromDb);
+          if (productsFromDb.length > 0) {
+            toast({ title: "Dados Carregados", description: "Dados de produtos carregados do banco de dados." });
+          }
+        } catch (error) {
+          console.error("Error fetching products from Firestore:", error);
+          toast({ title: "Erro ao Carregar Dados", description: "Não foi possível buscar os produtos do banco de dados.", variant: "destructive" });
+        } finally {
+          setIsLoadingFirestore(false);
+        }
+      };
+      fetchProducts();
+    } else {
+      setIsLoadingFirestore(false); // No user, so not loading from Firestore
+    }
+  }, [currentUser, toast]);
+
+
+  const saveProductsToFirestore = async (productsToSave: Product[]) => {
+    if (!currentUser) {
+      toast({ title: "Usuário não autenticado", description: "Faça login para salvar os dados.", variant: "destructive" });
+      return;
+    }
+    setIsSavingFirestore(true);
+    try {
+      const productsColRef = collection(firestore, 'users', currentUser.uid, 'products');
+      
+      // Delete existing products
+      const existingProductsQuery = query(productsColRef);
+      const existingDocsSnapshot = await getDocs(existingProductsQuery);
+      
+      let deleteOperations = 0;
+      let addOperations = 0;
+
+      // Firestore batch can handle up to 500 operations.
+      // We'll process in chunks if needed, though this simple version does all deletes then all adds.
+      // For very large datasets, chunking both delete and add batches would be more robust.
+
+      if (!existingDocsSnapshot.empty) {
+        const batchDelete = writeBatch(firestore);
+        existingDocsSnapshot.forEach(docSnapshot => {
+          batchDelete.delete(docSnapshot.ref);
+          deleteOperations++;
+        });
+        if (deleteOperations > 0) await batchDelete.commit();
+      }
+
+      // Add new products
+      if (productsToSave.length > 0) {
+        const batchAdd = writeBatch(firestore);
+        productsToSave.forEach(product => {
+          const newDocRef = doc(productsColRef); // Auto-generate ID
+          batchAdd.set(newDocRef, productToFirestore(product));
+          addOperations++;
+        });
+        if (addOperations > 0) await batchAdd.commit();
+      }
+      
+      setDashboardProducts(productsToSave); // Update local state
+      toast({ title: "Dados Salvos!", description: `${productsToSave.length} produtos foram salvos no banco de dados.` });
+
+    } catch (error) {
+      console.error("Error saving products to Firestore:", error);
+      toast({ title: "Erro ao Salvar", description: "Não foi possível salvar os produtos no banco de dados.", variant: "destructive" });
+    } finally {
+      setIsSavingFirestore(false);
+    }
+  };
+
+  const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
+    await saveProductsToFirestore(parsedProducts);
+  }, [currentUser]); // Include currentUser in dependencies
+
 
   const handleProcessingStart = () => setIsProcessingExcel(true);
   const handleProcessingEnd = () => setIsProcessingExcel(false);
@@ -115,7 +227,7 @@ export default function DashboardPage() {
     dashboardProducts.forEach(product => {
       const collectionKey = product.collection || 'Não Especificada';
       const sizeKey = product.size || 'Não Especificado';
-      const printKey = product.description || 'Não Especificada';
+      const printKey = product.description || 'Não Especificada'; // Assuming description is print
       const typeKey = product.productType || 'Não Especificado';
 
       const currentCol = stockByCollectionMap.get(collectionKey) || { stock: 0, skus: 0 };
@@ -161,7 +273,7 @@ export default function DashboardPage() {
     return {
       stockByCollection: Array.from(stockByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
       stockBySize: Array.from(stockBySizeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
-      stockByPrint: Array.from(stockByPrintMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock).slice(0, 15),
+      stockByPrint: Array.from(stockByPrintMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock).slice(0, 15), // Top 15 prints
       stockByProductType: Array.from(stockByProductTypeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
       zeroStockSkusByCollection: Array.from(zeroStockSkusByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.count - a.count),
       collectionRupturePercentage: collectionRupturePercentageData,
@@ -197,7 +309,7 @@ export default function DashboardPage() {
             color: "hsl(var(--destructive))",
         },
     };
-    aggregatedData.collectionRupturePercentage.forEach((item) => { // Removed index, not used
+    aggregatedData.collectionRupturePercentage.forEach((item) => {
         config[item.name] = { 
             label: item.name,
             color: "hsl(var(--destructive))", 
@@ -256,10 +368,10 @@ export default function DashboardPage() {
       yPos = (doc as any).lastAutoTable.finalY + 10;
 
       const addChartToPdf = async (elementId: string, title: string) => {
-        if (yPos > pageHeight - 50 && doc.getNumberOfPages() > 1) { // check only if not first page part
+        if (yPos > pageHeight - 50 && doc.getNumberOfPages() > 1) { 
              doc.addPage();
              yPos = margin + 5;
-        } else if (yPos > pageHeight - 50) { // if first page is full
+        } else if (yPos > pageHeight - 50) { 
             doc.addPage();
             yPos = margin + 5;
         }
@@ -327,7 +439,6 @@ export default function DashboardPage() {
     }
   };
 
-
   return (
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -336,7 +447,7 @@ export default function DashboardPage() {
           <p className="text-muted-foreground">Visão geral dos dados da sua coleção com base na coluna "Descrição Linha Comercial".</p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={generateDashboardPdf} disabled={isGeneratingPdf || dashboardProducts.length === 0}>
+          <Button onClick={generateDashboardPdf} disabled={isGeneratingPdf || isSavingFirestore || dashboardProducts.length === 0}>
             {isGeneratingPdf ? (
               <Loader2 className="mr-2 h-5 w-5 animate-spin" />
             ) : (
@@ -348,26 +459,41 @@ export default function DashboardPage() {
       </div>
 
       <ExcelUploadSection
-        onDataParsed={handleDashboardDataParsed}
+        onDataParsed={handleExcelDataProcessed}
         onProcessingStart={handleProcessingStart}
         onProcessingEnd={handleProcessingEnd}
         collectionColumnKey="Descrição Linha Comercial"
         cardTitle="Upload de Dados para Dashboard"
-        cardDescription="Carregue o arquivo Excel. A coluna 'Descrição Linha Comercial' será usada para agrupar coleções neste dashboard."
+        cardDescription="Carregue o arquivo Excel. Os dados serão salvos no seu perfil e usados para os gráficos abaixo."
+        isProcessingParent={isSavingFirestore}
       />
 
-      {dashboardProducts.length === 0 && !isProcessingExcel && (
+      {(isLoadingFirestore || isSavingFirestore) && (
         <Card className="shadow-lg">
           <CardHeader>
-            <CardTitle>Sem dados para exibir</CardTitle>
+            <CardTitle className="flex items-center">
+              <Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" /> 
+              {isSavingFirestore ? "Salvando dados..." : "Carregando dados..."}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-muted-foreground">Por favor, carregue um arquivo Excel para popular o dashboard.</p>
+            <p className="text-muted-foreground">Por favor, aguarde.</p>
           </CardContent>
         </Card>
       )}
 
-      {dashboardProducts.length > 0 && (
+      {!isLoadingFirestore && !isSavingFirestore && dashboardProducts.length === 0 && !isProcessingExcel && (
+        <Card className="shadow-lg">
+          <CardHeader>
+            <CardTitle className="flex items-center"><Database className="mr-2 h-6 w-6 text-primary" />Sem dados para exibir</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground">Por favor, carregue um arquivo Excel para popular o dashboard. Os dados serão salvos e carregados automaticamente nas próximas visitas.</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {!isLoadingFirestore && !isSavingFirestore && dashboardProducts.length > 0 && (
         <>
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             <Card className="shadow-lg hover:shadow-xl transition-shadow">
@@ -583,4 +709,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
