@@ -7,13 +7,13 @@ import { Button } from '@/components/ui/button';
 import {
   BarChartBig, ShoppingBag, AlertTriangle, FileSpreadsheet,
   Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler,
-  Download, Loader2, Activity, Percent, Database, Save, Filter
+  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import type { Product } from '@/types';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart";
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
@@ -54,6 +54,11 @@ interface CollectionRuptureData {
   rupturePercentage: number;
 }
 
+interface SkuStockStatusData {
+  name: string;
+  value: number;
+}
+
 const ALL_COLLECTIONS_VALUE = "_ALL_DASHBOARD_COLLECTIONS_";
 
 const chartConfigBase = {
@@ -73,6 +78,7 @@ const chartConfigBase = {
 } satisfies ChartConfig;
 
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
+const PIE_COLORS = ["hsl(var(--primary))", "hsl(var(--destructive))"]; // Primary for stocked, Destructive for zero stock
 
 const productToFirestore = (product: Product): any => {
   return {
@@ -121,7 +127,7 @@ export default function DashboardPage() {
         setIsLoadingFirestore(true);
         try {
           const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
-          const snapshot = await getDocs(productsCol);
+          const snapshot = await getDocs(query(productsCol)); // Use query to ensure it's a Query
           const productsFromDb = snapshot.docs.map(doc => productFromFirestore(doc.data()));
           setDashboardProducts(productsFromDb);
           if (productsFromDb.length > 0) {
@@ -191,14 +197,14 @@ export default function DashboardPage() {
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
     await saveProductsToFirestore(parsedProducts);
-  }, [currentUser, saveProductsToFirestore]); 
+  }, [currentUser, saveProductsToFirestore]); // saveProductsToFirestore is now memoized
 
 
   const handleProcessingStart = () => setIsProcessingExcel(true);
   const handleProcessingEnd = () => setIsProcessingExcel(false);
 
   const availableDashboardCollections = useMemo(() => {
-    const collections = new Set(dashboardProducts.map(p => p.collection).filter(Boolean).sort());
+    const collections = new Set(dashboardProducts.map(p => p.collection).filter(Boolean).sort((a,b) => (a as string).localeCompare(b as string)));
     return Array.from(collections);
   }, [dashboardProducts]);
 
@@ -218,6 +224,7 @@ export default function DashboardPage() {
         stockByProductType: [],
         zeroStockSkusByCollection: [],
         collectionRupturePercentage: [],
+        skuStockStatus: [],
         totalStock: 0,
         totalSkus: 0,
         totalZeroStockSkus: 0,
@@ -283,6 +290,11 @@ export default function DashboardPage() {
       };
     }).sort((a, b) => b.rupturePercentage - a.rupturePercentage);
 
+    const skuStockStatusData: SkuStockStatusData[] = [
+      { name: 'SKUs com Estoque', value: totalSkus - totalZeroStockSkus },
+      { name: 'SKUs Zerados', value: totalZeroStockSkus },
+    ].filter(d => d.value > 0);
+
 
     return {
       stockByCollection: Array.from(stockByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
@@ -291,6 +303,7 @@ export default function DashboardPage() {
       stockByProductType: Array.from(stockByProductTypeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
       zeroStockSkusByCollection: Array.from(zeroStockSkusByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.count - a.count),
       collectionRupturePercentage: collectionRupturePercentageData,
+      skuStockStatus: skuStockStatusData,
       totalStock,
       totalSkus,
       totalZeroStockSkus,
@@ -331,6 +344,17 @@ export default function DashboardPage() {
     });
     return config;
   }, [aggregatedData.collectionRupturePercentage]);
+
+  const skuStockStatusChartConfig = useMemo(() => {
+    const config: ChartConfig = {};
+    aggregatedData.skuStockStatus.forEach((item, index) => {
+      config[item.name] = {
+        label: item.name,
+        color: PIE_COLORS[index % PIE_COLORS.length],
+      };
+    });
+    return config;
+  }, [aggregatedData.skuStockStatus]);
 
 
   const generateDashboardPdf = async () => {
@@ -407,7 +431,7 @@ export default function DashboardPage() {
             let imgHeight = (imgProps.height * contentWidth) / imgProps.width;
             let imgWidth = contentWidth;
 
-            const maxChartHeight = pageHeight * 0.4;
+            const maxChartHeight = pageHeight * 0.4; // Max 40% of page height for a chart
             if (imgHeight > maxChartHeight) {
                 imgHeight = maxChartHeight;
                 imgWidth = (imgProps.width * imgHeight) / imgProps.height;
@@ -437,11 +461,12 @@ export default function DashboardPage() {
 
       const chartIdsAndTitles = [
         { id: 'chart-stock-by-collection', title: 'Estoque por Descrição Linha Comercial' },
+        { id: 'chart-sku-stock-status', title: 'Distribuição de SKUs (Estoque vs. Zerado)' },
+        { id: 'chart-rupture-by-collection', title: 'Ruptura (%) por Descrição Linha Comercial' },
         { id: 'chart-stock-by-size', title: 'Estoque por Tamanho (Excel)' },
         { id: 'chart-stock-by-print', title: 'Estoque por Estampa (Top 15 - Coluna Descrição)' },
         { id: 'chart-stock-by-product-type', title: 'Estoque por Tipo de Produto (Coluna Tipo. Produto)' },
         { id: 'chart-zero-stock-skus', title: 'SKUs Zerados por Descrição Linha Comercial' },
-        { id: 'chart-rupture-by-collection', title: 'Ruptura (%) por Descrição Linha Comercial' },
       ];
 
       for (const chartInfo of chartIdsAndTitles) {
@@ -461,6 +486,23 @@ export default function DashboardPage() {
       setIsGeneratingPdf(false);
     }
   };
+
+  const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, index, name, value }: any) => {
+    const RADIAN = Math.PI / 180;
+    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+    const percentage = (percent * 100).toFixed(0);
+
+    if (percentage === "0") return null; // Don't render label for 0%
+
+    return (
+      <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize="12px" fontWeight="bold">
+        {`${percentage}%`}
+      </text>
+    );
+  };
+
 
   return (
     <div className="space-y-8">
@@ -485,7 +527,7 @@ export default function DashboardPage() {
                 <SelectContent>
                   <SelectItem value={ALL_COLLECTIONS_VALUE}>Todas as Coleções</SelectItem>
                   {availableDashboardCollections.map(collection => (
-                    <SelectItem key={collection} value={collection}>{collection}</SelectItem>
+                    <SelectItem key={collection as string} value={collection as string}>{collection as string}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -631,6 +673,71 @@ export default function DashboardPage() {
               </Card>
             )}
 
+            {aggregatedData.skuStockStatus.length > 0 && aggregatedData.totalSkus > 0 && (
+              <Card id="chart-sku-stock-status" className="shadow-lg hover:shadow-xl transition-shadow">
+                <CardHeader>
+                  <CardTitle className="flex items-center"><PieChartIcon className="mr-2 h-5 w-5 text-primary" />Distribuição de SKUs (Estoque vs. Zerado)</CardTitle>
+                  <CardDescription>Proporção de SKUs com estoque e SKUs com estoque zerado.</CardDescription>
+                </CardHeader>
+                <CardContent className="h-[400px]">
+                   <ChartContainer config={skuStockStatusChartConfig} className="h-full w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Tooltip content={<ChartTooltipContent nameKey="name" />} />
+                        <Pie
+                          data={aggregatedData.skuStockStatus}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={120}
+                          labelLine={false}
+                          label={renderCustomizedLabel}
+                        >
+                          {aggregatedData.skuStockStatus.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </ChartContainer>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-2">
+            {aggregatedData.collectionRupturePercentage.length > 0 && (
+              <Card id="chart-rupture-by-collection" className="shadow-lg hover:shadow-xl transition-shadow">
+                <CardHeader>
+                  <CardTitle className="flex items-center"><Percent className="mr-2 h-5 w-5 text-destructive" />Ruptura (%) por Descrição Linha Comercial</CardTitle>
+                  <CardDescription>Porcentagem de SKUs com estoque zero em cada descrição linha comercial.</CardDescription>
+                </CardHeader>
+                <CardContent className="h-[400px]">
+                  <ChartContainer config={collectionRuptureChartConfig} className="h-full w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={aggregatedData.collectionRupturePercentage} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                            <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/>
+                            <YAxis 
+                              tickFormatter={(value) => `${value}%`} 
+                              domain={[0, 'dataMax + 5']} 
+                              allowDecimals={false}
+                            />
+                            <Tooltip 
+                              content={<ChartTooltipContent />}
+                              formatter={(value: number) => `${value.toFixed(2)}%`}
+                            />
+                            <Legend />
+                            <Bar dataKey="rupturePercentage" name="Ruptura (%)" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                    </ChartContainer>
+                </CardContent>
+              </Card>
+            )}
+
             {aggregatedData.stockBySize.length > 0 && (
               <Card id="chart-stock-by-size" className="shadow-lg hover:shadow-xl transition-shadow">
                 <CardHeader>
@@ -703,15 +810,14 @@ export default function DashboardPage() {
             )}
           </div>
 
-          <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-2">
-            {aggregatedData.zeroStockSkusByCollection.length > 0 && (
-              <Card id="chart-zero-stock-skus" className="shadow-lg hover:shadow-xl transition-shadow">
+          {aggregatedData.zeroStockSkusByCollection.length > 0 && (
+            <Card id="chart-zero-stock-skus" className="shadow-lg hover:shadow-xl transition-shadow">
                 <CardHeader>
-                  <CardTitle className="flex items-center"><TrendingDown className="mr-2 h-5 w-5 text-destructive" />SKUs Zerados por Descrição Linha Comercial</CardTitle>
-                  <CardDescription>Contagem de SKUs com estoque zero em cada descrição linha comercial (coluna "Descrição Linha Comercial" do Excel).</CardDescription>
+                <CardTitle className="flex items-center"><TrendingDown className="mr-2 h-5 w-5 text-destructive" />SKUs Zerados por Descrição Linha Comercial</CardTitle>
+                <CardDescription>Contagem de SKUs com estoque zero em cada descrição linha comercial (coluna "Descrição Linha Comercial" do Excel).</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[400px]">
-                  <ChartContainer config={zeroStockSkusChartConfig} className="h-full w-full">
+                <ChartContainer config={zeroStockSkusChartConfig} className="h-full w-full">
                     <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={aggregatedData.zeroStockSkusByCollection} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -724,39 +830,8 @@ export default function DashboardPage() {
                     </ResponsiveContainer>
                     </ChartContainer>
                 </CardContent>
-              </Card>
+            </Card>
             )}
-
-            {aggregatedData.collectionRupturePercentage.length > 0 && (
-              <Card id="chart-rupture-by-collection" className="shadow-lg hover:shadow-xl transition-shadow">
-                <CardHeader>
-                  <CardTitle className="flex items-center"><Percent className="mr-2 h-5 w-5 text-destructive" />Ruptura (%) por Descrição Linha Comercial</CardTitle>
-                  <CardDescription>Porcentagem de SKUs com estoque zero em cada descrição linha comercial.</CardDescription>
-                </CardHeader>
-                <CardContent className="h-[400px]">
-                  <ChartContainer config={collectionRuptureChartConfig} className="h-full w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={aggregatedData.collectionRupturePercentage} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                            <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/>
-                            <YAxis 
-                              tickFormatter={(value) => `${value}%`} 
-                              domain={[0, 'dataMax + 5']} 
-                              allowDecimals={false}
-                            />
-                            <Tooltip 
-                              content={<ChartTooltipContent />}
-                              formatter={(value: number) => `${value.toFixed(2)}%`}
-                            />
-                            <Legend />
-                            <Bar dataKey="rupturePercentage" name="Ruptura (%)" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} />
-                        </BarChart>
-                    </ResponsiveContainer>
-                    </ChartContainer>
-                </CardContent>
-              </Card>
-            )}
-          </div>
         </>
       )}
     </div>
