@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { clientAuth } from '@/lib/firebase/config';
 import { Button } from '@/components/ui/button';
-import { Loader2, LogOut, LayoutDashboard, UserCircle, PackageSearch, Settings } from 'lucide-react';
+import { Loader2, LogOut, LayoutDashboard, UserCircle, PackageSearch } from 'lucide-react'; // Removed Settings
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 import type { UserProfile } from '@/types';
@@ -22,21 +22,16 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const { toast } = useToast();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
+  // Removed isAdmin state
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(clientAuth, async (firebaseUser) => {
       if (firebaseUser) {
         setUserProfile({ uid: firebaseUser.uid, email: firebaseUser.email });
-        // Check if the logged-in user is the admin
-        if (firebaseUser.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL || firebaseUser.email === "gustavo.cordeiro@altenburg.com.br") { // Fallback for build time
-          setIsAdmin(true);
-        } else {
-          setIsAdmin(false);
-        }
+        // Removed isAdmin logic
       } else {
         setUserProfile(null);
-        setIsAdmin(false);
+        // Removed isAdmin logic
         router.replace('/login');
       }
       setLoading(false);
@@ -110,12 +105,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <PackageSearch className="h-5 w-5" />
             <span className="font-medium text-sm">Oportunidades Reabast.</span>
         </Link>
-        {isAdmin && (
-          <Link href="/admin-settings" className="flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors">
-            <Settings className="h-5 w-5" />
-            <span className="font-medium text-sm">Configurações Admin</span>
-          </Link>
-        )}
+        {/* Admin link removed */}
       </nav>
       <div className="flex-1 flex flex-col bg-background">
         <AuthenticatedHeader />
