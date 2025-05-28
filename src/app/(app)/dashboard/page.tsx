@@ -124,15 +124,15 @@ export default function DashboardPage() {
     const unsubscribe = clientAuth.onAuthStateChanged((user) => {
       setCurrentUser(user);
       if (!user) {
-        setDashboardProducts([]); // Clear products on logout
-        setIsLoadingFirestore(false); // Ensure loading stops if user logs out before initial load
+        setDashboardProducts([]); 
+        setIsLoadingFirestore(false); 
       }
     });
     return () => unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (currentUser && dashboardProducts.length === 0 && !isSavingFirestore) { // Fetch only if user is present and products are not loaded
+    if (currentUser && dashboardProducts.length === 0 && !isSavingFirestore) { 
       console.log(`DashboardPage: Fetching products for user UID: ${currentUser.uid} because dashboardProducts is empty.`);
       setIsLoadingFirestore(true);
       const fetchProducts = async () => {
@@ -154,9 +154,8 @@ export default function DashboardPage() {
       fetchProducts();
     } else if (currentUser && dashboardProducts.length > 0) {
       console.log(`DashboardPage: Products already loaded for user UID: ${currentUser.uid}. Skipping fetch.`);
-      setIsLoadingFirestore(false); // Data is already there
+      setIsLoadingFirestore(false); 
     } else if (!currentUser) {
-      // Handled by onAuthStateChanged
       setIsLoadingFirestore(false);
     }
   }, [currentUser, toast, dashboardProducts.length, isSavingFirestore]);
@@ -241,11 +240,11 @@ export default function DashboardPage() {
 
     if (vtexIdStatusFilterDashboard === "withVtexId") {
       products = products.filter(p => 
-        p.vtexId && String(p.vtexId).trim() !== '' && String(p.vtexId).toUpperCase() !== '#N/D'
+        typeof p.vtexId === 'number' && !isNaN(p.vtexId)
       );
     } else if (vtexIdStatusFilterDashboard === "withoutVtexId") {
       products = products.filter(p => 
-        !p.vtexId || String(p.vtexId).trim() === '' || String(p.vtexId).toUpperCase() === '#N/D'
+        typeof p.vtexId !== 'number' || (typeof p.vtexId === 'number' && isNaN(p.vtexId))
       );
     }
     return products;
@@ -385,7 +384,7 @@ export default function DashboardPage() {
         },
     };
     aggregatedData.collectionRupturePercentage.forEach((item) => {
-        if (!config[item.name]) { // Check if already exists to avoid overwriting rupturePercentage
+        if (!config[item.name]) { 
           config[item.name] = { 
               label: item.name,
           };
@@ -429,7 +428,7 @@ export default function DashboardPage() {
         appliedFiltersText.push(`Coleção: ${selectedCollection}`);
       }
       if(vtexIdStatusFilterDashboard !== "all") {
-        const statusText = vtexIdStatusFilterDashboard === "withVtexId" ? "Com ID VTEX" : "Sem ID VTEX";
+        const statusText = vtexIdStatusFilterDashboard === "withVtexId" ? "Com ID VTEX (Número)" : "Sem ID VTEX (Texto/#N/D)";
         appliedFiltersText.push(`Status ID VTEX: ${statusText}`);
       }
       
@@ -484,8 +483,7 @@ export default function DashboardPage() {
           return;
         }
         
-        // Add space and title before capturing
-        if (yPos + 10 > pageHeight - margin) { // Space for title + some chart height
+        if (yPos + 10 > pageHeight - margin) { 
              doc.addPage();
              yPos = margin;
         }
@@ -501,15 +499,15 @@ export default function DashboardPage() {
             scale: 1.5, 
             useCORS: true, 
             logging: false,
-            backgroundColor: '#ffffff' // Ensure background for transparent charts
+            backgroundColor: '#ffffff' 
           });
-          const imgData = canvas.toDataURL('image/png', 0.95); // Higher quality PNG
+          const imgData = canvas.toDataURL('image/png', 0.95); 
           
           const imgProps = doc.getImageProperties(imgData);
           let imgHeight = (imgProps.height * contentWidth) / imgProps.width;
           let imgWidth = contentWidth;
 
-          const maxChartHeight = pageHeight * 0.45; // Max height to avoid oversized charts
+          const maxChartHeight = pageHeight * 0.45; 
           if (imgHeight > maxChartHeight) {
               imgHeight = maxChartHeight;
               imgWidth = (imgProps.width * imgHeight) / imgProps.height;
@@ -518,7 +516,6 @@ export default function DashboardPage() {
           if (yPos + imgHeight > pageHeight - margin) {
             doc.addPage();
             yPos = margin;
-            // Re-add title on new page if chart starts here
             doc.setFontSize(13);
             doc.setFont('helvetica', 'bold');
             doc.text(chartTitle, margin, yPos);
@@ -526,7 +523,7 @@ export default function DashboardPage() {
             yPos += 8;
           }
           doc.addImage(imgData, 'PNG', margin, yPos, imgWidth, imgHeight);
-          yPos += imgHeight + 10; // Increased spacing after chart
+          yPos += imgHeight + 10; 
         } catch (error) {
           console.error(`Erro ao capturar gráfico ${elementId}:`, error);
           doc.setTextColor(255,0,0);
@@ -548,11 +545,9 @@ export default function DashboardPage() {
       ];
 
       for (const chartInfo of chartSections) {
-         // Check if there's data for the chart before attempting to add it
          if (chartInfo.data && chartInfo.data.length > 0) { 
             await addChartToPdf(chartInfo.id, chartInfo.title);
          } else {
-            // Optionally, add a note in PDF that this chart has no data
             if (yPos + 10 > pageHeight - margin) { doc.addPage(); yPos = margin; }
             doc.setFontSize(11);
             doc.setTextColor(100);
@@ -615,7 +610,6 @@ export default function DashboardPage() {
         </Button>
       </div>
 
-      {/* Filtros */}
        {dashboardProducts.length > 0 && (
         <Card className="shadow-md border-primary/30 border-l-4">
           <CardHeader>
@@ -652,8 +646,8 @@ export default function DashboardPage() {
                     </SelectTrigger>
                     <SelectContent>
                         <SelectItem value="all">Todos</SelectItem>
-                        <SelectItem value="withVtexId">Com ID VTEX (Cadastrado)</SelectItem>
-                        <SelectItem value="withoutVtexId">Sem ID VTEX (Não Cadastrado)</SelectItem>
+                        <SelectItem value="withVtexId">Com ID VTEX (Número)</SelectItem>
+                        <SelectItem value="withoutVtexId">Sem ID VTEX (Texto/#N/D)</SelectItem>
                     </SelectContent>
                 </Select>
             </div>
@@ -706,7 +700,7 @@ export default function DashboardPage() {
           <CardContent>
             <p className="text-muted-foreground">Nenhum produto encontrado para os filtros selecionados.
               {selectedCollection !== ALL_COLLECTIONS_VALUE && <> Coleção: <span className="font-semibold">{selectedCollection}</span>.</>}
-              {vtexIdStatusFilterDashboard !== "all" && <> Status ID VTEX: <span className="font-semibold">{vtexIdStatusFilterDashboard === "withVtexId" ? "Com ID" : "Sem ID"}</span>.</>}
+              {vtexIdStatusFilterDashboard !== "all" && <> Status ID VTEX: <span className="font-semibold">{vtexIdStatusFilterDashboard === "withVtexId" ? "Com ID (Número)" : "Sem ID (Texto/#N/D)"}</span>.</>}
               Por favor, ajuste os filtros ou selecione "Todas as Coleções" / "Todos" os status.
             </p>
           </CardContent>

@@ -78,7 +78,7 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-    if (currentUser && allProducts.length === 0 && !isSavingFirestore) { // Fetch only if user is present and products are not loaded
+    if (currentUser && allProducts.length === 0 && !isSavingFirestore) { 
       console.log(`RestockOpportunitiesPage: Fetching products for user UID: ${currentUser.uid} because allProducts is empty.`); 
       setIsLoadingFirestore(true);
       const fetchProducts = async () => {
@@ -100,9 +100,8 @@ export default function RestockOpportunitiesPage() {
       fetchProducts();
     } else if (currentUser && allProducts.length > 0) {
         console.log(`RestockOpportunitiesPage: Products already loaded for user UID: ${currentUser.uid}. Skipping fetch.`);
-        setIsLoadingFirestore(false); // Data is already there
+        setIsLoadingFirestore(false); 
     } else if (!currentUser) {
-        // Handled by onAuthStateChanged
         setIsLoadingFirestore(false);
     }
   }, [currentUser, toast, allProducts.length, isSavingFirestore]);
@@ -193,14 +192,13 @@ export default function RestockOpportunitiesPage() {
         toast({ title: "Aviso", description: `Limite de baixo estoque inválido, usando padrão: ${DEFAULT_LOW_STOCK_THRESHOLD}.`, variant: "default" });
     }
 
-    // Apply ID VTEX status filter
     if (vtexIdStatusFilter === "withVtexId") {
       tempFiltered = tempFiltered.filter(p => 
-        p.vtexId && String(p.vtexId).trim() !== '' && String(p.vtexId).toUpperCase() !== '#N/D'
+        typeof p.vtexId === 'number' && !isNaN(p.vtexId)
       );
     } else if (vtexIdStatusFilter === "withoutVtexId") {
       tempFiltered = tempFiltered.filter(p => 
-        !p.vtexId || String(p.vtexId).trim() === '' || String(p.vtexId).toUpperCase() === '#N/D'
+        typeof p.vtexId !== 'number' || (typeof p.vtexId === 'number' && isNaN(p.vtexId))
       );
     }
 
@@ -225,7 +223,6 @@ export default function RestockOpportunitiesPage() {
       }
     }
 
-    // Apply core restock opportunity logic
     tempFiltered = tempFiltered.filter(p =>
         p.stock <= currentThreshold &&
         (p.readyToShip > 0 || p.regulatorStock > 0) &&
@@ -415,7 +412,9 @@ export default function RestockOpportunitiesPage() {
                                         <HelpCircle className="ml-1.5 h-4 w-4 text-muted-foreground cursor-help" />
                                     </TooltipTrigger>
                                     <TooltipContent>
-                                        <p>Filtrar por itens com ou sem cadastro de ID VTEX (exclui #N/D).</p>
+                                        <p>Filtrar por itens com ou sem cadastro de ID VTEX.</p>
+                                        <p>"Com ID VTEX" significa que o campo ID VTEX é um número válido.</p>
+                                        <p>"Sem ID VTEX" significa que é texto (ex: #N/D), vazio ou NaN.</p>
                                     </TooltipContent>
                                 </Tooltip>
                             </TooltipProvider>
@@ -426,8 +425,8 @@ export default function RestockOpportunitiesPage() {
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">Todos (Com e Sem ID VTEX)</SelectItem>
-                                <SelectItem value="withVtexId">Com ID VTEX (Cadastrado)</SelectItem>
-                                <SelectItem value="withoutVtexId">Sem ID VTEX (Não Cadastrado)</SelectItem>
+                                <SelectItem value="withVtexId">Com ID VTEX (Número)</SelectItem>
+                                <SelectItem value="withoutVtexId">Sem ID VTEX (Texto/#N/D)</SelectItem>
                             </SelectContent>
                         </Select>
                     </div>
@@ -529,7 +528,7 @@ export default function RestockOpportunitiesPage() {
                         <CardContent>
                             <p className="text-muted-foreground">
                                 Nenhum produto com estoque atual &le; <span className="font-semibold">{parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD}</span> unidades, com disponibilidade em "Pronta Entrega" ou "Regulador", E sem "Pedidos em Aberto" foi encontrado com os filtros atuais (incluindo status do ID VTEX: {
-                                    vtexIdStatusFilter === "withVtexId" ? "Com ID VTEX" : vtexIdStatusFilter === "withoutVtexId" ? "Sem ID VTEX" : "Todos"
+                                    vtexIdStatusFilter === "withVtexId" ? "Com ID VTEX (Número)" : vtexIdStatusFilter === "withoutVtexId" ? "Sem ID VTEX (Texto/#N/D)" : "Todos"
                                 }).
                             </p>
                             <p className="text-muted-foreground mt-2">
