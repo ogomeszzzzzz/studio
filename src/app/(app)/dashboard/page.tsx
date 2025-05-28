@@ -4,20 +4,19 @@
 import { useState, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-// Link para Gap Analyzer removido
 import {
   BarChartBig, ShoppingBag, AlertTriangle, FileSpreadsheet,
   Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler,
-  Download, Loader2, Activity // Adicionado Activity para Regulador
+  Download, Loader2, Activity, Percent // Adicionado Percent para Ruptura
 } from 'lucide-react';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import type { Product } from '@/types';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart";
-import { useToast } from '@/hooks/use-toast'; 
-import jsPDF from 'jspdf'; // Importação direta
-import html2canvas from 'html2canvas'; // Importação direta
-import autoTable from 'jspdf-autotable'; // Importação direta
+import { useToast } from '@/hooks/use-toast';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
+import autoTable from 'jspdf-autotable';
 
 
 interface AggregatedCollectionData {
@@ -46,6 +45,12 @@ interface ZeroStockData {
   count: number;
 }
 
+interface CollectionRuptureData {
+  name: string;
+  rupturePercentage: number;
+}
+
+
 const chartConfigBase = {
   stock: {
     label: "Estoque",
@@ -55,6 +60,10 @@ const chartConfigBase = {
   },
   count: {
     label: "Contagem",
+  },
+  rupturePercentage: {
+    label: "Ruptura (%)",
+    color: "hsl(var(--destructive))",
   }
 } satisfies ChartConfig;
 
@@ -63,8 +72,8 @@ const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3
 export default function DashboardPage() {
   const [dashboardProducts, setDashboardProducts] = useState<Product[]>([]);
   const [isProcessingExcel, setIsProcessingExcel] = useState(false);
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false); 
-  const { toast } = useToast(); 
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const { toast } = useToast();
 
   const handleDashboardDataParsed = useCallback((data: Product[]) => {
     setDashboardProducts(data);
@@ -89,11 +98,12 @@ export default function DashboardPage() {
         stockByPrint: [],
         stockByProductType: [],
         zeroStockSkusByCollection: [],
+        collectionRupturePercentage: [],
         totalStock: 0,
         totalSkus: 0,
         totalZeroStockSkus: 0,
         totalReadyToShipStock: 0,
-        totalRegulatorStock: 0, // Alterado de totalOrderedStock
+        totalRegulatorStock: 0,
       };
     }
 
@@ -107,12 +117,12 @@ export default function DashboardPage() {
     let totalSkus = dashboardProducts.length;
     let totalZeroStockSkus = 0;
     let totalReadyToShipStock = 0;
-    let totalRegulatorStock = 0; // Alterado de totalOrderedStock
+    let totalRegulatorStock = 0;
 
     dashboardProducts.forEach(product => {
-      const collectionKey = product.collection || 'Não Especificada'; 
-      const sizeKey = product.size || 'Não Especificado'; 
-      const printKey = product.description || 'Não Especificada'; 
+      const collectionKey = product.collection || 'Não Especificada';
+      const sizeKey = product.size || 'Não Especificado';
+      const printKey = product.description || 'Não Especificada';
       const typeKey = product.productType || 'Não Especificado';
 
       const currentCol = stockByCollectionMap.get(collectionKey) || { stock: 0, skus: 0 };
@@ -140,8 +150,20 @@ export default function DashboardPage() {
       }
       totalStock += product.stock;
       totalReadyToShipStock += product.readyToShip;
-      totalRegulatorStock += product.regulatorStock; // Usando regulatorStock
+      totalRegulatorStock += product.regulatorStock;
     });
+    
+    const collectionRupturePercentageData: CollectionRuptureData[] = Array.from(stockByCollectionMap.entries()).map(([name, collData]) => {
+      const zeroStockData = zeroStockSkusByCollectionMap.get(name);
+      const zeroStockCount = zeroStockData ? zeroStockData.count : 0;
+      const totalSkusInCollection = collData.skus;
+      const rupturePercentage = totalSkusInCollection > 0 ? (zeroStockCount / totalSkusInCollection) * 100 : 0;
+      return {
+        name,
+        rupturePercentage: parseFloat(rupturePercentage.toFixed(2)),
+      };
+    }).sort((a, b) => b.rupturePercentage - a.rupturePercentage);
+
 
     return {
       stockByCollection: Array.from(stockByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
@@ -149,11 +171,12 @@ export default function DashboardPage() {
       stockByPrint: Array.from(stockByPrintMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock).slice(0, 15),
       stockByProductType: Array.from(stockByProductTypeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
       zeroStockSkusByCollection: Array.from(zeroStockSkusByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.count - a.count),
+      collectionRupturePercentage: collectionRupturePercentageData,
       totalStock,
       totalSkus,
       totalZeroStockSkus,
       totalReadyToShipStock,
-      totalRegulatorStock, // Retornando totalRegulatorStock
+      totalRegulatorStock,
     };
   }, [dashboardProducts]);
 
@@ -173,6 +196,23 @@ export default function DashboardPage() {
   const stockByPrintChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByPrint), [aggregatedData.stockByPrint]);
   const stockByProductTypeChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByProductType), [aggregatedData.stockByProductType]);
   const zeroStockSkusChartConfig = useMemo(() => createChartConfig(aggregatedData.zeroStockSkusByCollection), [aggregatedData.zeroStockSkusByCollection]);
+  
+  const collectionRuptureChartConfig = useMemo(() => {
+    const config: ChartConfig = {
+        rupturePercentage: {
+            label: "Ruptura (%)",
+            color: "hsl(var(--destructive))",
+        },
+    };
+    aggregatedData.collectionRupturePercentage.forEach((item, index) => {
+        config[item.name] = { // Though name isn't directly used by BarChart for dataKey, it's for consistency if tooltip needs it
+            label: item.name,
+            color: "hsl(var(--destructive))", // All bars will use destructive color
+        };
+    });
+    return config;
+  }, [aggregatedData.collectionRupturePercentage]);
+
 
   const generateDashboardPdf = async () => {
     if (dashboardProducts.length === 0) {
@@ -206,7 +246,7 @@ export default function DashboardPage() {
       const summaryTableBody = [
         ["Estoque Total", aggregatedData.totalStock.toLocaleString()],
         ["Pronta Entrega", aggregatedData.totalReadyToShipStock.toLocaleString()],
-        ["Regulador", aggregatedData.totalRegulatorStock.toLocaleString()], // Alterado de Pedidos
+        ["Regulador", aggregatedData.totalRegulatorStock.toLocaleString()],
         ["Total SKUs", aggregatedData.totalSkus.toLocaleString()],
         ["Total SKUs Zerados", aggregatedData.totalZeroStockSkus.toLocaleString()],
       ];
@@ -223,7 +263,7 @@ export default function DashboardPage() {
       yPos = (doc as any).lastAutoTable.finalY + 10;
 
       const addChartToPdf = async (elementId: string, title: string) => {
-        if (yPos > pageHeight - 50) { 
+        if (yPos > pageHeight - 50) {
           doc.addPage();
           yPos = margin + 5;
         }
@@ -235,12 +275,12 @@ export default function DashboardPage() {
         if (chartElement) {
           try {
             const canvas = await html2canvas(chartElement, { scale: 1.5, useCORS: true, logging: false });
-            const imgData = canvas.toDataURL('image/png', 0.9); 
+            const imgData = canvas.toDataURL('image/png', 0.9);
             const imgProps = doc.getImageProperties(imgData);
             let imgHeight = (imgProps.height * contentWidth) / imgProps.width;
             let imgWidth = contentWidth;
 
-            const maxChartHeight = pageHeight * 0.4; 
+            const maxChartHeight = pageHeight * 0.4;
             if (imgHeight > maxChartHeight) {
                 imgHeight = maxChartHeight;
                 imgWidth = (imgProps.width * imgHeight) / imgProps.height;
@@ -254,9 +294,9 @@ export default function DashboardPage() {
             yPos += imgHeight + 7;
           } catch (error) {
             console.error(`Error capturing chart ${elementId}:`, error);
-            doc.setTextColor(255,0,0); 
+            doc.setTextColor(255,0,0);
             doc.text(`Erro ao renderizar o gráfico: ${title}`, margin, yPos);
-            doc.setTextColor(0); 
+            doc.setTextColor(0);
             yPos += 7;
           }
         } else {
@@ -274,6 +314,7 @@ export default function DashboardPage() {
         { id: 'chart-stock-by-print', title: 'Estoque por Estampa (Top 15 - Coluna Descrição)' },
         { id: 'chart-stock-by-product-type', title: 'Estoque por Tipo de Produto (Coluna Tipo. Produto)' },
         { id: 'chart-zero-stock-skus', title: 'SKUs Zerados por Descrição Linha Comercial' },
+        { id: 'chart-rupture-by-collection', title: 'Ruptura (%) por Descrição Linha Comercial' },
       ];
 
       for (const chartInfo of chartIdsAndTitles) {
@@ -307,7 +348,6 @@ export default function DashboardPage() {
             )}
             Baixar Relatório PDF
           </Button>
-          {/* Link para Gap Analyzer foi removido */}
         </div>
       </div>
 
@@ -356,8 +396,8 @@ export default function DashboardPage() {
             </Card>
             <Card className="shadow-lg hover:shadow-xl transition-shadow">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Regulador</CardTitle> 
-                <Activity className="h-5 w-5 text-orange-500" /> 
+                <CardTitle className="text-sm font-medium">Regulador</CardTitle>
+                <Activity className="h-5 w-5 text-orange-500" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-foreground">{aggregatedData.totalRegulatorStock.toLocaleString()}</div>
@@ -488,28 +528,60 @@ export default function DashboardPage() {
             </Card>
           </div>
 
-          <Card id="chart-zero-stock-skus" className="shadow-lg hover:shadow-xl transition-shadow">
-            <CardHeader>
-              <CardTitle className="flex items-center"><TrendingDown className="mr-2 h-5 w-5 text-destructive" />SKUs Zerados por Descrição Linha Comercial</CardTitle>
-              <CardDescription>Contagem de SKUs com estoque zero em cada descrição linha comercial (coluna "Descrição Linha Comercial" do Excel).</CardDescription>
-            </CardHeader>
-            <CardContent className="h-[400px]">
-              {aggregatedData.zeroStockSkusByCollection.length > 0 ? (
-                <ChartContainer config={zeroStockSkusChartConfig} className="h-full w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={aggregatedData.zeroStockSkusByCollection} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/>
-                        <YAxis allowDecimals={false} tickFormatter={(value) => value.toLocaleString()}/>
-                        <Tooltip content={<ChartTooltipContent />} />
-                        <Legend />
-                        <Bar dataKey="count" name="SKUs Zerados" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                </ResponsiveContainer>
-                </ChartContainer>
-              ) : <p className="text-muted-foreground text-center pt-10">Nenhum SKU com estoque zerado ou sem dados carregados.</p>}
-            </CardContent>
-          </Card>
+          <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-2">
+            <Card id="chart-zero-stock-skus" className="shadow-lg hover:shadow-xl transition-shadow">
+              <CardHeader>
+                <CardTitle className="flex items-center"><TrendingDown className="mr-2 h-5 w-5 text-destructive" />SKUs Zerados por Descrição Linha Comercial</CardTitle>
+                <CardDescription>Contagem de SKUs com estoque zero em cada descrição linha comercial (coluna "Descrição Linha Comercial" do Excel).</CardDescription>
+              </CardHeader>
+              <CardContent className="h-[400px]">
+                {aggregatedData.zeroStockSkusByCollection.length > 0 ? (
+                  <ChartContainer config={zeroStockSkusChartConfig} className="h-full w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={aggregatedData.zeroStockSkusByCollection} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                          <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/>
+                          <YAxis allowDecimals={false} tickFormatter={(value) => value.toLocaleString()}/>
+                          <Tooltip content={<ChartTooltipContent />} />
+                          <Legend />
+                          <Bar dataKey="count" name="SKUs Zerados" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                  </ResponsiveContainer>
+                  </ChartContainer>
+                ) : <p className="text-muted-foreground text-center pt-10">Nenhum SKU com estoque zerado ou sem dados carregados.</p>}
+              </CardContent>
+            </Card>
+
+            <Card id="chart-rupture-by-collection" className="shadow-lg hover:shadow-xl transition-shadow">
+              <CardHeader>
+                <CardTitle className="flex items-center"><Percent className="mr-2 h-5 w-5 text-destructive" />Ruptura (%) por Descrição Linha Comercial</CardTitle>
+                <CardDescription>Porcentagem de SKUs com estoque zero em cada descrição linha comercial.</CardDescription>
+              </CardHeader>
+              <CardContent className="h-[400px]">
+                {aggregatedData.collectionRupturePercentage.length > 0 ? (
+                  <ChartContainer config={collectionRuptureChartConfig} className="h-full w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={aggregatedData.collectionRupturePercentage} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                          <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/>
+                          <YAxis 
+                            tickFormatter={(value) => `${value}%`} 
+                            domain={[0, 'dataMax + 5']} // Adiciona um pouco de espaço no topo
+                            allowDecimals={false}
+                          />
+                          <Tooltip 
+                            content={<ChartTooltipContent />}
+                            formatter={(value: number) => `${value.toFixed(2)}%`}
+                          />
+                          <Legend />
+                          <Bar dataKey="rupturePercentage" name="Ruptura (%)" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                  </ResponsiveContainer>
+                  </ChartContainer>
+                ) : <p className="text-muted-foreground text-center pt-10">Sem dados para análise de ruptura.</p>}
+              </CardContent>
+            </Card>
+          </div>
         </>
       )}
     </div>
