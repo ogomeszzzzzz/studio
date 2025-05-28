@@ -27,15 +27,14 @@ const toBoolean = (value: string | number | undefined): boolean => {
 };
 
 const getRowValue = (row: any, primaryKey: string, fallbacks: string[] = [], defaultValue: any = '') => {
-  if (row[primaryKey] !== undefined && row[primaryKey] !== null && String(row[primaryKey]).trim() !== '') {
-    return row[primaryKey];
-  }
-  for (const fallbackKey of fallbacks) {
-    if (row[fallbackKey] !== undefined && row[fallbackKey] !== null && String(row[fallbackKey]).trim() !== '') {
-      return row[fallbackKey];
+  const keysToCheck = [primaryKey, ...fallbacks];
+  for (const key of keysToCheck) {
+    if (row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== '') {
+      return row[key];
     }
   }
   
+  // Fallback to case-insensitive search for the primary key
   const rowKeys = Object.keys(row);
   const primaryKeyUpper = primaryKey.toUpperCase();
   const foundKey = rowKeys.find(k => k.toUpperCase() === primaryKeyUpper);
@@ -57,7 +56,7 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
           reject(new Error('Could not read file content.'));
           return;
         }
-        const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: false });
+        const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: false }); // Keep cellDates false to handle dates manually
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json<any>(worksheet, { raw: false, defval: null });
@@ -67,19 +66,31 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
           const endDate = parseDate(getRowValue(row, 'Fim Coleção', ['Fim Colecao']));
           const collectionValue = getRowValue(row, collectionColumnKey, [], '');
           
-          const productName = getRowValue(row, 'Nome Produto', ['Nome do Produto', 'Nome']);
-          const vtexIdValue = getRowValue(row, 'ID VTEX', ['Id Vtex', 'IDVtex', 'ID_VTEX']);
-          
+          // Explicitly check for ID VTEX variations
+          let vtexIdValue: string | number = '';
+          if (row['ID VTEX'] !== undefined && row['ID VTEX'] !== null) vtexIdValue = row['ID VTEX'];
+          else if (row['Id Vtex'] !== undefined && row['Id Vtex'] !== null) vtexIdValue = row['Id Vtex'];
+          else if (row['IDVtex'] !== undefined && row['IDVtex'] !== null) vtexIdValue = row['IDVtex'];
+          else if (row['ID_VTEX'] !== undefined && row['ID_VTEX'] !== null) vtexIdValue = row['ID_VTEX'];
+          else { // Last resort: case-insensitive search if common variations fail
+             const rowKeys = Object.keys(row);
+             const vtexKey = rowKeys.find(k => k.toUpperCase() === 'ID VTEX');
+             if (vtexKey && row[vtexKey] !== undefined && row[vtexKey] !== null) {
+                 vtexIdValue = row[vtexKey];
+             }
+          }
+
+
           return {
             vtexId: vtexIdValue,
-            name: productName,
+            name: getRowValue(row, 'Nome Produto', ['Nome do Produto', 'Nome']),
             productId: getRowValue(row, 'Produto'),
             derivation: getRowValue(row, 'Derivação'),
             productDerivation: getRowValue(row, 'Produto-Derivação', ['Produto Derivacao']),
             stock: Number(getRowValue(row, 'Estoque', [], 0)) || 0,
             readyToShip: Number(getRowValue(row, 'Pronta Entrega', [], 0)) || 0,
             regulatorStock: Number(getRowValue(row, 'Regulador', [], 0)) || 0,
-            openOrders: Number(getRowValue(row, 'Pedidos em Aberto', ['Pedidos Abertos'], 0)) || 0, // Novo campo
+            openOrders: Number(getRowValue(row, 'Pedidos em Aberto', ['Pedidos Abertos', 'Open Orders'], 0)) || 0,
             description: getRowValue(row, 'Descrição'), 
             size: getRowValue(row, 'Tamanho', [], 'Não Especificado'),
             productType: getRowValue(row, 'Tipo. Produto', ['Tipo Produto'], 'Não Especificado'),

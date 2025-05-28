@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import {
   ShoppingBag, AlertTriangle, FileSpreadsheet,
   Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler,
-  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon
+  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon, ListFilter
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -22,6 +22,7 @@ import autoTable from 'jspdf-autotable';
 import { clientAuth, firestore } from '@/lib/firebase/config';
 import type { User } from 'firebase/auth';
 import { collection, getDocs, writeBatch, doc, Timestamp, query } from 'firebase/firestore';
+import { Tooltip as ShadTooltip, TooltipContent as ShadTooltipContent, TooltipProvider as ShadTooltipProvider, TooltipTrigger as ShadTooltipTrigger } from "@/components/ui/tooltip"; // Renomeado para evitar conflito
 
 interface AggregatedCollectionData {
   name: string;
@@ -55,6 +56,8 @@ interface SkuStockStatusData {
   name: string;
   value: number;
 }
+
+type VtexIdStatusFilter = "all" | "withVtexId" | "withoutVtexId";
 
 const ALL_COLLECTIONS_VALUE = "_ALL_DASHBOARD_COLLECTIONS_";
 const FIRESTORE_BATCH_LIMIT = 450; // Firestore's hard limit is 500, stay a bit under.
@@ -114,6 +117,8 @@ export default function DashboardPage() {
   const [isSavingFirestore, setIsSavingFirestore] = useState(false);
 
   const [selectedCollection, setSelectedCollection] = useState<string>(ALL_COLLECTIONS_VALUE);
+  const [vtexIdStatusFilterDashboard, setVtexIdStatusFilterDashboard] = useState<VtexIdStatusFilter>("all");
+
 
   useEffect(() => {
     const unsubscribe = clientAuth.onAuthStateChanged((user) => {
@@ -229,11 +234,22 @@ export default function DashboardPage() {
   }, [dashboardProducts]);
 
   const filteredProductsForDashboard = useMemo(() => {
-    if (selectedCollection === ALL_COLLECTIONS_VALUE) {
-      return dashboardProducts;
+    let products = dashboardProducts;
+    if (selectedCollection !== ALL_COLLECTIONS_VALUE) {
+      products = products.filter(p => p.collection === selectedCollection);
     }
-    return dashboardProducts.filter(p => p.collection === selectedCollection);
-  }, [dashboardProducts, selectedCollection]);
+
+    if (vtexIdStatusFilterDashboard === "withVtexId") {
+      products = products.filter(p => 
+        p.vtexId && String(p.vtexId).trim() !== '' && String(p.vtexId).toUpperCase() !== '#N/D'
+      );
+    } else if (vtexIdStatusFilterDashboard === "withoutVtexId") {
+      products = products.filter(p => 
+        !p.vtexId || String(p.vtexId).trim() === '' || String(p.vtexId).toUpperCase() === '#N/D'
+      );
+    }
+    return products;
+  }, [dashboardProducts, selectedCollection, vtexIdStatusFilterDashboard]);
 
   const aggregatedData = useMemo(() => {
     if (filteredProductsForDashboard.length === 0) {
@@ -408,13 +424,24 @@ export default function DashboardPage() {
       const contentWidth = pageWidth - 2 * margin;
 
       let reportTitle = "Relatório do Dashboard de Performance";
+      let appliedFiltersText = [];
       if(selectedCollection !== ALL_COLLECTIONS_VALUE) {
-        reportTitle += `\nColeção: ${selectedCollection}`;
+        appliedFiltersText.push(`Coleção: ${selectedCollection}`);
       }
+      if(vtexIdStatusFilterDashboard !== "all") {
+        const statusText = vtexIdStatusFilterDashboard === "withVtexId" ? "Com ID VTEX" : "Sem ID VTEX";
+        appliedFiltersText.push(`Status ID VTEX: ${statusText}`);
+      }
+      
       doc.setFontSize(18);
       doc.text(reportTitle, pageWidth / 2, yPos, { align: "center" });
-      yPos += selectedCollection !== ALL_COLLECTIONS_VALUE ? 15 : 10;
+      yPos += 10;
 
+      if (appliedFiltersText.length > 0) {
+        doc.setFontSize(10);
+        doc.text("Filtros Aplicados: " + appliedFiltersText.join(' | '), pageWidth / 2, yPos, { align: "center" });
+        yPos += 7;
+      }
 
       doc.setFontSize(10);
       doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`, pageWidth / 2, yPos, { align: "center" });
@@ -534,8 +561,17 @@ export default function DashboardPage() {
             yPos += 10;
          }
       }
+      
+      let pdfFileName = `Relatorio_Dashboard_${new Date().toISOString().split('T')[0]}`;
+      if (selectedCollection !== ALL_COLLECTIONS_VALUE) {
+        pdfFileName += `_${selectedCollection.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      }
+      if (vtexIdStatusFilterDashboard !== "all") {
+        pdfFileName += `_${vtexIdStatusFilterDashboard === "withVtexId" ? 'ComIdVtex' : 'SemIdVtex'}`;
+      }
+      pdfFileName += '.pdf';
 
-      doc.save(`Relatorio_Dashboard_${new Date().toISOString().split('T')[0]}${selectedCollection !== ALL_COLLECTIONS_VALUE ? '_' + selectedCollection.replace(/[^a-zA-Z0-9]/g, '_') : ''}.pdf`);
+      doc.save(pdfFileName);
       toast({ title: "PDF Gerado!", description: "O download do relatório foi iniciado." });
     } catch (error) {
       console.error("Erro ao gerar PDF:", error);
@@ -569,17 +605,31 @@ export default function DashboardPage() {
           <h1 className="text-3xl font-bold tracking-tight text-foreground">Dashboard de Performance</h1>
           <p className="text-muted-foreground">Visão geral dos dados da sua coleção com base na coluna "Descrição Linha Comercial".</p>
         </div>
-        <div className="flex items-center gap-2">
-           {dashboardProducts.length > 0 && (
-            <div className="w-full sm:w-64">
-              <Label htmlFor="collectionFilterDashboard" className="sr-only">Filtrar por Coleção</Label>
+        <Button onClick={generateDashboardPdf} disabled={isGeneratingPdf || isSavingFirestore || isLoadingFirestore || filteredProductsForDashboard.length === 0}>
+            {isGeneratingPdf ? (
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+            ) : (
+              <Download className="mr-2 h-5 w-5" />
+            )}
+            Baixar Relatório PDF
+        </Button>
+      </div>
+
+      {/* Filtros */}
+       {dashboardProducts.length > 0 && (
+        <Card className="shadow-md border-primary/30 border-l-4">
+          <CardHeader>
+            <CardTitle className="flex items-center"><ListFilter className="mr-2 h-5 w-5 text-primary" />Filtros do Dashboard</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="collectionFilterDashboard">Filtrar por Coleção (Desc. Linha Comercial)</Label>
               <Select
                 value={selectedCollection}
                 onValueChange={setSelectedCollection}
                 disabled={isLoadingFirestore || isSavingFirestore || isGeneratingPdf}
               >
                 <SelectTrigger id="collectionFilterDashboard" aria-label="Filtrar por Coleção">
-                  <Filter className="mr-2 h-4 w-4 text-muted-foreground" />
                   <SelectValue placeholder="Filtrar por Coleção" />
                 </SelectTrigger>
                 <SelectContent>
@@ -590,17 +640,27 @@ export default function DashboardPage() {
                 </SelectContent>
               </Select>
             </div>
-          )}
-          <Button onClick={generateDashboardPdf} disabled={isGeneratingPdf || isSavingFirestore || isLoadingFirestore || filteredProductsForDashboard.length === 0}>
-            {isGeneratingPdf ? (
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-            ) : (
-              <Download className="mr-2 h-5 w-5" />
-            )}
-            Baixar Relatório PDF
-          </Button>
-        </div>
-      </div>
+            <div>
+                <Label htmlFor="vtexIdStatusFilterDashboard">Filtrar por Status ID VTEX</Label>
+                <Select 
+                  value={vtexIdStatusFilterDashboard} 
+                  onValueChange={(value) => setVtexIdStatusFilterDashboard(value as VtexIdStatusFilter)}
+                  disabled={isLoadingFirestore || isSavingFirestore || isGeneratingPdf}
+                >
+                    <SelectTrigger id="vtexIdStatusFilterDashboard" aria-label="Filtrar por Status ID VTEX">
+                        <SelectValue placeholder="Status ID VTEX" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="all">Todos</SelectItem>
+                        <SelectItem value="withVtexId">Com ID VTEX (Cadastrado)</SelectItem>
+                        <SelectItem value="withoutVtexId">Sem ID VTEX (Não Cadastrado)</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
 
       <ExcelUploadSection
         onDataParsed={handleExcelDataProcessed}
@@ -638,13 +698,17 @@ export default function DashboardPage() {
         </Card>
       )}
       
-      {!isLoadingFirestore && !isSavingFirestore && dashboardProducts.length > 0 && filteredProductsForDashboard.length === 0 && selectedCollection !== ALL_COLLECTIONS_VALUE && (
+      {!isLoadingFirestore && !isSavingFirestore && dashboardProducts.length > 0 && filteredProductsForDashboard.length === 0 && (selectedCollection !== ALL_COLLECTIONS_VALUE || vtexIdStatusFilterDashboard !== "all") && (
          <Card className="shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center"><Filter className="mr-2 h-6 w-6 text-primary" />Nenhum produto encontrado</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-muted-foreground">Nenhum produto encontrado para a coleção <span className="font-semibold">{selectedCollection}</span>. Por favor, selecione outra coleção ou "Todas as Coleções".</p>
+            <p className="text-muted-foreground">Nenhum produto encontrado para os filtros selecionados.
+              {selectedCollection !== ALL_COLLECTIONS_VALUE && <> Coleção: <span className="font-semibold">{selectedCollection}</span>.</>}
+              {vtexIdStatusFilterDashboard !== "all" && <> Status ID VTEX: <span className="font-semibold">{vtexIdStatusFilterDashboard === "withVtexId" ? "Com ID" : "Sem ID"}</span>.</>}
+              Por favor, ajuste os filtros ou selecione "Todas as Coleções" / "Todos" os status.
+            </p>
           </CardContent>
         </Card>
       )}
