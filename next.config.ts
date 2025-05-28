@@ -4,6 +4,7 @@ import type {NextConfig} from 'next';
 const nextConfig: NextConfig = {
   /* config options here */
   output: 'export', // Adicionado para exportação estática
+  basePath: '/studio', // Configurado para o nome do repositório no GitHub Pages
   typescript: {
     ignoreBuildErrors: true,
   },
