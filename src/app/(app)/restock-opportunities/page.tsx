@@ -6,7 +6,7 @@ import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import { FilterControlsSection } from '@/components/domain/FilterControlsSection';
 import { ProductDataTableSection } from '@/components/domain/ProductDataTableSection';
 import type { Product, FilterState } from '@/types';
-import { PackageSearch, AlertTriangle, Download, TrendingUp, PackageCheck, ListFilter, HelpCircle, Loader2, Database, ClipboardList } from 'lucide-react';
+import { PackageSearch, AlertTriangle, Download, TrendingUp, PackageCheck, ListFilter, HelpCircle, Loader2, Database, ClipboardList, CheckSquare, Square } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,15 +19,18 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { clientAuth, firestore } from '@/lib/firebase/config';
 import type { User } from 'firebase/auth';
-import { collection, getDocs, writeBatch, doc, Timestamp, query } from 'firebase/firestore'; // Removed deleteDoc, addDoc
+import { collection, getDocs, writeBatch, doc, Timestamp, query } from 'firebase/firestore';
 
 
 const ALL_COLLECTIONS_VALUE = "_ALL_COLLECTIONS_";
 const ALL_PRODUCT_TYPES_VALUE = "_ALL_PRODUCT_TYPES_";
 const DEFAULT_LOW_STOCK_THRESHOLD = 10;
-const FIRESTORE_BATCH_LIMIT = 450; // Firestore's hard limit is 500, stay a bit under.
+const FIRESTORE_BATCH_LIMIT = 450; 
+
+type VtexIdStatusFilter = "all" | "withVtexId" | "withoutVtexId";
 
 const productToFirestore = (product: Product): any => {
   return {
@@ -53,6 +56,7 @@ export default function RestockOpportunitiesPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [lowStockThreshold, setLowStockThreshold] = useState<string>(DEFAULT_LOW_STOCK_THRESHOLD.toString());
+  const [vtexIdStatusFilter, setVtexIdStatusFilter] = useState<VtexIdStatusFilter>("all");
   const { toast } = useToast();
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -80,7 +84,7 @@ export default function RestockOpportunitiesPage() {
         setIsLoadingFirestore(true);
         try {
           const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
-          const snapshot = await getDocs(query(productsCol)); // Use query here as well for consistency
+          const snapshot = await getDocs(query(productsCol));
           const productsFromDb = snapshot.docs.map(doc => productFromFirestore(doc.data()));
           setAllProducts(productsFromDb);
            if (productsFromDb.length > 0) {
@@ -114,7 +118,6 @@ export default function RestockOpportunitiesPage() {
     try {
       const productsColRef = collection(firestore, 'users', currentUser.uid, 'products');
       
-      // 1. Delete existing products in chunks
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
       
@@ -134,7 +137,6 @@ export default function RestockOpportunitiesPage() {
         console.log(`RestockOpportunitiesPage: Successfully deleted ${totalDeleted} existing products.`);
       }
 
-      // 2. Add new products in chunks
       if (productsToSave.length > 0) {
         const addPromises: Promise<void>[] = [];
         console.log(`RestockOpportunitiesPage: Adding ${productsToSave.length} new products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
@@ -171,24 +173,35 @@ export default function RestockOpportunitiesPage() {
 
 
   const availableCollections = useMemo(() => {
-    const collections = new Set(allProducts.map(p => p.collection).filter(Boolean).sort());
+    const collections = new Set(allProducts.map(p => p.collection).filter(Boolean).sort((a,b) => (a as string).localeCompare(b as string)));
     return Array.from(collections);
   }, [allProducts]);
 
   const availableProductTypes = useMemo(() => {
-    const productTypes = new Set(allProducts.map(p => p.productType).filter(Boolean).sort());
+    const productTypes = new Set(allProducts.map(p => p.productType).filter(Boolean).sort((a,b) => (a as string).localeCompare(b as string)));
     return Array.from(productTypes);
   }, [allProducts]);
 
   const applyAllFilters = useCallback(() => {
     setIsLoading(true);
-    console.log("Applying filters with baseFilters:", baseFilters, "and lowStockThreshold:", lowStockThreshold);
+    console.log("Applying filters with baseFilters:", baseFilters, "lowStockThreshold:", lowStockThreshold, "vtexIdStatusFilter:", vtexIdStatusFilter);
     let tempFiltered = [...allProducts];
     const effectiveThreshold = parseInt(lowStockThreshold, 10);
 
     const currentThreshold = isNaN(effectiveThreshold) || lowStockThreshold.trim() === '' ? DEFAULT_LOW_STOCK_THRESHOLD : effectiveThreshold;
     if (isNaN(effectiveThreshold) && lowStockThreshold.trim() !== '') {
         toast({ title: "Aviso", description: `Limite de baixo estoque inválido, usando padrão: ${DEFAULT_LOW_STOCK_THRESHOLD}.`, variant: "default" });
+    }
+
+    // Apply ID VTEX status filter
+    if (vtexIdStatusFilter === "withVtexId") {
+      tempFiltered = tempFiltered.filter(p => 
+        p.vtexId && String(p.vtexId).trim() !== '' && String(p.vtexId).toUpperCase() !== '#N/D'
+      );
+    } else if (vtexIdStatusFilter === "withoutVtexId") {
+      tempFiltered = tempFiltered.filter(p => 
+        !p.vtexId || String(p.vtexId).trim() === '' || String(p.vtexId).toUpperCase() === '#N/D'
+      );
     }
 
     if (baseFilters) {
@@ -212,6 +225,7 @@ export default function RestockOpportunitiesPage() {
       }
     }
 
+    // Apply core restock opportunity logic
     tempFiltered = tempFiltered.filter(p =>
         p.stock <= currentThreshold &&
         (p.readyToShip > 0 || p.regulatorStock > 0) &&
@@ -220,7 +234,7 @@ export default function RestockOpportunitiesPage() {
     console.log("Filtered products count:", tempFiltered.length);
     setFilteredProducts(tempFiltered);
     setIsLoading(false);
-  }, [allProducts, baseFilters, lowStockThreshold, toast]);
+  }, [allProducts, baseFilters, lowStockThreshold, vtexIdStatusFilter, toast]);
 
 
   const handleBaseFilterChange = useCallback((filters: FilterState) => {
@@ -228,12 +242,12 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-   if(allProducts.length > 0 || baseFilters !== null) { // Trigger if allProducts change OR baseFilters change
+   if(allProducts.length > 0 || baseFilters !== null || vtexIdStatusFilter !== "all") {
     applyAllFilters();
    } else if (!isLoadingFirestore) { 
     setFilteredProducts([]);
    }
-  }, [allProducts, lowStockThreshold, baseFilters, applyAllFilters, isLoadingFirestore]);
+  }, [allProducts, lowStockThreshold, baseFilters, vtexIdStatusFilter, applyAllFilters, isLoadingFirestore]);
 
   const handleProcessingStart = () => setIsProcessingExcel(true);
   const handleProcessingEnd = () => setIsProcessingExcel(false);
@@ -367,17 +381,17 @@ export default function RestockOpportunitiesPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                     <div>
                         <Label htmlFor="lowStockThreshold" className="flex items-center font-semibold">
-                            Estoque Atual Máximo para Oportunidade
+                            Estoque Atual Máximo
                             <TooltipProvider>
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <HelpCircle className="ml-1.5 h-4 w-4 text-muted-foreground cursor-help" />
                                     </TooltipTrigger>
                                     <TooltipContent>
-                                        <p>Produtos com estoque atual igual ou inferior a este valor serão considerados para reabastecimento.</p>
+                                        <p>Produtos com estoque atual igual ou inferior a este valor serão considerados.</p>
                                     </TooltipContent>
                                 </Tooltip>
                             </TooltipProvider>
@@ -392,7 +406,32 @@ export default function RestockOpportunitiesPage() {
                         className="mt-1 text-base"
                         />
                     </div>
-                    <Button onClick={applyAllFilters} className="w-full md:w-auto py-2.5 text-base" disabled={isLoading || isSavingFirestore}>
+                    <div>
+                        <Label htmlFor="vtexIdStatusFilter" className="flex items-center font-semibold">
+                            Status Cadastro (ID VTEX)
+                             <TooltipProvider>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <HelpCircle className="ml-1.5 h-4 w-4 text-muted-foreground cursor-help" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        <p>Filtrar por itens com ou sem cadastro de ID VTEX (exclui #N/D).</p>
+                                    </TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                        </Label>
+                        <Select value={vtexIdStatusFilter} onValueChange={(value) => setVtexIdStatusFilter(value as VtexIdStatusFilter)}>
+                            <SelectTrigger id="vtexIdStatusFilter" className="mt-1 text-base">
+                                <SelectValue placeholder="Selecionar status do ID VTEX" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Todos (Com e Sem ID VTEX)</SelectItem>
+                                <SelectItem value="withVtexId">Com ID VTEX (Cadastrado)</SelectItem>
+                                <SelectItem value="withoutVtexId">Sem ID VTEX (Não Cadastrado)</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <Button onClick={applyAllFilters} className="w-full md:w-auto py-2.5 text-base self-end" disabled={isLoading || isSavingFirestore}>
                         {isLoading ? (
                             <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                         ) : (
@@ -477,8 +516,6 @@ export default function RestockOpportunitiesPage() {
                     showDescriptionColumn={true} 
                     showSizeColumn={true}
                     showProductTypeColumn={true}
-                    showStartDateColumn={false} 
-                    showEndDateColumn={false}   
                     showStatusColumn={true}    
                 />
                  {allProducts.length > 0 && filteredProducts.length === 0 && !isLoading && !isSavingFirestore && !isLoadingFirestore && (
@@ -491,10 +528,12 @@ export default function RestockOpportunitiesPage() {
                         </CardHeader>
                         <CardContent>
                             <p className="text-muted-foreground">
-                                Nenhum produto com estoque atual &le; <span className="font-semibold">{parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD}</span> unidades, com disponibilidade em "Pronta Entrega" ou "Regulador", E sem "Pedidos em Aberto" foi encontrado com os filtros atuais.
+                                Nenhum produto com estoque atual &le; <span className="font-semibold">{parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD}</span> unidades, com disponibilidade em "Pronta Entrega" ou "Regulador", E sem "Pedidos em Aberto" foi encontrado com os filtros atuais (incluindo status do ID VTEX: {
+                                    vtexIdStatusFilter === "withVtexId" ? "Com ID VTEX" : vtexIdStatusFilter === "withoutVtexId" ? "Sem ID VTEX" : "Todos"
+                                }).
                             </p>
                             <p className="text-muted-foreground mt-2">
-                                Tente ajustar o "Estoque Atual Máximo para Oportunidade" ou os filtros adicionais e clique em "Aplicar Critérios e Filtros".
+                                Tente ajustar o "Estoque Atual Máximo", o status do ID VTEX, ou os filtros adicionais e clique em "Aplicar Critérios e Filtros".
                             </p>
                         </CardContent>
                     </Card>
@@ -506,3 +545,4 @@ export default function RestockOpportunitiesPage() {
     </div>
   );
 }
+
