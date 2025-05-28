@@ -21,12 +21,13 @@ import {
 } from "@/components/ui/tooltip";
 import { clientAuth, firestore } from '@/lib/firebase/config';
 import type { User } from 'firebase/auth';
-import { collection, getDocs, writeBatch, doc, Timestamp, query, deleteDoc, addDoc } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, Timestamp, query } from 'firebase/firestore'; // Removed deleteDoc, addDoc
 
 
 const ALL_COLLECTIONS_VALUE = "_ALL_COLLECTIONS_";
 const ALL_PRODUCT_TYPES_VALUE = "_ALL_PRODUCT_TYPES_";
 const DEFAULT_LOW_STOCK_THRESHOLD = 10;
+const FIRESTORE_BATCH_LIMIT = 450; // Firestore's hard limit is 500, stay a bit under.
 
 const productToFirestore = (product: Product): any => {
   return {
@@ -79,7 +80,7 @@ export default function RestockOpportunitiesPage() {
         setIsLoadingFirestore(true);
         try {
           const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
-          const snapshot = await getDocs(productsCol);
+          const snapshot = await getDocs(query(productsCol)); // Use query here as well for consistency
           const productsFromDb = snapshot.docs.map(doc => productFromFirestore(doc.data()));
           setAllProducts(productsFromDb);
            if (productsFromDb.length > 0) {
@@ -100,43 +101,59 @@ export default function RestockOpportunitiesPage() {
     }
   }, [currentUser, toast]);
 
-  const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
+ const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
     if (!currentUser) {
       toast({ title: "Usuário não autenticado", description: "Faça login para salvar os dados.", variant: "destructive" });
       return;
     }
-    console.log(`RestockOpportunitiesPage: Saving products for user UID: ${currentUser.uid}`); 
+    console.log(`RestockOpportunitiesPage: Saving products for user UID: ${currentUser.uid}`);
     setIsSavingFirestore(true);
+    let totalDeleted = 0;
+    let totalAdded = 0;
+
     try {
       const productsColRef = collection(firestore, 'users', currentUser.uid, 'products');
       
+      // 1. Delete existing products in chunks
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
       
-      const batch = writeBatch(firestore);
-      let operationsCount = 0;
-
       if (!existingDocsSnapshot.empty) {
-        existingDocsSnapshot.forEach(docSnapshot => {
-          batch.delete(docSnapshot.ref);
-          operationsCount++;
-        });
+        const deletePromises: Promise<void>[] = [];
+        console.log(`RestockOpportunitiesPage: Deleting ${existingDocsSnapshot.docs.length} existing documents in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
+        for (let i = 0; i < existingDocsSnapshot.docs.length; i += FIRESTORE_BATCH_LIMIT) {
+          const batch = writeBatch(firestore);
+          const chunk = existingDocsSnapshot.docs.slice(i, i + FIRESTORE_BATCH_LIMIT);
+          chunk.forEach(docSnapshot => {
+            batch.delete(docSnapshot.ref);
+            totalDeleted++;
+          });
+          deletePromises.push(batch.commit());
+        }
+        await Promise.all(deletePromises);
+        console.log(`RestockOpportunitiesPage: Successfully deleted ${totalDeleted} existing products.`);
       }
 
+      // 2. Add new products in chunks
       if (productsToSave.length > 0) {
-        productsToSave.forEach(product => {
-          const newDocRef = doc(productsColRef);
-          batch.set(newDocRef, productToFirestore(product));
-          operationsCount++;
-        });
-      }
-      
-      if (operationsCount > 0) {
-        await batch.commit();
+        const addPromises: Promise<void>[] = [];
+        console.log(`RestockOpportunitiesPage: Adding ${productsToSave.length} new products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
+        for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
+          const batch = writeBatch(firestore);
+          const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
+          chunk.forEach(product => {
+            const newDocRef = doc(productsColRef); 
+            batch.set(newDocRef, productToFirestore(product));
+            totalAdded++;
+          });
+          addPromises.push(batch.commit());
+        }
+        await Promise.all(addPromises);
+        console.log(`RestockOpportunitiesPage: Successfully added ${totalAdded} new products.`);
       }
       
       setAllProducts(productsToSave); 
-      toast({ title: "Dados Salvos!", description: `${productsToSave.length} produtos foram salvos e atualizados.` });
+      toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
 
     } catch (error) {
       console.error("Error saving products to Firestore (Restock):", error);
@@ -165,6 +182,7 @@ export default function RestockOpportunitiesPage() {
 
   const applyAllFilters = useCallback(() => {
     setIsLoading(true);
+    console.log("Applying filters with baseFilters:", baseFilters, "and lowStockThreshold:", lowStockThreshold);
     let tempFiltered = [...allProducts];
     const effectiveThreshold = parseInt(lowStockThreshold, 10);
 
@@ -197,9 +215,9 @@ export default function RestockOpportunitiesPage() {
     tempFiltered = tempFiltered.filter(p =>
         p.stock <= currentThreshold &&
         (p.readyToShip > 0 || p.regulatorStock > 0) &&
-        p.openOrders === 0 // Somente se não houver pedidos em aberto
+        p.openOrders === 0 
     );
-
+    console.log("Filtered products count:", tempFiltered.length);
     setFilteredProducts(tempFiltered);
     setIsLoading(false);
   }, [allProducts, baseFilters, lowStockThreshold, toast]);
@@ -210,7 +228,7 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-   if(allProducts.length > 0) { 
+   if(allProducts.length > 0 || baseFilters !== null) { // Trigger if allProducts change OR baseFilters change
     applyAllFilters();
    } else if (!isLoadingFirestore) { 
     setFilteredProducts([]);
@@ -255,7 +273,7 @@ export default function RestockOpportunitiesPage() {
       "Estoque Atual": p.stock,
       "Pronta Entrega": p.readyToShip,
       "Regulador": p.regulatorStock,
-      "Pedidos em Aberto": p.openOrders, // Novo
+      "Pedidos em Aberto": p.openOrders, 
       "Coleção (Desc. Linha Comercial)": p.collection,
       "Descrição (Estampa)": p.description,
       "Tamanho": p.size,
@@ -454,7 +472,7 @@ export default function RestockOpportunitiesPage() {
                     showStockColumn={true}
                     showReadyToShipColumn={true}
                     showRegulatorStockColumn={true}
-                    showOpenOrdersColumn={true} // Novo
+                    showOpenOrdersColumn={true} 
                     showCollectionColumn={true}
                     showDescriptionColumn={true} 
                     showSizeColumn={true}

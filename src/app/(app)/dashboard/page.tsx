@@ -57,6 +57,7 @@ interface SkuStockStatusData {
 }
 
 const ALL_COLLECTIONS_VALUE = "_ALL_DASHBOARD_COLLECTIONS_";
+const FIRESTORE_BATCH_LIMIT = 450; // Firestore's hard limit is 500, stay a bit under.
 
 const chartConfigBase = {
   stock: {
@@ -159,38 +160,52 @@ export default function DashboardPage() {
     }
     console.log(`DashboardPage: Saving products for user UID: ${currentUser.uid}`);
     setIsSavingFirestore(true);
+    let totalDeleted = 0;
+    let totalAdded = 0;
+
     try {
       const productsColRef = collection(firestore, 'users', currentUser.uid, 'products');
       
+      // 1. Delete existing products in chunks
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
       
-      let deleteOperations = 0;
-      let addOperations = 0;
-
-      const batch = writeBatch(firestore);
-
       if (!existingDocsSnapshot.empty) {
-        existingDocsSnapshot.forEach(docSnapshot => {
-          batch.delete(docSnapshot.ref);
-          deleteOperations++;
-        });
+        const deletePromises: Promise<void>[] = [];
+        console.log(`DashboardPage: Deleting ${existingDocsSnapshot.docs.length} existing documents in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
+        for (let i = 0; i < existingDocsSnapshot.docs.length; i += FIRESTORE_BATCH_LIMIT) {
+          const batch = writeBatch(firestore);
+          const chunk = existingDocsSnapshot.docs.slice(i, i + FIRESTORE_BATCH_LIMIT);
+          chunk.forEach(docSnapshot => {
+            batch.delete(docSnapshot.ref);
+            totalDeleted++;
+          });
+          deletePromises.push(batch.commit());
+        }
+        await Promise.all(deletePromises);
+        console.log(`DashboardPage: Successfully deleted ${totalDeleted} existing products.`);
       }
 
+      // 2. Add new products in chunks
       if (productsToSave.length > 0) {
-        productsToSave.forEach(product => {
-          const newDocRef = doc(productsColRef); 
-          batch.set(newDocRef, productToFirestore(product));
-          addOperations++;
-        });
-      }
-      
-      if (deleteOperations > 0 || addOperations > 0) {
-        await batch.commit();
+        const addPromises: Promise<void>[] = [];
+        console.log(`DashboardPage: Adding ${productsToSave.length} new products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
+        for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
+          const batch = writeBatch(firestore);
+          const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
+          chunk.forEach(product => {
+            const newDocRef = doc(productsColRef); 
+            batch.set(newDocRef, productToFirestore(product));
+            totalAdded++;
+          });
+          addPromises.push(batch.commit());
+        }
+        await Promise.all(addPromises);
+        console.log(`DashboardPage: Successfully added ${totalAdded} new products.`);
       }
       
       setDashboardProducts(productsToSave); 
-      toast({ title: "Dados Salvos!", description: `${productsToSave.length} produtos foram salvos no banco de dados.` });
+      toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
 
     } catch (error) {
       console.error("Error saving products to Firestore (Dashboard):", error);
@@ -235,7 +250,7 @@ export default function DashboardPage() {
         totalZeroStockSkus: 0,
         totalReadyToShipStock: 0,
         totalRegulatorStock: 0,
-        totalOpenOrders: 0, // Novo
+        totalOpenOrders: 0, 
       };
     }
 
@@ -250,7 +265,7 @@ export default function DashboardPage() {
     let totalZeroStockSkus = 0;
     let totalReadyToShipStock = 0;
     let totalRegulatorStock = 0;
-    let totalOpenOrders = 0; // Novo
+    let totalOpenOrders = 0; 
 
     filteredProductsForDashboard.forEach(product => {
       const collectionKey = product.collection || 'Não Especificada';
@@ -288,7 +303,7 @@ export default function DashboardPage() {
       totalStock += product.stock;
       totalReadyToShipStock += product.readyToShip;
       totalRegulatorStock += product.regulatorStock;
-      totalOpenOrders += product.openOrders; // Novo
+      totalOpenOrders += product.openOrders; 
     });
     
     const collectionRupturePercentageData: CollectionRuptureData[] = Array.from(stockByCollectionMap.entries()).map(([name, collData]) => {
@@ -321,7 +336,7 @@ export default function DashboardPage() {
       totalZeroStockSkus,
       totalReadyToShipStock,
       totalRegulatorStock,
-      totalOpenOrders, // Novo
+      totalOpenOrders, 
     };
   }, [filteredProductsForDashboard]);
 
@@ -412,7 +427,7 @@ export default function DashboardPage() {
         ["Estoque Total", aggregatedData.totalStock.toLocaleString()],
         ["Pronta Entrega", aggregatedData.totalReadyToShipStock.toLocaleString()],
         ["Regulador", aggregatedData.totalRegulatorStock.toLocaleString()],
-        ["Pedidos em Aberto", aggregatedData.totalOpenOrders.toLocaleString()], // Novo
+        ["Pedidos em Aberto", aggregatedData.totalOpenOrders.toLocaleString()], 
         ["Total SKUs", aggregatedData.totalSkus.toLocaleString()],
         ["Total SKUs Zerados", aggregatedData.totalZeroStockSkus.toLocaleString()],
       ];
@@ -611,7 +626,7 @@ export default function DashboardPage() {
 
       {!isLoadingFirestore && !isSavingFirestore && filteredProductsForDashboard.length > 0 && (
         <>
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6"> {/* Ajustado para 6 colunas para o novo card */}
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6"> 
             <Card className="shadow-lg hover:shadow-xl transition-shadow">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Estoque Total</CardTitle>
@@ -642,7 +657,7 @@ export default function DashboardPage() {
                 <p className="text-xs text-muted-foreground">unidades no depósito Regulador</p>
               </CardContent>
             </Card>
-            <Card className="shadow-lg hover:shadow-xl transition-shadow"> {/* Novo Card */}
+            <Card className="shadow-lg hover:shadow-xl transition-shadow"> 
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Pedidos em Aberto</CardTitle>
                 <ClipboardList className="h-5 w-5 text-blue-500" />
