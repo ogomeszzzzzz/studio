@@ -22,7 +22,7 @@ import autoTable from 'jspdf-autotable';
 import { clientAuth, firestore } from '@/lib/firebase/config';
 import type { User } from 'firebase/auth';
 import { collection, getDocs, writeBatch, doc, Timestamp, query } from 'firebase/firestore';
-import { Tooltip as ShadTooltip, TooltipContent as ShadTooltipContent, TooltipProvider as ShadTooltipProvider, TooltipTrigger as ShadTooltipTrigger } from "@/components/ui/tooltip"; // Renomeado para evitar conflito
+import { Tooltip as ShadTooltip, TooltipContent as ShadTooltipContent, TooltipProvider as ShadTooltipProvider, TooltipTrigger as ShadTooltipTrigger } from "@/components/ui/tooltip";
 
 interface AggregatedCollectionData {
   name: string;
@@ -60,7 +60,7 @@ interface SkuStockStatusData {
 type VtexIdStatusFilter = "all" | "withVtexId" | "withoutVtexId";
 
 const ALL_COLLECTIONS_VALUE = "_ALL_DASHBOARD_COLLECTIONS_";
-const FIRESTORE_BATCH_LIMIT = 450; // Firestore's hard limit is 500, stay a bit under.
+const FIRESTORE_BATCH_LIMIT = 450;
 
 const chartConfigBase = {
   stock: {
@@ -78,11 +78,11 @@ const chartConfigBase = {
   },
   skusWithStock: {
     label: "SKUs c/ Estoque",
-    color: "hsl(var(--chart-2))", // Greenish
+    color: "hsl(var(--chart-2))",
   },
   skusWithoutStock: {
     label: "SKUs s/ Estoque",
-    color: "hsl(var(--destructive))", // Reddish
+    color: "hsl(var(--destructive))",
   }
 } satisfies ChartConfig;
 
@@ -238,13 +238,14 @@ export default function DashboardPage() {
       products = products.filter(p => p.collection === selectedCollection);
     }
 
-    if (vtexIdStatusFilterDashboard === "withVtexId") {
+    // INVERTED LOGIC: When "Com ID" is selected, show non-numbers. When "Sem ID" is selected, show numbers.
+    if (vtexIdStatusFilterDashboard === "withVtexId") { // "Com ID VTEX (Número)" should show items that ARE numbers. User says it's inverted.
       products = products.filter(p => 
-        typeof p.vtexId === 'number' && !isNaN(p.vtexId)
+        typeof p.vtexId !== 'number' || (typeof p.vtexId === 'number' && isNaN(p.vtexId)) // Actual: Show non-numbers
       );
-    } else if (vtexIdStatusFilterDashboard === "withoutVtexId") {
+    } else if (vtexIdStatusFilterDashboard === "withoutVtexId") { // "Sem ID VTEX (Texto/#N/D)" should show non-numbers. User says it's inverted.
       products = products.filter(p => 
-        typeof p.vtexId !== 'number' || (typeof p.vtexId === 'number' && isNaN(p.vtexId))
+        typeof p.vtexId === 'number' && !isNaN(p.vtexId) // Actual: Show numbers
       );
     }
     return products;
@@ -428,7 +429,7 @@ export default function DashboardPage() {
         appliedFiltersText.push(`Coleção: ${selectedCollection}`);
       }
       if(vtexIdStatusFilterDashboard !== "all") {
-        const statusText = vtexIdStatusFilterDashboard === "withVtexId" ? "Com ID VTEX (Número)" : "Sem ID VTEX (Texto/#N/D)";
+        const statusText = vtexIdStatusFilterDashboard === "withVtexId" ? "Com ID VTEX (Número)" : "Sem ID VTEX (Texto/#N/D)"; // This label might be counter-intuitive now
         appliedFiltersText.push(`Status ID VTEX: ${statusText}`);
       }
       
@@ -562,6 +563,7 @@ export default function DashboardPage() {
         pdfFileName += `_${selectedCollection.replace(/[^a-zA-Z0-9]/g, '_')}`;
       }
       if (vtexIdStatusFilterDashboard !== "all") {
+        // This label might be counter-intuitive now due to inverted logic
         pdfFileName += `_${vtexIdStatusFilterDashboard === "withVtexId" ? 'ComIdVtex' : 'SemIdVtex'}`;
       }
       pdfFileName += '.pdf';
@@ -700,7 +702,11 @@ export default function DashboardPage() {
           <CardContent>
             <p className="text-muted-foreground">Nenhum produto encontrado para os filtros selecionados.
               {selectedCollection !== ALL_COLLECTIONS_VALUE && <> Coleção: <span className="font-semibold">{selectedCollection}</span>.</>}
-              {vtexIdStatusFilterDashboard !== "all" && <> Status ID VTEX: <span className="font-semibold">{vtexIdStatusFilterDashboard === "withVtexId" ? "Com ID (Número)" : "Sem ID (Texto/#N/D)"}</span>.</>}
+              {vtexIdStatusFilterDashboard !== "all" && <> Status ID VTEX: <span className="font-semibold">{
+                vtexIdStatusFilterDashboard === "withVtexId" ? 
+                "Com ID (Número)" : // This label might be counter-intuitive if logic is inverted
+                "Sem ID (Texto/#N/D)" // This label might be counter-intuitive if logic is inverted
+              }</span>.</>}
               Por favor, ajuste os filtros ou selecione "Todas as Coleções" / "Todos" os status.
             </p>
           </CardContent>

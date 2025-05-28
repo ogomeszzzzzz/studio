@@ -192,13 +192,14 @@ export default function RestockOpportunitiesPage() {
         toast({ title: "Aviso", description: `Limite de baixo estoque inválido, usando padrão: ${DEFAULT_LOW_STOCK_THRESHOLD}.`, variant: "default" });
     }
 
-    if (vtexIdStatusFilter === "withVtexId") {
+    // INVERTED LOGIC: When "Com ID" is selected, show non-numbers. When "Sem ID" is selected, show numbers.
+    if (vtexIdStatusFilter === "withVtexId") { // "Com ID VTEX (Número)" should show items that ARE numbers. User says it's inverted.
       tempFiltered = tempFiltered.filter(p => 
-        typeof p.vtexId === 'number' && !isNaN(p.vtexId)
+        typeof p.vtexId !== 'number' || (typeof p.vtexId === 'number' && isNaN(p.vtexId)) // Actual: Show non-numbers
       );
-    } else if (vtexIdStatusFilter === "withoutVtexId") {
+    } else if (vtexIdStatusFilter === "withoutVtexId") { // "Sem ID VTEX (Texto/#N/D)" should show non-numbers. User says it's inverted.
       tempFiltered = tempFiltered.filter(p => 
-        typeof p.vtexId !== 'number' || (typeof p.vtexId === 'number' && isNaN(p.vtexId))
+        typeof p.vtexId === 'number' && !isNaN(p.vtexId) // Actual: Show numbers
       );
     }
 
