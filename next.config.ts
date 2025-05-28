@@ -2,9 +2,8 @@
 import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
-  /* config options here */
   output: 'export', // Adicionado para exportação estática
-  basePath: '/studio', // Configurado para o nome do repositório no GitHub Pages
+  // basePath: '/studio', // REMOVIDO - GitHub Pages lida com o nome do repositório como base path
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -12,14 +11,7 @@ const nextConfig: NextConfig = {
     ignoreDuringBuilds: true,
   },
   images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'placehold.co',
-        port: '',
-        pathname: '/**',
-      },
-    ],
+    // remotePatterns for placehold.co removed as it's not actively used.
     unoptimized: true, // Adicionado para exports estáticos
   },
   // experimental: {
