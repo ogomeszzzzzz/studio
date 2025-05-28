@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { clientAuth } from '@/lib/firebase/config';
 import { Button } from '@/components/ui/button';
-import { Loader2, LogOut, LayoutDashboard, UserCircle, PackageSearch } from 'lucide-react'; // BarChartBig removed
+import { Loader2, LogOut, LayoutDashboard, UserCircle, PackageSearch, Settings } from 'lucide-react';
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 import type { UserProfile } from '@/types';
@@ -21,26 +21,34 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const router = useRouter();
   const { toast } = useToast();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true); 
+  const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(clientAuth, async (firebaseUser) => {
       if (firebaseUser) {
         setUserProfile({ uid: firebaseUser.uid, email: firebaseUser.email });
+        // Check if the logged-in user is the admin
+        if (firebaseUser.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL || firebaseUser.email === "gustavo.cordeiro@altenburg.com.br") { // Fallback for build time
+          setIsAdmin(true);
+        } else {
+          setIsAdmin(false);
+        }
       } else {
         setUserProfile(null);
+        setIsAdmin(false);
         router.replace('/login');
       }
       setLoading(false);
     });
     return () => unsubscribe();
-  }, [router]); 
+  }, [router]);
 
   const handleSignOut = async () => {
     try {
       await signOut(clientAuth);
       toast({ title: 'Logout', description: 'Você foi desconectado.' });
-      router.push('/login'); 
+      router.push('/login');
     } catch (error) {
       console.error('Error signing out:', error);
       toast({ title: 'Erro de Logout', description: 'Não foi possível desconectar.', variant: 'destructive' });
@@ -64,7 +72,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
       </div>
     );
   }
-  
+
   const AuthenticatedHeader = () => (
     <header className="bg-card border-b border-border shadow-sm sticky top-0 z-50">
       <div className="container mx-auto px-4 md:px-6 lg:px-8 py-3 flex items-center justify-between">
@@ -98,12 +106,16 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <LayoutDashboard className="h-5 w-5" />
             <span className="font-medium text-sm">Dashboard</span>
         </Link>
-        {/* Link to Gap Analyzer removed */}
         <Link href="/restock-opportunities" className="flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors">
             <PackageSearch className="h-5 w-5" />
             <span className="font-medium text-sm">Oportunidades Reabast.</span>
         </Link>
-        {/* Add more navigation links here */}
+        {isAdmin && (
+          <Link href="/admin-settings" className="flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors">
+            <Settings className="h-5 w-5" />
+            <span className="font-medium text-sm">Configurações Admin</span>
+          </Link>
+        )}
       </nav>
       <div className="flex-1 flex flex-col bg-background">
         <AuthenticatedHeader />
