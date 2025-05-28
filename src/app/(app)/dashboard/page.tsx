@@ -17,9 +17,9 @@ import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import autoTable from 'jspdf-autotable';
-import { clientAuth, firestore } from '@/lib/firebase/config'; // Added firestore
-import type { User } from 'firebase/auth'; // Added User type
-import { collection, getDocs, writeBatch, doc, Timestamp, query, deleteDoc, addDoc } from 'firebase/firestore'; // Added Firestore functions
+import { clientAuth, firestore } from '@/lib/firebase/config';
+import type { User } from 'firebase/auth';
+import { collection, getDocs, writeBatch, doc, Timestamp, query, deleteDoc, addDoc } from 'firebase/firestore';
 
 interface AggregatedCollectionData {
   name: string;
@@ -71,7 +71,6 @@ const chartConfigBase = {
 
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
 
-// Helper to convert Firestore Timestamps to JS Dates and vice-versa in Product objects
 const productToFirestore = (product: Product): any => {
   return {
     ...product,
@@ -103,7 +102,7 @@ export default function DashboardPage() {
     const unsubscribe = clientAuth.onAuthStateChanged((user) => {
       setCurrentUser(user);
       if (!user) {
-        setDashboardProducts([]); // Clear products if user logs out
+        setDashboardProducts([]);
         setIsLoadingFirestore(false);
       }
     });
@@ -112,6 +111,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (currentUser) {
+      console.log(`DashboardPage: Fetching products for user UID: ${currentUser.uid}`); // DIAGNOSTIC LOG
       const fetchProducts = async () => {
         setIsLoadingFirestore(true);
         try {
@@ -123,15 +123,15 @@ export default function DashboardPage() {
             toast({ title: "Dados Carregados", description: "Dados de produtos carregados do banco de dados." });
           }
         } catch (error) {
-          console.error("Error fetching products from Firestore:", error);
-          toast({ title: "Erro ao Carregar Dados", description: "Não foi possível buscar os produtos do banco de dados.", variant: "destructive" });
+          console.error("Error fetching products from Firestore (Dashboard):", error);
+          toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${(error as Error).message}`, variant: "destructive" });
         } finally {
           setIsLoadingFirestore(false);
         }
       };
       fetchProducts();
     } else {
-      setIsLoadingFirestore(false); // No user, so not loading from Firestore
+      setIsLoadingFirestore(false);
     }
   }, [currentUser, toast]);
 
@@ -141,47 +141,44 @@ export default function DashboardPage() {
       toast({ title: "Usuário não autenticado", description: "Faça login para salvar os dados.", variant: "destructive" });
       return;
     }
+    console.log(`DashboardPage: Saving products for user UID: ${currentUser.uid}`); // DIAGNOSTIC LOG
     setIsSavingFirestore(true);
     try {
       const productsColRef = collection(firestore, 'users', currentUser.uid, 'products');
       
-      // Delete existing products
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
       
       let deleteOperations = 0;
       let addOperations = 0;
 
-      // Firestore batch can handle up to 500 operations.
-      // We'll process in chunks if needed, though this simple version does all deletes then all adds.
-      // For very large datasets, chunking both delete and add batches would be more robust.
+      const batch = writeBatch(firestore);
 
       if (!existingDocsSnapshot.empty) {
-        const batchDelete = writeBatch(firestore);
         existingDocsSnapshot.forEach(docSnapshot => {
-          batchDelete.delete(docSnapshot.ref);
+          batch.delete(docSnapshot.ref);
           deleteOperations++;
         });
-        if (deleteOperations > 0) await batchDelete.commit();
       }
 
-      // Add new products
       if (productsToSave.length > 0) {
-        const batchAdd = writeBatch(firestore);
         productsToSave.forEach(product => {
-          const newDocRef = doc(productsColRef); // Auto-generate ID
-          batchAdd.set(newDocRef, productToFirestore(product));
+          const newDocRef = doc(productsColRef); 
+          batch.set(newDocRef, productToFirestore(product));
           addOperations++;
         });
-        if (addOperations > 0) await batchAdd.commit();
       }
       
-      setDashboardProducts(productsToSave); // Update local state
+      if (deleteOperations > 0 || addOperations > 0) {
+        await batch.commit();
+      }
+      
+      setDashboardProducts(productsToSave); 
       toast({ title: "Dados Salvos!", description: `${productsToSave.length} produtos foram salvos no banco de dados.` });
 
     } catch (error) {
-      console.error("Error saving products to Firestore:", error);
-      toast({ title: "Erro ao Salvar", description: "Não foi possível salvar os produtos no banco de dados.", variant: "destructive" });
+      console.error("Error saving products to Firestore (Dashboard):", error);
+      toast({ title: "Erro ao Salvar", description: `Não foi possível salvar: ${(error as Error).message}`, variant: "destructive" });
     } finally {
       setIsSavingFirestore(false);
     }
@@ -189,7 +186,7 @@ export default function DashboardPage() {
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
     await saveProductsToFirestore(parsedProducts);
-  }, [currentUser]); // Include currentUser in dependencies
+  }, [currentUser]); 
 
 
   const handleProcessingStart = () => setIsProcessingExcel(true);
@@ -227,7 +224,7 @@ export default function DashboardPage() {
     dashboardProducts.forEach(product => {
       const collectionKey = product.collection || 'Não Especificada';
       const sizeKey = product.size || 'Não Especificado';
-      const printKey = product.description || 'Não Especificada'; // Assuming description is print
+      const printKey = product.description || 'Não Especificada'; 
       const typeKey = product.productType || 'Não Especificado';
 
       const currentCol = stockByCollectionMap.get(collectionKey) || { stock: 0, skus: 0 };
@@ -273,7 +270,7 @@ export default function DashboardPage() {
     return {
       stockByCollection: Array.from(stockByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
       stockBySize: Array.from(stockBySizeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
-      stockByPrint: Array.from(stockByPrintMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock).slice(0, 15), // Top 15 prints
+      stockByPrint: Array.from(stockByPrintMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock).slice(0, 15),
       stockByProductType: Array.from(stockByProductTypeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
       zeroStockSkusByCollection: Array.from(zeroStockSkusByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.count - a.count),
       collectionRupturePercentage: collectionRupturePercentageData,

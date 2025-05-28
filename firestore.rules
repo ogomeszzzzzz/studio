@@ -3,34 +3,12 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Regra para a subcoleção 'products' de um usuário
-    match /users/{userId}/products/{productId} {
-      // Permite que o proprietário do documento leia, escreva e exclua documentos individuais.
-      // Esta regra é boa para operações em documentos específicos.
-      allow read, write, delete: if request.auth != null && request.auth.uid == userId;
+    // Permite que um usuário autenticado leia e escreva (crie, atualize, exclua)
+    // QUALQUER documento ou subcoleção sob seu próprio caminho /users/{userId}.
+    // 'read' inclui 'get' e 'list'.
+    // 'write' inclui 'create', 'update', e 'delete'.
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
     }
-
-    // Regra adicional para permitir a listagem (leitura da coleção) e operações de escrita
-    // na coleção 'products' como um todo, pelo proprietário.
-    // Isso é necessário para getDocs() na coleção e para writeBatch que opera na coleção.
-    match /users/{userId}/products {
-        // Permite listar (ler) todos os produtos se o usuário for o proprietário.
-        allow list: if request.auth != null && request.auth.uid == userId;
-
-        // Permite criar (escrever novos) produtos se o usuário for o proprietário.
-        // A regra de /{productId} acima cobrirá updates e deletes em documentos específicos.
-        // Para o writeBatch funcionar ao adicionar novos documentos, precisamos de 'create'.
-        allow create: if request.auth != null && request.auth.uid == userId;
-    }
-
-    // Você pode ter outras regras para o documento /users/{userId} em si,
-    // por exemplo, para permitir que um usuário leia seu próprio perfil, se necessário.
-    // Exemplo:
-    // match /users/{userId} {
-    //   allow read: if request.auth != null && request.auth.uid == userId;
-    //   // Evite escritas diretas no perfil do usuário pelo cliente, a menos que necessário
-    //   allow write: if false;
-    // }
   }
 }
