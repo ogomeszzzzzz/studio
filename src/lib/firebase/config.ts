@@ -1,8 +1,10 @@
 
-import { initializeApp, getApps, getApp, FirebaseOptions } from 'firebase/app';
+import { initializeApp, getApps, getApp, type FirebaseOptions } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
+// CRITICAL: Ensure all these NEXT_PUBLIC_ environment variables are correctly set in your .env file
+// The error "auth/api-key-not-valid" specifically points to an issue with NEXT_PUBLIC_FIREBASE_API_KEY.
 const firebaseConfig: FirebaseOptions = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -14,7 +16,13 @@ const firebaseConfig: FirebaseOptions = {
 };
 
 // Initialize Firebase for client-side
-const clientApp = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+let clientApp;
+if (!getApps().length) {
+  clientApp = initializeApp(firebaseConfig);
+} else {
+  clientApp = getApp();
+}
+
 const clientAuth = getAuth(clientApp);
 const firestore = getFirestore(clientApp);
 
