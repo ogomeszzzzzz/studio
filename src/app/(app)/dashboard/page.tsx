@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import {
   BarChartBig, ShoppingBag, AlertTriangle, FileSpreadsheet,
   Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler,
-  Download, Loader2, Activity, Percent // Adicionado Percent para Ruptura
+  Download, Loader2, Activity, Percent
 } from 'lucide-react';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import type { Product } from '@/types';
@@ -77,14 +77,7 @@ export default function DashboardPage() {
 
   const handleDashboardDataParsed = useCallback((data: Product[]) => {
     setDashboardProducts(data);
-    if (data.length > 0) {
-      console.log("--- DIAGNÓSTICO ESTAMPA (Dashboard) ---");
-      console.log("Amostra dos valores de 'product.description' lidos do Excel (deveriam ser as estampas da coluna 'Descrição'):");
-      data.slice(0, 5).forEach((p, index) => {
-        console.log(`Produto ${index + 1} - product.description: "${p.description}" (Usado para 'Estoque por Estampa')`);
-      });
-      console.log("--- FIM DIAGNÓSTICO ESTAMPA (Dashboard) ---");
-    }
+    // Removed diagnostic console.log for print data
   }, []);
 
   const handleProcessingStart = () => setIsProcessingExcel(true);
@@ -204,10 +197,10 @@ export default function DashboardPage() {
             color: "hsl(var(--destructive))",
         },
     };
-    aggregatedData.collectionRupturePercentage.forEach((item, index) => {
-        config[item.name] = { // Though name isn't directly used by BarChart for dataKey, it's for consistency if tooltip needs it
+    aggregatedData.collectionRupturePercentage.forEach((item) => { // Removed index, not used
+        config[item.name] = { 
             label: item.name,
-            color: "hsl(var(--destructive))", // All bars will use destructive color
+            color: "hsl(var(--destructive))", 
         };
     });
     return config;
@@ -263,9 +256,12 @@ export default function DashboardPage() {
       yPos = (doc as any).lastAutoTable.finalY + 10;
 
       const addChartToPdf = async (elementId: string, title: string) => {
-        if (yPos > pageHeight - 50) {
-          doc.addPage();
-          yPos = margin + 5;
+        if (yPos > pageHeight - 50 && doc.getNumberOfPages() > 1) { // check only if not first page part
+             doc.addPage();
+             yPos = margin + 5;
+        } else if (yPos > pageHeight - 50) { // if first page is full
+            doc.addPage();
+            yPos = margin + 5;
         }
         doc.setFontSize(13);
         doc.text(title, margin, yPos);
@@ -566,7 +562,7 @@ export default function DashboardPage() {
                           <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/>
                           <YAxis 
                             tickFormatter={(value) => `${value}%`} 
-                            domain={[0, 'dataMax + 5']} // Adiciona um pouco de espaço no topo
+                            domain={[0, 'dataMax + 5']} 
                             allowDecimals={false}
                           />
                           <Tooltip 
