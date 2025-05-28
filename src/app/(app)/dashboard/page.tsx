@@ -119,18 +119,18 @@ export default function DashboardPage() {
     const unsubscribe = clientAuth.onAuthStateChanged((user) => {
       setCurrentUser(user);
       if (!user) {
-        setDashboardProducts([]);
-        setIsLoadingFirestore(false);
+        setDashboardProducts([]); // Clear products on logout
+        setIsLoadingFirestore(false); // Ensure loading stops if user logs out before initial load
       }
     });
     return () => unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (currentUser) {
-      console.log(`DashboardPage: Fetching products for user UID: ${currentUser.uid}`);
+    if (currentUser && dashboardProducts.length === 0 && !isSavingFirestore) { // Fetch only if user is present and products are not loaded
+      console.log(`DashboardPage: Fetching products for user UID: ${currentUser.uid} because dashboardProducts is empty.`);
+      setIsLoadingFirestore(true);
       const fetchProducts = async () => {
-        setIsLoadingFirestore(true);
         try {
           const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
           const snapshot = await getDocs(query(productsCol)); 
@@ -147,10 +147,14 @@ export default function DashboardPage() {
         }
       };
       fetchProducts();
-    } else {
+    } else if (currentUser && dashboardProducts.length > 0) {
+      console.log(`DashboardPage: Products already loaded for user UID: ${currentUser.uid}. Skipping fetch.`);
+      setIsLoadingFirestore(false); // Data is already there
+    } else if (!currentUser) {
+      // Handled by onAuthStateChanged
       setIsLoadingFirestore(false);
     }
-  }, [currentUser, toast]);
+  }, [currentUser, toast, dashboardProducts.length, isSavingFirestore]);
 
 
   const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
@@ -179,6 +183,7 @@ export default function DashboardPage() {
             totalDeleted++;
           });
           await batch.commit();
+          console.log(`DashboardPage: Committed a batch of ${chunk.length} deletions.`);
         }
         console.log(`DashboardPage: Successfully deleted ${totalDeleted} existing products.`);
       }
@@ -194,6 +199,7 @@ export default function DashboardPage() {
             totalAdded++;
           });
           await batch.commit();
+          console.log(`DashboardPage: Committed a batch of ${chunk.length} additions.`);
         }
         console.log(`DashboardPage: Successfully added ${totalAdded} new products.`);
       }
@@ -901,6 +907,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-
-    

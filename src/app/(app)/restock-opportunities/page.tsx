@@ -78,10 +78,10 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-    if (currentUser) {
-      console.log(`RestockOpportunitiesPage: Fetching products for user UID: ${currentUser.uid}`); 
+    if (currentUser && allProducts.length === 0 && !isSavingFirestore) { // Fetch only if user is present and products are not loaded
+      console.log(`RestockOpportunitiesPage: Fetching products for user UID: ${currentUser.uid} because allProducts is empty.`); 
+      setIsLoadingFirestore(true);
       const fetchProducts = async () => {
-        setIsLoadingFirestore(true);
         try {
           const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
           const snapshot = await getDocs(query(productsCol));
@@ -98,12 +98,14 @@ export default function RestockOpportunitiesPage() {
         }
       };
       fetchProducts();
-    } else {
-        setAllProducts([]);
-        setFilteredProducts([]);
+    } else if (currentUser && allProducts.length > 0) {
+        console.log(`RestockOpportunitiesPage: Products already loaded for user UID: ${currentUser.uid}. Skipping fetch.`);
+        setIsLoadingFirestore(false); // Data is already there
+    } else if (!currentUser) {
+        // Handled by onAuthStateChanged
         setIsLoadingFirestore(false);
     }
-  }, [currentUser, toast]);
+  }, [currentUser, toast, allProducts.length, isSavingFirestore]);
 
  const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
     if (!currentUser) {
@@ -122,7 +124,6 @@ export default function RestockOpportunitiesPage() {
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
       
       if (!existingDocsSnapshot.empty) {
-        const deletePromises: Promise<void>[] = [];
         console.log(`RestockOpportunitiesPage: Deleting ${existingDocsSnapshot.docs.length} existing documents in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < existingDocsSnapshot.docs.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
@@ -131,14 +132,13 @@ export default function RestockOpportunitiesPage() {
             batch.delete(docSnapshot.ref);
             totalDeleted++;
           });
-          deletePromises.push(batch.commit());
+          await batch.commit();
+          console.log(`RestockOpportunitiesPage: Committed a batch of ${chunk.length} deletions.`);
         }
-        await Promise.all(deletePromises);
         console.log(`RestockOpportunitiesPage: Successfully deleted ${totalDeleted} existing products.`);
       }
 
       if (productsToSave.length > 0) {
-        const addPromises: Promise<void>[] = [];
         console.log(`RestockOpportunitiesPage: Adding ${productsToSave.length} new products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
@@ -148,9 +148,9 @@ export default function RestockOpportunitiesPage() {
             batch.set(newDocRef, productToFirestore(product));
             totalAdded++;
           });
-          addPromises.push(batch.commit());
+          await batch.commit();
+          console.log(`RestockOpportunitiesPage: Committed a batch of ${chunk.length} additions.`);
         }
-        await Promise.all(addPromises);
         console.log(`RestockOpportunitiesPage: Successfully added ${totalAdded} new products.`);
       }
       
@@ -242,9 +242,9 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-   if(allProducts.length > 0 || baseFilters !== null || vtexIdStatusFilter !== "all") {
+   if(!isLoadingFirestore && (allProducts.length > 0 || baseFilters !== null || vtexIdStatusFilter !== "all" || lowStockThreshold !== DEFAULT_LOW_STOCK_THRESHOLD.toString())) {
     applyAllFilters();
-   } else if (!isLoadingFirestore) { 
+   } else if (!isLoadingFirestore && allProducts.length === 0) { 
     setFilteredProducts([]);
    }
   }, [allProducts, lowStockThreshold, baseFilters, vtexIdStatusFilter, applyAllFilters, isLoadingFirestore]);
@@ -545,4 +545,3 @@ export default function RestockOpportunitiesPage() {
     </div>
   );
 }
-
