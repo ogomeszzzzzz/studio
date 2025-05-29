@@ -2,15 +2,14 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
-// ExcelUploadSection import removed
 import { PillowStackColumn } from '@/components/domain/PillowStackColumn';
 import type { Product } from '@/types';
-import { BedDouble, Loader2, Database, Filter as FilterIcon, AlertTriangle, ShoppingBag, TrendingDown, PackageX, BarChart3, ListFilter, SortAsc, SortDesc, Clock } from 'lucide-react';
+import { BedDouble, Loader2, Database, Filter as FilterIcon, AlertTriangle, ShoppingBag, TrendingDown, PackageX, BarChart3, ListFilter, SortAsc, SortDesc, Clock, Zap } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { clientAuth, firestore } from '@/lib/firebase/config';
 import type { User } from 'firebase/auth';
-import { collection, getDocs, doc, Timestamp, query, getDoc } from 'firebase/firestore'; // Removed writeBatch, setDoc, serverTimestamp
+import { collection, getDocs, doc, Timestamp, query, getDoc } from 'firebase/firestore';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -23,13 +22,15 @@ const PILLOW_PRODUCT_TYPE_EXCEL = "TRAVESSEIRO";
 const PILLOW_NAME_PREFIX = "Travesseiro";
 const PILLOW_BRAND_NAME = "Altenburg";
 const MAX_STOCK_PER_PILLOW_COLUMN = 75;
-const LOW_STOCK_THRESHOLD_PERCENTAGE = 0.25;
-const GOOD_STOCK_THRESHOLD_PERCENTAGE = 0.75;
+const LOW_STOCK_THRESHOLD_PERCENTAGE = 0.25; // 25% of max stock
+const GOOD_STOCK_THRESHOLD_PERCENTAGE = 0.75; // 75% of max stock
+const HIGH_SALES_THRESHOLD = 10; // Example: more than 10 sales in 30d is considered high for urgency
+const LOW_DAYS_OF_STOCK_THRESHOLD = 7; // Example: less than 7 days of stock is urgent
 
 
-type SortCriteria = 'name' | 'stock' | 'fillPercentage';
+type SortCriteria = 'name' | 'stock' | 'fillPercentage' | 'sales30d';
 type SortOrder = 'asc' | 'desc';
-type StockStatusFilter = 'all' | 'empty' | 'low' | 'medium' | 'good' | 'overstocked';
+type StockStatusFilter = 'all' | 'empty' | 'low' | 'medium' | 'good' | 'overstocked' | 'critical';
 
 
 interface AggregatedPillow {
@@ -38,9 +39,11 @@ interface AggregatedPillow {
   fillPercentage: number;
   derivation?: string;
   vtexId?: string | number;
+  sales30d: number;
+  isCritical?: boolean;
+  isUrgent?: boolean;
 }
 
-// productToFirestore removed as no saving happens here
 const productFromFirestore = (data: any): Product => {
   return {
     ...data,
@@ -62,11 +65,17 @@ function derivePillowDisplayName(productNameInput: string | undefined): string {
       }
     }
     const words = name.split(/\s+/).filter(word => word.length > 0);
-    if (words.length === 0) return productName;
-    else if (words.length === 1) return words[0];
-    else return `${words[0]} ${words[1]}`;
+    if (words.length === 0) return productName; // Fallback if stripping leaves nothing
+    
+    // Take up to first two words, unless it's a single word name like "Gellou"
+    if (words[0]?.toLowerCase() === 'gellou' && words.length === 1) return words[0];
+    if (words.length === 1) return words[0];
+    return `${words[0]} ${words[1] || ''}`.trim();
   }
-  return productName;
+  // If not starting with "Travesseiro", return a shorter version or original
+  const words = productName.split(/\s+/).filter(word => word.length > 0);
+  if (words.length <= 2) return productName;
+  return `${words[0]} ${words[1]}`;
 }
 
 
@@ -74,7 +83,6 @@ export default function PillowStockPage() {
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [aggregatedPillowStockState, setAggregatedPillowStockState] = useState<AggregatedPillow[]>([]);
   const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
-  // isSavingFirestore and isProcessingExcel removed
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
@@ -98,7 +106,7 @@ export default function PillowStockPage() {
   }, []);
 
   useEffect(() => {
-    if (currentUser && allProducts.length === 0 ) { // Removed !isSavingFirestore && !isProcessingExcel
+    if (currentUser && allProducts.length === 0 ) {
       console.log(`PillowStockPage: Fetching products for user UID: ${currentUser.uid} because allProducts is empty.`);
       setIsLoadingFirestore(true);
       const fetchProducts = async () => {
@@ -106,7 +114,7 @@ export default function PillowStockPage() {
           const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
           const snapshot = await getDocs(query(productsCol));
           const productsFromDb: Product[] = [];
-           snapshot.docs.forEach(docSnap => { // Renamed doc to docSnap
+           snapshot.docs.forEach(docSnap => {
             if (docSnap.id !== '_metadata') {
               productsFromDb.push(productFromFirestore(docSnap.data()));
             }
@@ -155,26 +163,26 @@ export default function PillowStockPage() {
     } else if (!currentUser) {
       setIsLoadingFirestore(false);
     }
-  }, [currentUser, toast, allProducts.length, lastDataUpdateTimestamp]); // Removed isSavingFirestore, isProcessingExcel
-
-  // saveProductsToFirestore and handleExcelDataProcessed removed
+  }, [currentUser, toast, allProducts.length, lastDataUpdateTimestamp]);
 
   const pillowProducts = useMemo(() => {
     return allProducts.filter(p => p.productType?.toUpperCase() === PILLOW_PRODUCT_TYPE_EXCEL.toUpperCase());
   }, [allProducts]);
 
   useEffect(() => {
-    const pillowStockMap = new Map<string, { stock: number; derivation?: string; vtexId?: string | number }>();
+    const pillowStockMap = new Map<string, { stock: number; derivation?: string; vtexId?: string | number; sales30d: number }>();
     pillowProducts.forEach(pillow => {
         const displayName = derivePillowDisplayName(pillow.name);
         const currentPillowData = pillowStockMap.get(displayName) || {
             stock: 0,
             derivation: pillow.productDerivation || String(pillow.productId || pillow.vtexId || ''),
-            vtexId: pillow.vtexId
+            vtexId: pillow.vtexId,
+            sales30d: 0,
         };
         currentPillowData.stock += pillow.stock;
+        currentPillowData.sales30d += (pillow.sales30d || 0);
 
-        if (!pillowStockMap.has(displayName)) {
+        if (!pillowStockMap.has(displayName)) { // Set derivation and vtexId from the first product encountered for this display name
             currentPillowData.derivation = pillow.productDerivation || String(pillow.productId || pillow.vtexId || '');
             currentPillowData.vtexId = pillow.vtexId;
         }
@@ -182,13 +190,25 @@ export default function PillowStockPage() {
     });
 
     let derivedPillows: AggregatedPillow[] = Array.from(pillowStockMap.entries())
-      .map(([name, data]) => ({
-        name,
-        stock: data.stock,
-        derivation: data.derivation,
-        vtexId: data.vtexId,
-        fillPercentage: (data.stock / MAX_STOCK_PER_PILLOW_COLUMN) * 100
-      }));
+      .map(([name, data]) => {
+        const fillPercentage = (data.stock / MAX_STOCK_PER_PILLOW_COLUMN) * 100;
+        const daysOfStock = data.sales30d > 0 ? (data.stock / (data.sales30d / 30)) : Infinity;
+        
+        const isCritical = data.stock === 0 && data.sales30d > 0;
+        const isUrgent = data.stock > 0 && data.stock < (MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE) && 
+                         (data.sales30d > HIGH_SALES_THRESHOLD || (daysOfStock < LOW_DAYS_OF_STOCK_THRESHOLD && data.sales30d > 0));
+
+        return {
+          name,
+          stock: data.stock,
+          derivation: data.derivation,
+          vtexId: data.vtexId,
+          fillPercentage,
+          sales30d: data.sales30d,
+          isCritical,
+          isUrgent,
+        };
+      });
 
     if (searchTerm) {
       derivedPillows = derivedPillows.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -200,6 +220,7 @@ export default function PillowStockPage() {
         const lowThreshold = MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE;
         const goodThreshold = MAX_STOCK_PER_PILLOW_COLUMN * GOOD_STOCK_THRESHOLD_PERCENTAGE;
         switch (stockStatusFilter) {
+          case 'critical': return !!p.isCritical || !!p.isUrgent;
           case 'empty': return stock === 0;
           case 'low': return stock > 0 && stock < lowThreshold;
           case 'medium': return stock >= lowThreshold && stock < goodThreshold;
@@ -218,6 +239,8 @@ export default function PillowStockPage() {
         comparison = a.stock - b.stock;
       } else if (sortCriteria === 'fillPercentage') {
         comparison = a.fillPercentage - b.fillPercentage;
+      } else if (sortCriteria === 'sales30d') {
+        comparison = (a.sales30d || 0) - (b.sales30d || 0);
       }
       return sortOrder === 'asc' ? comparison : -comparison;
     });
@@ -226,17 +249,20 @@ export default function PillowStockPage() {
 
 
   const pillowKPIs = useMemo(() => {
-    if (pillowProducts.length === 0) return { totalPillowSKUs: 0, totalPillowUnits: 0, lowStockPillowTypes: 0, zeroStockPillowTypes: 0, averageStockPerType: 0 };
+    if (pillowProducts.length === 0) return { totalPillowSKUs: 0, totalPillowUnits: 0, lowStockPillowTypes: 0, zeroStockPillowTypes: 0, averageStockPerType: 0, criticalPillowsCount: 0 };
 
-    const uniquePillowDisplays = aggregatedPillowStockState;
+    const uniquePillowDisplays = aggregatedPillowStockState; // Use already filtered/sorted state for consistency with display
 
     const totalPillowSKUs = uniquePillowDisplays.length;
     const totalPillowUnits = uniquePillowDisplays.reduce((sum, p) => sum + p.stock, 0);
+    
     const lowStockThresholdValue = MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE;
-    const lowStockPillowTypes = uniquePillowDisplays.filter(p => p.stock > 0 && p.stock < lowStockThresholdValue).length;
-    const zeroStockPillowTypes = uniquePillowDisplays.filter(p => p.stock === 0).length;
+    const lowStockPillowTypes = uniquePillowDisplays.filter(p => p.stock > 0 && p.stock < lowStockThresholdValue && !p.isCritical && !p.isUrgent).length; // Exclude critical/urgent
+    const zeroStockPillowTypes = uniquePillowDisplays.filter(p => p.stock === 0 && !p.isCritical).length; // Exclude those already counted as critical rupture
     const averageStockPerType = totalPillowSKUs > 0 ? parseFloat((totalPillowUnits / totalPillowSKUs).toFixed(1)) : 0;
-    return { totalPillowSKUs, totalPillowUnits, lowStockPillowTypes, zeroStockPillowTypes, averageStockPerType };
+    const criticalPillowsCount = uniquePillowDisplays.filter(p => p.isCritical || p.isUrgent).length;
+    
+    return { totalPillowSKUs, totalPillowUnits, lowStockPillowTypes, zeroStockPillowTypes, averageStockPerType, criticalPillowsCount };
   }, [pillowProducts, aggregatedPillowStockState]);
 
   const noPillowsFoundInExcel = useMemo(() => {
@@ -244,7 +270,7 @@ export default function PillowStockPage() {
   }, [allProducts, pillowProducts]);
 
 
-  const isAnyDataLoading = isLoadingFirestore; // Simplified
+  const isAnyDataLoading = isLoadingFirestore;
   const lowStockFilterThreshold = (MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE).toFixed(0);
   const goodStockFilterThreshold = (MAX_STOCK_PER_PILLOW_COLUMN * GOOD_STOCK_THRESHOLD_PERCENTAGE).toFixed(0);
 
@@ -269,8 +295,6 @@ export default function PillowStockPage() {
         </div>
       )}
 
-      {/* ExcelUploadSection removed */}
-
       {isAnyDataLoading && (
         <Card className="shadow-lg"><CardHeader><CardTitle className="flex items-center">
               <Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" />
@@ -293,11 +317,12 @@ export default function PillowStockPage() {
                 {pillowProducts.length === 0 && !noPillowsFoundInExcel && (<p className="text-muted-foreground">Nenhum travesseiro encontrado (coluna "Tipo. Produto" diferente de "{PILLOW_PRODUCT_TYPE_EXCEL}").</p>)}
                 {noPillowsFoundInExcel && (<p className="text-muted-foreground">Nenhum produto com "Tipo. Produto" igual a "{PILLOW_PRODUCT_TYPE_EXCEL}" foi encontrado nos dados carregados.</p>)}
                 {pillowProducts.length > 0 && (
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 gap-4">
                         <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Modelos de Travesseiros</CardTitle><BedDouble className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{pillowKPIs.totalPillowSKUs}</div><p className="text-xs text-muted-foreground">Modelos únicos</p></CardContent></Card>
                         <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Total em Estoque</CardTitle><ShoppingBag className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{pillowKPIs.totalPillowUnits.toLocaleString()}</div><p className="text-xs text-muted-foreground">Unidades totais</p></CardContent></Card>
-                        <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Travesseiros Estoque Baixo</CardTitle><TrendingDown className="h-4 w-4 text-destructive" /></CardHeader><CardContent><div className="text-2xl font-bold text-destructive">{pillowKPIs.lowStockPillowTypes}</div><p className="text-xs text-muted-foreground">Modelos &lt; {lowStockFilterThreshold} unid.</p></CardContent></Card>
-                        <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Travesseiros Estoque Zerado</CardTitle><PackageX className="h-4 w-4 text-red-700" /></CardHeader><CardContent><div className="text-2xl font-bold text-red-700">{pillowKPIs.zeroStockPillowTypes}</div><p className="text-xs text-muted-foreground">Modelos sem unidades</p></CardContent></Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow bg-destructive/10 border-destructive"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium text-destructive">Travesseiros Críticos</CardTitle><Zap className="h-4 w-4 text-destructive" /></CardHeader><CardContent><div className="text-2xl font-bold text-destructive">{pillowKPIs.criticalPillowsCount}</div><p className="text-xs text-destructive/80">Ruptura ou Urgência!</p></CardContent></Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Estoque Baixo (Não Crítico)</CardTitle><TrendingDown className="h-4 w-4 text-amber-600" /></CardHeader><CardContent><div className="text-2xl font-bold text-amber-700">{pillowKPIs.lowStockPillowTypes}</div><p className="text-xs text-muted-foreground">&lt; {lowStockFilterThreshold} unid.</p></CardContent></Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Estoque Zerado (Sem Venda)</CardTitle><PackageX className="h-4 w-4 text-red-700" /></CardHeader><CardContent><div className="text-2xl font-bold text-red-700">{pillowKPIs.zeroStockPillowTypes}</div><p className="text-xs text-muted-foreground">Modelos sem unid. (e sem vendas)</p></CardContent></Card>
                         <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Média Estoque/Modelo</CardTitle><BarChart3 className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{pillowKPIs.averageStockPerType.toLocaleString()}</div><p className="text-xs text-muted-foreground">Unid. médias por modelo</p></CardContent></Card>
                     </div>
                 )}
@@ -321,6 +346,7 @@ export default function PillowStockPage() {
                     <SelectTrigger id="stockStatusFilter" className="mt-1"><SelectValue placeholder="Filtrar status..." /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="critical">Críticos (Ruptura/Urgência)</SelectItem>
                       <SelectItem value="empty">Vazio (0 unidades)</SelectItem>
                       <SelectItem value="low">Estoque Baixo (&lt; {lowStockFilterThreshold} unidades)</SelectItem>
                       <SelectItem value="medium">Estoque Médio ({lowStockFilterThreshold}-{(Number(goodStockFilterThreshold)-1).toFixed(0)} unidades)</SelectItem>
@@ -337,6 +363,7 @@ export default function PillowStockPage() {
                       <SelectItem value="name">Nome do Travesseiro</SelectItem>
                       <SelectItem value="stock">Estoque Atual</SelectItem>
                       <SelectItem value="fillPercentage">Percentual Preenchido</SelectItem>
+                      <SelectItem value="sales30d">Vendas 30d</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -377,6 +404,9 @@ export default function PillowStockPage() {
                         productDerivation={pillow.derivation}
                         currentStock={pillow.stock}
                         maxStock={MAX_STOCK_PER_PILLOW_COLUMN}
+                        sales30d={pillow.sales30d}
+                        isCritical={pillow.isCritical}
+                        isUrgent={pillow.isUrgent}
                         />
                     ))}
                     </div>
