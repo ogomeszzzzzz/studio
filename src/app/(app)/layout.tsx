@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { clientAuth } from '@/lib/firebase/config';
 import { Button } from '@/components/ui/button';
-import { Loader2, LogOut, LayoutDashboard, UserCircle, PackageSearch } from 'lucide-react'; // Removed Settings
+import { Loader2, LogOut, LayoutDashboard, UserCircle, PackageSearch, BedDouble } from 'lucide-react';
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 import type { UserProfile } from '@/types';
@@ -22,16 +22,13 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const { toast } = useToast();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  // Removed isAdmin state
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(clientAuth, async (firebaseUser) => {
       if (firebaseUser) {
         setUserProfile({ uid: firebaseUser.uid, email: firebaseUser.email });
-        // Removed isAdmin logic
       } else {
         setUserProfile(null);
-        // Removed isAdmin logic
         router.replace('/login');
       }
       setLoading(false);
@@ -105,7 +102,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <PackageSearch className="h-5 w-5" />
             <span className="font-medium text-sm">Oportunidades Reabast.</span>
         </Link>
-        {/* Admin link removed */}
+        <Link href="/pillow-stock" className="flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors">
+            <BedDouble className="h-5 w-5" /> {/* Using BedDouble for pillows, adjust if a better icon is found */}
+            <span className="font-medium text-sm">Estoque Travesseiros</span>
+        </Link>
       </nav>
       <div className="flex-1 flex flex-col bg-background">
         <AuthenticatedHeader />
