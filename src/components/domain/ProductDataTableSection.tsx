@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { Product } from '@/types';
 import { format, isValid, addDays, isBefore, parseISO } from 'date-fns';
-import { ArrowUpDown, ListChecks, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowUpDown, ListChecks, ChevronLeft, ChevronRight, TrendingUp } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
@@ -21,29 +21,31 @@ interface ProductDataTableSectionProps {
   showStockColumn?: boolean;
   showReadyToShipColumn?: boolean;
   showRegulatorStockColumn?: boolean;
-  showOpenOrdersColumn?: boolean; // Novo
+  showOpenOrdersColumn?: boolean;
   showCollectionColumn?: boolean;
   showStartDateColumn?: boolean;
   showEndDateColumn?: boolean;
   showStatusColumn?: boolean;
-  showDescriptionColumn?: boolean; 
+  showDescriptionColumn?: boolean;
   showSizeColumn?: boolean;
   showProductTypeColumn?: boolean;
-  showProductDerivationColumn?: boolean; 
+  showProductDerivationColumn?: boolean;
+  showCanRestockAmountColumn?: boolean; // Nova prop
+  lowStockThresholdForRestock?: number; // Nova prop para cálculo
   cardTitle?: string;
-  cardDescription?: string; 
+  cardDescription?: string;
   cardIcon?: React.ElementType;
 }
 
-type SortKey = keyof Product | '';
+type SortKey = keyof Product | 'canRestockAmount' | ''; // Adicionado 'canRestockAmount'
 type SortOrder = 'asc' | 'desc';
 
 const getCollectionStatus = (product: Product): { text: string; variant: 'default' | 'secondary' | 'destructive' | 'outline', colorClass?: string } => {
   const today = new Date();
-  today.setHours(0,0,0,0); 
+  today.setHours(0,0,0,0);
 
   const endDateInput = product.collectionEndDate;
-  
+
   let endDate: Date | null = null;
   if (endDateInput instanceof Date && isValid(endDateInput)) {
     endDate = endDateInput;
@@ -52,7 +54,7 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
     if (isValid(parsedDate)) {
       endDate = parsedDate;
     }
-  } else if (typeof endDateInput === 'number') { 
+  } else if (typeof endDateInput === 'number') {
       const excelEpoch = new Date(Date.UTC(1899, 11, 30));
       const d = new Date(excelEpoch.getTime() + endDateInput * 24 * 60 * 60 * 1000);
       if (isValid(d)) endDate = d;
@@ -60,29 +62,29 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
 
 
   if (endDate && isValid(endDate)) {
-    endDate.setHours(0,0,0,0); 
+    endDate.setHours(0,0,0,0);
 
     if (isBefore(endDate, today)) {
-      return product.stock > 0 
-        ? { text: 'Coleção Passada (Em Estoque)', variant: 'destructive', colorClass: 'bg-destructive/80 text-destructive-foreground' } 
+      return product.stock > 0
+        ? { text: 'Coleção Passada (Em Estoque)', variant: 'destructive', colorClass: 'bg-destructive/80 text-destructive-foreground' }
         : { text: 'Coleção Passada (Sem Estoque)', variant: 'outline', colorClass: 'border-muted-foreground text-muted-foreground' };
     }
     if (isBefore(endDate, addDays(today, 30))) {
-      return { text: 'Próximo ao Fim', variant: 'default', colorClass: 'bg-amber-500 text-white' }; 
+      return { text: 'Próximo ao Fim', variant: 'default', colorClass: 'bg-amber-500 text-white' };
     }
   }
-  if (product.isCurrentCollection === false && product.stock > 0) { 
+  if (product.isCurrentCollection === false && product.stock > 0) {
      return { text: 'Não Atual (Em Estoque)', variant: 'secondary' };
   }
-  if (product.isCurrentCollection === true) { 
+  if (product.isCurrentCollection === true) {
     return { text: 'Coleção Atual', variant: 'default', colorClass: 'bg-primary/80 text-primary-foreground' };
   }
   return { text: 'Status N/A', variant: 'outline' };
 };
 
 
-export function ProductDataTableSection({ 
-  products, 
+export function ProductDataTableSection({
+  products,
   isLoading,
   itemsPerPage = 20,
   showVtexIdColumn = false,
@@ -90,15 +92,17 @@ export function ProductDataTableSection({
   showStockColumn = true,
   showReadyToShipColumn = false,
   showRegulatorStockColumn = false,
-  showOpenOrdersColumn = false, // Novo
+  showOpenOrdersColumn = false,
   showCollectionColumn = true,
   showStartDateColumn = true,
   showEndDateColumn = true,
   showStatusColumn = true,
-  showDescriptionColumn = false, 
+  showDescriptionColumn = false,
   showSizeColumn = false,
   showProductTypeColumn = false,
   showProductDerivationColumn = false,
+  showCanRestockAmountColumn = false, // Nova prop
+  lowStockThresholdForRestock = 0, // Nova prop
   cardTitle = "Dados dos Produtos",
   cardDescription = "Lista detalhada de produtos. Clique nos cabeçalhos das colunas para ordenar.",
   cardIcon: CardIcon = ListChecks,
@@ -107,11 +111,23 @@ export function ProductDataTableSection({
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [currentPage, setCurrentPage] = useState(1);
 
+  const augmentedProducts = useMemo(() => {
+    if (!showCanRestockAmountColumn) return products;
+    return products.map(p => ({
+        ...p,
+        // This calculation is now done in the parent page (RestockOpportunitiesPage)
+        // and passed via p.canRestockAmount
+    }));
+  }, [products, showCanRestockAmountColumn, lowStockThresholdForRestock]);
+
+
   const sortedProducts = useMemo(() => {
-    if (!sortKey) return products;
-    return [...products].sort((a, b) => {
-      const valA = a[sortKey as keyof Product]; 
-      const valB = b[sortKey as keyof Product]; 
+    const productsToSort = showCanRestockAmountColumn ? augmentedProducts : products;
+    if (!sortKey) return productsToSort;
+
+    return [...productsToSort].sort((a, b) => {
+      const valA = a[sortKey as keyof Product];
+      const valB = b[sortKey as keyof Product];
 
       let comparison = 0;
       if (valA instanceof Date && valB instanceof Date) {
@@ -123,26 +139,26 @@ export function ProductDataTableSection({
       } else if (typeof valA === 'boolean' && typeof valB === 'boolean') {
         comparison = valA === valB ? 0 : (valA ? -1 : 1);
       } else if (valA === null || valA === undefined) {
-        comparison = (valB === null || valB === undefined) ? 0 : 1; 
+        comparison = (valB === null || valB === undefined) ? 0 : 1;
       } else if (valB === null || valB === undefined) {
-        comparison = -1; 
+        comparison = -1;
       }
 
       return sortOrder === 'asc' ? comparison : -comparison;
     });
-  }, [products, sortKey, sortOrder]);
+  }, [products, augmentedProducts, showCanRestockAmountColumn, sortKey, sortOrder]);
 
   const totalPages = Math.ceil(sortedProducts.length / itemsPerPage);
 
   useEffect(() => {
     if (currentPage > totalPages && totalPages > 0) {
       setCurrentPage(totalPages);
-    } else if (currentPage === 0 && totalPages > 0) { 
+    } else if (currentPage === 0 && totalPages > 0) {
         setCurrentPage(1);
-    } else if (totalPages === 0 && sortedProducts.length === 0) { 
-        setCurrentPage(1); 
+    } else if (totalPages === 0 && sortedProducts.length === 0) {
+        setCurrentPage(1);
     }
-  }, [sortedProducts, currentPage, itemsPerPage, totalPages]);
+  }, [sortedProducts.length, currentPage, itemsPerPage, totalPages]);
 
 
   const paginatedProducts = useMemo(() => {
@@ -153,14 +169,14 @@ export function ProductDataTableSection({
 
 
   const handleSort = (key: SortKey) => {
-    if (!key) return; 
+    if (!key) return;
     if (sortKey === key) {
       setSortOrder(prevOrder => (prevOrder === 'asc' ? 'desc' : 'asc'));
     } else {
       setSortKey(key);
       setSortOrder('asc');
     }
-    setCurrentPage(1); 
+    setCurrentPage(1);
   };
 
   const renderSortIcon = (key: SortKey) => {
@@ -170,18 +186,19 @@ export function ProductDataTableSection({
     }
     return <ArrowUpDown className="h-4 w-4 inline ml-1 opacity-30" />;
   };
-  
+
   const TableSkeleton = () => {
     const colCount = [
-        showVtexIdColumn, showNameColumn, showProductDerivationColumn, showStockColumn, 
-        showReadyToShipColumn, showRegulatorStockColumn, showOpenOrdersColumn, // Novo
-        showCollectionColumn, showDescriptionColumn, 
+        showVtexIdColumn, showNameColumn, showProductDerivationColumn, showStockColumn,
+        showReadyToShipColumn, showRegulatorStockColumn, showOpenOrdersColumn,
+        showCanRestockAmountColumn, // Nova coluna
+        showCollectionColumn, showDescriptionColumn,
         showSizeColumn, showProductTypeColumn, showStartDateColumn, showEndDateColumn, showStatusColumn
-    ].filter(Boolean).length || 1; 
+    ].filter(Boolean).length || 1;
 
     return (
         <>
-            {[...Array(itemsPerPage > 10 ? 10 : itemsPerPage)].map((_, i) => ( 
+            {[...Array(itemsPerPage > 10 ? 10 : itemsPerPage)].map((_, i) => (
                 <TableRow key={`skeleton-row-${i}`}>
                     <TableCell colSpan={colCount > 0 ? colCount : 1}>
                         <Skeleton className="h-8 w-full" />
@@ -194,17 +211,17 @@ export function ProductDataTableSection({
 
 
   return (
-    <Card className="shadow-sm"> 
-      <CardHeader className="pt-4 pb-2"> 
-        <CardTitle className="flex items-center text-lg"> 
-          <CardIcon className="mr-2 h-5 w-5 text-primary" />
+    <Card className="shadow-sm">
+      <CardHeader className="pt-4 pb-2">
+        <CardTitle className="flex items-center text-lg">
+          {CardIcon && <CardIcon className="mr-2 h-5 w-5 text-primary" />}
           {cardTitle}
         </CardTitle>
         <CardDescription className="text-sm">
           {cardDescription}
         </CardDescription>
       </CardHeader>
-      <CardContent className="pt-2"> 
+      <CardContent className="pt-2">
         {(products.length === 0 && !isLoading) ? (
           <p className="text-center text-muted-foreground py-6">Nenhum produto corresponde aos critérios selecionados.</p>
         ) : (
@@ -220,6 +237,7 @@ export function ProductDataTableSection({
                     {showReadyToShipColumn && <TableHead onClick={() => handleSort('readyToShip')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap font-semibold text-green-600 px-2 py-3 text-xs sm:text-sm">Pronta Ent. {renderSortIcon('readyToShip')}</TableHead>}
                     {showRegulatorStockColumn && <TableHead onClick={() => handleSort('regulatorStock')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap font-semibold text-orange-600 px-2 py-3 text-xs sm:text-sm">Regulador {renderSortIcon('regulatorStock')}</TableHead>}
                     {showOpenOrdersColumn && <TableHead onClick={() => handleSort('openOrders')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap font-semibold text-blue-600 px-2 py-3 text-xs sm:text-sm">Ped. Aberto {renderSortIcon('openOrders')}</TableHead>}
+                    {showCanRestockAmountColumn && <TableHead onClick={() => handleSort('canRestockAmount')} className="cursor-pointer hover:bg-muted/50 text-right whitespace-nowrap font-semibold text-teal-600 px-2 py-3 text-xs sm:text-sm"><TrendingUp className="inline h-4 w-4 mr-1" />Pode Repor {renderSortIcon('canRestockAmount')}</TableHead>}
                     {showCollectionColumn && <TableHead onClick={() => handleSort('collection')} className="cursor-pointer hover:bg-muted/50 min-w-[150px] px-2 py-3 text-xs sm:text-sm">Coleção {renderSortIcon('collection')}</TableHead>}
                     {showDescriptionColumn && <TableHead onClick={() => handleSort('description')} className="cursor-pointer hover:bg-muted/50 min-w-[150px] px-2 py-3 text-xs sm:text-sm">Estampa {renderSortIcon('description')}</TableHead>}
                     {showSizeColumn && <TableHead onClick={() => handleSort('size')} className="cursor-pointer hover:bg-muted/50 min-w-[100px] px-2 py-3 text-xs sm:text-sm">Tamanho {renderSortIcon('size')}</TableHead>}
@@ -241,6 +259,7 @@ export function ProductDataTableSection({
                         {showReadyToShipColumn && <TableCell className="text-right font-semibold text-green-700 px-2 py-2 text-xs sm:text-sm">{product.readyToShip.toLocaleString()}</TableCell>}
                         {showRegulatorStockColumn && <TableCell className="text-right font-semibold text-orange-700 px-2 py-2 text-xs sm:text-sm">{product.regulatorStock.toLocaleString()}</TableCell>}
                         {showOpenOrdersColumn && <TableCell className="text-right font-semibold text-blue-700 px-2 py-2 text-xs sm:text-sm">{product.openOrders.toLocaleString()}</TableCell>}
+                        {showCanRestockAmountColumn && <TableCell className="text-right font-bold text-teal-700 px-2 py-2 text-xs sm:text-sm">{(product.canRestockAmount ?? 0).toLocaleString()}</TableCell>}
                         {showCollectionColumn && <TableCell className="px-2 py-2 text-xs sm:text-sm">{product.collection}</TableCell>}
                         {showDescriptionColumn && <TableCell className="px-2 py-2 text-xs sm:text-sm">{product.description}</TableCell>}
                         {showSizeColumn && <TableCell className="px-2 py-2 text-xs sm:text-sm">{product.size}</TableCell>}

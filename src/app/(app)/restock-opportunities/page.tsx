@@ -6,7 +6,7 @@ import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import { FilterControlsSection } from '@/components/domain/FilterControlsSection';
 import { ProductDataTableSection } from '@/components/domain/ProductDataTableSection';
 import type { Product, FilterState } from '@/types';
-import { PackageSearch, AlertTriangle, Download, TrendingUp, PackageCheck, ListFilter, HelpCircle, Loader2, Database, ClipboardList, CheckSquare, Square, Filter, Activity } from 'lucide-react';
+import { PackageSearch, Download, TrendingUp, ClipboardList, CheckSquare, Loader2, Database, Filter, HelpCircle, ListFilter } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -27,7 +27,7 @@ import { collection, getDocs, writeBatch, doc, Timestamp, query } from 'firebase
 const ALL_COLLECTIONS_VALUE = "_ALL_COLLECTIONS_";
 const ALL_PRODUCT_TYPES_VALUE = "_ALL_PRODUCT_TYPES_";
 const DEFAULT_LOW_STOCK_THRESHOLD = 10;
-const FIRESTORE_BATCH_LIMIT = 450; 
+const FIRESTORE_BATCH_LIMIT = 450;
 
 
 const productToFirestore = (product: Product): any => {
@@ -35,6 +35,7 @@ const productToFirestore = (product: Product): any => {
     ...product,
     collectionStartDate: product.collectionStartDate ? Timestamp.fromDate(product.collectionStartDate) : null,
     collectionEndDate: product.collectionEndDate ? Timestamp.fromDate(product.collectionEndDate) : null,
+    // canRestockAmount is a derived field, no need to save to Firestore
   };
 };
 
@@ -66,7 +67,7 @@ export default function RestockOpportunitiesPage() {
     const unsubscribe = clientAuth.onAuthStateChanged((user) => {
       setCurrentUser(user);
        if (!user) {
-        setAllProducts([]); 
+        setAllProducts([]);
         setFilteredProducts([]);
         setIsLoadingFirestore(false);
       }
@@ -75,8 +76,8 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-    if (currentUser && allProducts.length === 0 && !isSavingFirestore) { 
-      console.log(`RestockOpportunitiesPage: Fetching products for user UID: ${currentUser.uid} because allProducts is empty.`); 
+    if (currentUser && allProducts.length === 0 && !isSavingFirestore && !isLoadingFirestore) {
+      console.log(`RestockOpportunitiesPage: Fetching products for user UID: ${currentUser.uid} because allProducts is empty.`);
       setIsLoadingFirestore(true);
       const fetchProducts = async () => {
         try {
@@ -97,11 +98,11 @@ export default function RestockOpportunitiesPage() {
       fetchProducts();
     } else if (currentUser && allProducts.length > 0) {
         console.log(`RestockOpportunitiesPage: Products already loaded for user UID: ${currentUser.uid}. Skipping fetch.`);
-        setIsLoadingFirestore(false); 
+        setIsLoadingFirestore(false);
     } else if (!currentUser) {
         setIsLoadingFirestore(false);
     }
-  }, [currentUser, toast, allProducts.length, isSavingFirestore]);
+  }, [currentUser, toast, allProducts.length, isSavingFirestore, isLoadingFirestore]); // Added isLoadingFirestore
 
  const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
     if (!currentUser) {
@@ -115,10 +116,10 @@ export default function RestockOpportunitiesPage() {
 
     try {
       const productsColRef = collection(firestore, 'users', currentUser.uid, 'products');
-      
+
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
-      
+
       if (!existingDocsSnapshot.empty) {
         console.log(`RestockOpportunitiesPage: Deleting ${existingDocsSnapshot.docs.length} existing documents in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < existingDocsSnapshot.docs.length; i += FIRESTORE_BATCH_LIMIT) {
@@ -140,7 +141,7 @@ export default function RestockOpportunitiesPage() {
           const batch = writeBatch(firestore);
           const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(product => {
-            const newDocRef = doc(productsColRef); 
+            const newDocRef = doc(productsColRef);
             batch.set(newDocRef, productToFirestore(product));
             totalAdded++;
           });
@@ -149,8 +150,8 @@ export default function RestockOpportunitiesPage() {
         }
         console.log(`RestockOpportunitiesPage: Successfully added ${totalAdded} new products.`);
       }
-      
-      setAllProducts(productsToSave); 
+
+      setAllProducts(productsToSave);
       toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
 
     } catch (error) {
@@ -162,9 +163,9 @@ export default function RestockOpportunitiesPage() {
   },[currentUser, toast]);
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
-    setIsProcessingExcel(true); 
+    setIsProcessingExcel(true);
     await saveProductsToFirestore(parsedProducts);
-    setIsProcessingExcel(false); 
+    setIsProcessingExcel(false);
   }, [saveProductsToFirestore]);
 
 
@@ -179,7 +180,7 @@ export default function RestockOpportunitiesPage() {
   }, [allProducts]);
 
   const applyAllFilters = useCallback(() => {
-    if (isLoadingFirestore) return; // Don't filter if still loading initial data
+    if (isLoadingFirestore) return;
 
     setIsLoading(true);
     console.log("Applying filters with baseFilters:", baseFilters, "lowStockThreshold:", lowStockThreshold);
@@ -190,7 +191,7 @@ export default function RestockOpportunitiesPage() {
     if (isNaN(effectiveThreshold) && lowStockThreshold.trim() !== '') {
         toast({ title: "Aviso", description: `Limite de baixo estoque inválido, usando padrão: ${DEFAULT_LOW_STOCK_THRESHOLD}.`, variant: "default" });
     }
-    
+
     if (baseFilters) {
       if (baseFilters.collection && baseFilters.collection !== ALL_COLLECTIONS_VALUE) {
         tempFiltered = tempFiltered.filter(p => p.collection === baseFilters.collection);
@@ -215,8 +216,12 @@ export default function RestockOpportunitiesPage() {
     tempFiltered = tempFiltered.filter(p =>
         p.stock <= currentThreshold &&
         (p.readyToShip > 0 || p.regulatorStock > 0) &&
-        p.openOrders === 0 
-    );
+        p.openOrders === 0
+    ).map(p => ({
+      ...p,
+      canRestockAmount: Math.min(Math.max(0, currentThreshold - p.stock), p.readyToShip + p.regulatorStock)
+    }));
+
     console.log("Filtered products count:", tempFiltered.length);
     setFilteredProducts(tempFiltered);
     setIsLoading(false);
@@ -228,11 +233,9 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-    // This useEffect will now react to changes in allProducts, lowStockThreshold, and baseFilters
-    // applyAllFilters will be called if not loading from Firestore and conditions are met
    if(!isLoadingFirestore ) {
     applyAllFilters();
-   } else if (!isLoadingFirestore && allProducts.length === 0) { 
+   } else if (!isLoadingFirestore && allProducts.length === 0) {
     setFilteredProducts([]);
    }
   }, [allProducts, lowStockThreshold, baseFilters, applyAllFilters, isLoadingFirestore]);
@@ -243,16 +246,13 @@ export default function RestockOpportunitiesPage() {
 
   const summaryStats = useMemo(() => {
     const totalSkusToRestock = filteredProducts.length;
-    const totalUnitsAvailableForRestock = filteredProducts.reduce((sum, p) => sum + p.readyToShip + p.regulatorStock, 0);
-    const potentialStockAtRiskUnits = filteredProducts.reduce((sum, p) => {
-      if (p.stock === 0) return sum + p.readyToShip + p.regulatorStock;
-      return sum + Math.max(0, (p.readyToShip + p.regulatorStock) - p.stock);
-    }, 0);
+    const totalUnitsInPERegForOpportunities = filteredProducts.reduce((sum, p) => sum + p.readyToShip + p.regulatorStock, 0);
+    const totalUnitsThatCanBeRestocked = filteredProducts.reduce((sum, p) => sum + (p.canRestockAmount || 0), 0);
 
     return {
       totalSkusToRestock,
-      totalUnitsAvailableForRestock,
-      potentialStockAtRiskUnits
+      totalUnitsInPERegForOpportunities,
+      totalUnitsThatCanBeRestocked
     };
   }, [filteredProducts]);
 
@@ -275,7 +275,8 @@ export default function RestockOpportunitiesPage() {
       "Estoque Atual": p.stock,
       "Pronta Entrega": p.readyToShip,
       "Regulador": p.regulatorStock,
-      "Pedidos em Aberto": p.openOrders, 
+      "Pedidos em Aberto": p.openOrders,
+      "Pode Repor (Un.)": p.canRestockAmount || 0,
       "Coleção (Desc. Linha Comercial)": p.collection,
       "Descrição (Estampa)": p.description,
       "Tamanho": p.size,
@@ -299,7 +300,6 @@ export default function RestockOpportunitiesPage() {
     }
   };
 
-  // Handler for the main "Aplicar Critérios e Filtros" button
   const handleApplyMainFilters = () => {
     applyAllFilters();
   }
@@ -310,10 +310,10 @@ export default function RestockOpportunitiesPage() {
         <div>
             <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center">
                 <TrendingUp className="mr-3 h-8 w-8 text-primary" />
-                Oportunidades de Reabastecimento
+                Análise de Oportunidades de Reabastecimento
             </h1>
             <p className="text-muted-foreground">
-                Identifique produtos com baixo estoque que possuem unidades em "Pronta Entrega" ou "Regulador" para reposição, e que não possuam "Pedidos em Aberto".
+                Identifique SKUs com baixo estoque que podem ser repostos utilizando unidades de "Pronta Entrega" ou "Regulador".
             </p>
         </div>
       </div>
@@ -322,17 +322,17 @@ export default function RestockOpportunitiesPage() {
         onDataParsed={handleExcelDataProcessed}
         onProcessingStart={handleProcessingStart}
         onProcessingEnd={handleProcessingEnd}
-        collectionColumnKey="Descrição Linha Comercial" // Used for product.collection field
-        cardTitle="1. Carregar/Atualizar Dados do Excel"
+        collectionColumnKey="Descrição Linha Comercial"
+        cardTitle="1. Carregar/Atualizar Dados da Planilha"
         cardDescription="Faça o upload da planilha de produtos. Os dados substituirão os existentes em seu perfil."
         isProcessingParent={isSavingFirestore || isProcessingExcel}
       />
-      
+
       {(isLoadingFirestore || isSavingFirestore) && (
          <Card className="shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center">
-              <Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" /> 
+              <Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" />
               {isSavingFirestore ? "Salvando dados..." : "Carregando dados..."}
             </CardTitle>
           </CardHeader>
@@ -353,9 +353,9 @@ export default function RestockOpportunitiesPage() {
           </CardHeader>
           <CardContent>
             <p className="text-muted-foreground">
-              Carregue um arquivo Excel no passo "1. Carregar Dados do Excel" para identificar produtos com baixo estoque que podem ser reabastecidos.
+              Carregue um arquivo Excel no passo "1. Carregar Dados da Planilha" para identificar produtos com baixo estoque que podem ser reabastecidos.
             </p>
-             <p className="text-sm text-muted-foreground mt-2">Se você já carregou dados antes, eles serão buscados automaticamente. Caso contrário, esta mensagem indica que não há dados salvos.</p>
+             <p className="text-sm text-muted-foreground mt-2">Os dados salvos em seu perfil serão carregados automaticamente.</p>
           </CardContent>
         </Card>
       )}
@@ -369,22 +369,23 @@ export default function RestockOpportunitiesPage() {
                 2. Definir Critérios e Filtros Adicionais
               </CardTitle>
               <CardDescription>
-                Ajuste o limite de estoque para considerar um item como "baixo" e aplique filtros adicionais.
-                As oportunidades são itens com estoque atual &lt;= ao limite definido, COM unidades em "Pronta Entrega" ou "Regulador" E SEM "Pedidos em Aberto".
+                Defina o "Estoque Atual Máximo" para identificar itens com baixo estoque.
+                As oportunidades são itens com estoque atual &le; ao limite definido, COM unidades em "Pronta Entrega" ou "Regulador" E SEM "Pedidos em Aberto".
+                Use os filtros adicionais para refinar sua análise.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end"> 
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                     <div>
                         <Label htmlFor="lowStockThreshold" className="flex items-center font-semibold">
-                            Estoque Atual Máximo
+                            Estoque Atual Máximo (para Oportunidade)
                             <TooltipProvider>
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <HelpCircle className="ml-1.5 h-4 w-4 text-muted-foreground cursor-help" />
                                     </TooltipTrigger>
                                     <TooltipContent>
-                                        <p>Produtos com estoque atual igual ou inferior a este valor serão considerados.</p>
+                                        <p>Produtos com estoque atual igual ou inferior a este valor serão considerados para reabastecimento.</p>
                                     </TooltipContent>
                                 </Tooltip>
                             </TooltipProvider>
@@ -399,19 +400,19 @@ export default function RestockOpportunitiesPage() {
                         className="mt-1 text-base"
                         />
                     </div>
-                    <div className="md:col-span-2"> {/* Button spans 2 cols on md+, or takes full width if alone */}
-                        <Button onClick={handleApplyMainFilters} className="w-full py-2.5 text-base" disabled={isLoading || isSavingFirestore}>
+                    <div className="md:col-span-2">
+                        <Button onClick={handleApplyMainFilters} className="w-full py-2.5 text-base" disabled={isLoading || isSavingFirestore || isProcessingExcel}>
                             {isLoading ? (
                                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                             ) : (
                                 <Filter className="mr-2 h-5 w-5" />
                             )}
-                            {isLoading ? 'Aplicando...' : 'Aplicar Estoque Máximo e Filtros Adicionais'}
+                            {isLoading ? 'Analisando...' : 'Analisar Oportunidades'}
                         </Button>
                     </div>
                 </div>
                 <FilterControlsSection
-                    products={allProducts} 
+                    products={allProducts}
                     onFilterChange={handleBaseFilterChange}
                     availableCollections={availableCollections}
                     availableProductTypes={availableProductTypes}
@@ -447,48 +448,50 @@ export default function RestockOpportunitiesPage() {
                             <p className="text-xs text-muted-foreground">Produtos únicos identificados.</p>
                         </CardContent>
                     </Card>
-                    <Card className="border-green-500 border-l-4 shadow-md hover:shadow-lg transition-shadow">
+                    <Card className="border-blue-500 border-l-4 shadow-md hover:shadow-lg transition-shadow">
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-medium">Unidades Disponíveis (PE+Reg.)</CardTitle>
-                            <PackageCheck className="h-5 w-5 text-green-500" />
+                            <CardTitle className="text-sm font-medium">Unidades em PE/Regulador (Oportunidades)</CardTitle>
+                            <ClipboardList className="h-5 w-5 text-blue-500" />
                         </CardHeader>
                         <CardContent>
-                            <div className="text-3xl font-bold text-green-600">{summaryStats.totalUnitsAvailableForRestock.toLocaleString()}</div>
-                            <p className="text-xs text-muted-foreground">Total em Pronta Entrega + Regulador.</p>
+                            <div className="text-3xl font-bold text-blue-600">{summaryStats.totalUnitsInPERegForOpportunities.toLocaleString()}</div>
+                            <p className="text-xs text-muted-foreground">Total em Pronta Entrega + Regulador para estes SKUs.</p>
                         </CardContent>
                     </Card>
-                    <Card className="border-destructive border-l-4 shadow-md hover:shadow-lg transition-shadow">
+                    <Card className="border-green-500 border-l-4 shadow-md hover:shadow-lg transition-shadow">
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-medium">Estoque em Risco (Unidades)</CardTitle>
-                            <AlertTriangle className="h-5 w-5 text-destructive" />
+                            <CardTitle className="text-sm font-medium">Total Unidades para Reposição</CardTitle>
+                            <CheckSquare className="h-5 w-5 text-green-500" />
                         </CardHeader>
                         <CardContent>
-                            <div className="text-3xl font-bold text-destructive">{summaryStats.potentialStockAtRiskUnits.toLocaleString()}</div>
-                            <p className="text-xs text-muted-foreground">Unidades de PE/Regulador que podem faltar se não repostas.</p>
+                            <div className="text-3xl font-bold text-green-600">{summaryStats.totalUnitsThatCanBeRestocked.toLocaleString()}</div>
+                            <p className="text-xs text-muted-foreground">Unidades que podem ser efetivamente repostas de PE/Regulador.</p>
                         </CardContent>
                     </Card>
                 </div>
 
                 <ProductDataTableSection
                     products={filteredProducts}
-                    isLoading={(isLoading || isSavingFirestore || isLoadingFirestore) && filteredProducts.length === 0}
+                    isLoading={(isLoading || isSavingFirestore || isLoadingFirestore || isProcessingExcel) && filteredProducts.length === 0 && allProducts.length > 0}
                     cardIcon={PackageSearch}
                     cardTitle="Produtos com Oportunidade de Reabastecimento"
-                    cardDescription="Lista de produtos com baixo estoque atual, disponibilidade em 'Pronta Entrega' ou 'Regulador', e sem 'Pedidos em Aberto'."
+                    cardDescription="Lista de produtos com baixo estoque, disponibilidade em 'Pronta Entrega' ou 'Regulador', e sem 'Pedidos em Aberto'. Clique nos cabeçalhos para ordenar."
                     showVtexIdColumn={true}
                     showNameColumn={true}
                     showProductDerivationColumn={true}
                     showStockColumn={true}
                     showReadyToShipColumn={true}
                     showRegulatorStockColumn={true}
-                    showOpenOrdersColumn={true} 
-                    showCollectionColumn={true} // This will use product.collection (from "Descrição Linha Comercial")
-                    showDescriptionColumn={true} // This is product.description (from "Descrição" / Estampa)
+                    showOpenOrdersColumn={true}
+                    showCanRestockAmountColumn={true} // Nova coluna
+                    lowStockThresholdForRestock={parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD} // Passar para cálculo na tabela
+                    showCollectionColumn={true}
+                    showDescriptionColumn={false} // Estampa não é tão crucial aqui
                     showSizeColumn={true}
                     showProductTypeColumn={true}
-                    showStatusColumn={true}    
+                    showStatusColumn={true} // Status da Coleção
                 />
-                 {allProducts.length > 0 && filteredProducts.length === 0 && !isLoading && !isSavingFirestore && !isLoadingFirestore && (
+                 {allProducts.length > 0 && filteredProducts.length === 0 && !isLoading && !isSavingFirestore && !isLoadingFirestore && !isProcessingExcel && (
                     <Card className="shadow-md my-6 border-blue-500/50 border-l-4">
                         <CardHeader>
                             <CardTitle className="flex items-center text-blue-700">
@@ -498,10 +501,11 @@ export default function RestockOpportunitiesPage() {
                         </CardHeader>
                         <CardContent>
                             <p className="text-muted-foreground">
-                                Nenhum produto com estoque atual &le; <span className="font-semibold">{parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD}</span> unidades, com disponibilidade em "Pronta Entrega" ou "Regulador", E sem "Pedidos em Aberto" foi encontrado com os filtros atuais.
+                                Nenhum produto atendeu aos critérios de oportunidade (Estoque Atual &le; <span className="font-semibold">{parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD}</span>,
+                                disponibilidade em PE/Regulador, e sem Pedidos em Aberto) com os filtros atuais.
                             </p>
                             <p className="text-muted-foreground mt-2">
-                                Tente ajustar o "Estoque Atual Máximo" ou os filtros adicionais e clique em "Aplicar Estoque Máximo e Filtros Adicionais".
+                                Tente ajustar o "Estoque Atual Máximo" ou os filtros adicionais e clique em "Analisar Oportunidades".
                             </p>
                         </CardContent>
                     </Card>
@@ -513,4 +517,3 @@ export default function RestockOpportunitiesPage() {
     </div>
   );
 }
-

@@ -8,13 +8,13 @@ export interface Product {
   stock: number;
   readyToShip: number;
   regulatorStock: number;
-  openOrders: number; // Novo campo para Pedidos em Aberto
-  description: string; 
-  size?: string; 
-  productType?: string; 
+  openOrders: number;
+  description: string;
+  size?: string;
+  productType?: string;
   complement?: string;
   commercialLine: string;
-  collection: string; 
+  collection: string;
   commercialLineDescription?: string;
   isCurrentCollection: boolean;
   collectionStartDate: Date | null;
@@ -23,6 +23,7 @@ export interface Product {
   isDiscontinued: boolean;
   rawCollectionStartDate?: string;
   rawCollectionEndDate?: string;
+  canRestockAmount?: number; // Novo campo para análise de reposição
 }
 
 export interface FilterState {
