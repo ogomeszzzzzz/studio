@@ -1,5 +1,5 @@
 
-// REMOVED: 'use server'; directive. This file is a server-side utility, not a Server Actions module.
+// REMOVED: 'use server'; directive. This file is a server-side utility.
 
 import * as admin from 'firebase-admin';
 import path from 'path';
@@ -33,9 +33,9 @@ if (!admin || !admin.credential || typeof admin.credential.cert !== 'function' |
         console.log('[Admin SDK] Service account file content read successfully.');
 
         const serviceAccountCredentials = JSON.parse(serviceAccountFileContent);
-        console.log('[Admin SDK] Service account file content parsed as JSON successfully.');
-        console.log(`[Admin SDK] Project ID from serviceAccountKey.json: ${serviceAccountCredentials.project_id}`);
-        console.log(`[Admin SDK] Expected Project ID: ${expectedProjectId}`);
+        // Log a portion of the credentials to verify, but be careful with sensitive data in logs
+        console.log(`[Admin SDK] Parsed service account JSON. Project ID: ${serviceAccountCredentials.project_id}, Client Email: ${serviceAccountCredentials.client_email}`);
+        // console.log('[Admin SDK] Full parsed serviceAccountCredentials:', JSON.stringify(serviceAccountCredentials)); // Uncomment for deep debugging if necessary
 
         const essentialFields = ['type', 'project_id', 'private_key', 'client_email'];
         const missingFields = essentialFields.filter(field => !(field in serviceAccountCredentials) || !serviceAccountCredentials[field]);
@@ -53,28 +53,27 @@ if (!admin || !admin.credential || typeof admin.credential.cert !== 'function' |
           const credential = admin.credential.cert(serviceAccountCredentials);
           // console.log('[Admin SDK] Credential object created by admin.credential.cert():', JSON.stringify(credential, null, 2)); // Log the credential object
 
-          if (!credential) {
-            adminSDKInitializationError = `admin.credential.cert(serviceAccountCredentials) returned a falsy value. This indicates a problem with the service account credentials object. Path: ${absolutePath}`;
+          if (!credential || Object.keys(credential).length === 0) { // Check if credential object is empty or falsy
+            adminSDKInitializationError = `admin.credential.cert(serviceAccountCredentials) returned a falsy or empty credential object. This indicates a problem with the service account credentials structure. Path: ${absolutePath}`;
             console.error(`[Admin SDK Init Error] ${adminSDKInitializationError}`);
           } else {
             console.log('[Admin SDK] Credential object created successfully by admin.credential.cert().');
             
-            // Generate a unique app name to force a new instance
             const appName = `firebase-admin-app-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-            console.log(`[Admin SDK] Attempting admin.initializeApp() with unique name: ${appName}`);
-            // console.log(`[Admin SDK] Explicitly passing projectId to initializeApp: '${serviceAccountCredentials.project_id}'`); // Removed for this test
+            console.log(`[Admin SDK] Attempting admin.initializeApp() with unique name: ${appName} and explicit projectId: '${serviceAccountCredentials.project_id}'`);
 
             try {
               adminApp = admin.initializeApp({
                 credential,
-                // projectId: serviceAccountCredentials.project_id, // Relying solely on credential for projectId
+                projectId: serviceAccountCredentials.project_id, // Explicitly pass projectId
               }, appName); // Use a unique name
 
               console.log(`[Admin SDK] admin.initializeApp() called for app name: ${appName}. Resulting adminApp: ${adminApp ? 'Assigned' : 'NOT Assigned'}`);
               if (adminApp) {
                 console.log(`[Admin SDK] adminApp.name: ${adminApp.name}`);
-                console.log(`[Admin SDK] adminApp.options: ${JSON.stringify(adminApp.options, null, 2)}`); // Log all options
-                console.log(`[Admin SDK] Project ID from initialized app: ${adminApp.options.projectId}`);
+                // console.log(`[Admin SDK] adminApp.options (full): ${JSON.stringify(adminApp.options, null, 2)}`); // More detailed log
+                console.log(`[Admin SDK] adminApp.options.projectId: ${adminApp.options.projectId}`);
+                console.log(`[Admin SDK] adminApp.options.credential?.projectId (if available): ${adminApp.options.credential?.getAccountId()}`); // This might provide the email or other info
               }
               console.log(`[Admin SDK] Total admin apps after initialization attempt: ${admin.apps.length}`);
 
@@ -89,7 +88,7 @@ if (!admin || !admin.credential || typeof admin.credential.cert !== 'function' |
               }
             } catch (initError: any) {
                 console.error(`[Admin SDK Init Error] FAILED during admin.initializeApp() for app '${appName}'. Error:`, initError);
-                adminSDKInitializationError = `Failed to initialize Firebase Admin App '${appName}'. Error: ${initError.message || String(initError)}.`;
+                adminSDKInitializationError = `Failed to initialize Firebase Admin App '${appName}'. Error: ${initError.message || String(initError)}. Make sure the service account key is valid and has not been revoked.`;
                 adminApp = undefined;
             }
           }
@@ -102,7 +101,7 @@ if (!admin || !admin.credential || typeof admin.credential.cert !== 'function' |
       console.error(`[Admin SDK Init Error] Service account file NOT FOUND at: ${absolutePath}.`);
       adminSDKInitializationError = `Service account file not found at: ${absolutePath}. Check FIREBASE_ADMIN_SDK_CONFIG_PATH in .env and file location. CWD: ${process.cwd()}`;
     }
-  } else if (!adminSDKInitializationError) {
+  } else if (!adminSDKInitializationError) { // Only set this error if no other error has been set
     console.log('[Admin SDK] FIREBASE_ADMIN_SDK_CONFIG_PATH not set or is empty. Cannot initialize Admin SDK from file.');
     adminSDKInitializationError = 'FIREBASE_ADMIN_SDK_CONFIG_PATH environment variable not set or empty. Cannot initialize Admin SDK.';
   }
@@ -115,7 +114,7 @@ if (!adminApp && !adminSDKInitializationError) {
 }
 
 export const adminAuth = adminApp ? adminApp.auth() : null;
-export const adminFirestore = adminApp ? adminApp.firestore() : null; // Firestore will be for the same project as adminApp
+export const adminFirestore = adminApp ? adminApp.firestore("ecom") : null; // Explicitly connect to "ecom" database for admin operations too
 
 if (!adminApp) {
   console.error("[Admin SDK] CRITICAL: adminApp is undefined after all initialization attempts. Admin SDK is NOT operational.");
@@ -130,9 +129,8 @@ if (adminApp && !adminFirestore) {
 if (adminSDKInitializationError) {
   console.error(`[Admin SDK] Final Initialization Error State: ${adminSDKInitializationError}`);
 } else if (adminApp) {
-  console.log(`[Admin SDK] Admin SDK services (Auth, Firestore) should be available. App name: ${adminApp.name}. Project ID: ${adminApp.options.projectId}. Total apps in admin.apps: ${admin.apps.length}`);
+  console.log(`[Admin SDK] Admin SDK services (Auth, Firestore) should be available. App name: ${adminApp.name}. Project ID: ${adminApp.options.projectId}. Firestore targeting 'ecom' database. Total apps in admin.apps: ${admin.apps.length}`);
 } else {
   console.error("[Admin SDK] Final State: Admin SDK not initialized, and adminApp is undefined, and no specific error string was set (this is unexpected).");
 }
 console.log('--- [ADMIN SDK INIT END V5] ---');
-
