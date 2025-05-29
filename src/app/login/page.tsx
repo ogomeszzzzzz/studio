@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { signInWithEmailAndPassword, onAuthStateChanged, User as FirebaseUser, FirebaseError } from 'firebase/auth';
+import { signInWithEmailAndPassword, onAuthStateChanged, type User as FirebaseUser } from 'firebase/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -24,7 +24,7 @@ export default function LoginPage() {
       if (user) {
         // O layout (app)/layout.tsx cuidará da verificação de aprovação e redirecionamento para dashboard
         // ou para a tela de pendente. Se o usuário está logado, ele não deve estar na página de login.
-        router.replace('/dashboard'); 
+        router.replace('/dashboard');
       }
     });
     return () => unsubscribe();
@@ -47,19 +47,24 @@ export default function LoginPage() {
 
     try {
       await signInWithEmailAndPassword(clientAuth, email, password);
-      // Não redireciona aqui, deixa o listener onAuthStateChanged e o layout lidarem com isso.
-      // Apenas um toast de sucesso.
+      // Se o login for bem-sucedido, o onAuthStateChanged listener (no useEffect acima)
+      // irá detectar a mudança de estado e redirecionar para /dashboard.
+      // Adicionamos um toast aqui para feedback imediato.
       toast({ title: 'Login Bem-sucedido', description: 'Verificando status da conta...' });
-      // setIsLoading(false) será tratado no catch ou o componente será desmontado.
+      // O setIsLoading(false) não é estritamente necessário aqui porque a navegação deve ocorrer,
+      // desmontando o componente ou o estado de carregamento será interrompido pela mudança de página.
+      // Mas é bom ter em caso de falha no redirecionamento por algum motivo inesperado.
     } catch (e: unknown) {
       setIsLoading(false);
       let errorMessage = 'Falha no login. Verifique suas credenciais.';
       let consoleLogFn: 'error' | 'warn' = 'error';
       let logMessagePrefix = 'Login error:';
 
-      if (e instanceof FirebaseError) { 
-        logMessagePrefix = `Firebase login attempt failed (${e.code}):`;
-        switch (e.code) {
+      // Check if 'e' is an object and has a 'code' property (typical for Firebase errors)
+      if (e && typeof e === 'object' && 'code' in e) {
+        const firebaseError = e as { code: string; message?: string }; // Type assertion
+        logMessagePrefix = `Firebase login attempt failed (${firebaseError.code}):`;
+        switch (firebaseError.code) {
           case 'auth/user-not-found':
           case 'auth/wrong-password':
           case 'auth/invalid-credential':
@@ -75,7 +80,7 @@ export default function LoginPage() {
              consoleLogFn = 'warn';
              break;
           default:
-            errorMessage = `Erro do Firebase: ${e.message || 'Erro desconhecido ao tentar logar.'}`;
+            errorMessage = `Erro: ${firebaseError.message || 'Erro desconhecido ao tentar logar.'}`;
             break;
         }
       } else if (e instanceof Error) {
@@ -137,7 +142,7 @@ export default function LoginPage() {
             </Button>
           </form>
         </CardContent>
-        <CardFooter className="flex flex-col items-center space-y-4 pt-6"> {/* Aumentei o padding-top e space-y */}
+        <CardFooter className="flex flex-col items-center space-y-4 pt-6">
            <p className="text-sm">
              Não tem uma conta?{' '}
              <Link href="/register" className="font-medium text-primary hover:underline flex items-center gap-1">
