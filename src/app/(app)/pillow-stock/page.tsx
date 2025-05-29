@@ -5,7 +5,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import { PillowStackColumn } from '@/components/domain/PillowStackColumn';
 import type { Product } from '@/types';
-import { BedDouble, Loader2, Database, Filter, AlertTriangle } from 'lucide-react';
+import { BedDouble, Loader2, Database, Filter, AlertTriangle, ShoppingBag, TrendingDown, PackageX, BarChart3 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { clientAuth, firestore } from '@/lib/firebase/config';
@@ -15,7 +15,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 const FIRESTORE_BATCH_LIMIT = 450;
-const PILLOW_PRODUCT_TYPE = "TRAVESSEIRO"; // Case-insensitive comparison will be used
+const PILLOW_PRODUCT_TYPE_EXCEL = "TRAVESSEIRO"; // Case-insensitive comparison will be used for Excel's 'Tipo. Produto'
+const PILLOW_NAME_PREFIX = "Travesseiro"; // For derivePillowDisplayName
+const PILLOW_BRAND_NAME = "Altenburg"; // For derivePillowDisplayName
+const MAX_STOCK_PER_PILLOW_COLUMN = 100;
+const LOW_STOCK_THRESHOLD_PERCENTAGE = 0.25; // 25% of MAX_STOCK_PER_PILLOW_COLUMN
 
 interface AggregatedPillow {
   name: string;
@@ -42,37 +46,31 @@ function derivePillowDisplayName(productNameInput: string | undefined): string {
   const productName = productNameInput || "";
 
   if (!productName.trim()) {
-    return "Sem Nome"; // Default for empty or whitespace-only names
+    return "Sem Nome";
   }
 
   let name = productName.trim();
-  const prefix = "Travesseiro";
-  const altenburg = "Altenburg";
 
-  if (name.toLowerCase().startsWith(prefix.toLowerCase())) {
-    // Remove "Travesseiro"
-    name = name.substring(prefix.length).trim();
+  if (name.toLowerCase().startsWith(PILLOW_NAME_PREFIX.toLowerCase())) {
+    name = name.substring(PILLOW_NAME_PREFIX.length).trim();
 
-    // Remove "Altenburg" if it's the next word (case-insensitive)
-    if (name.toLowerCase().startsWith(altenburg.toLowerCase())) {
-      // Need to ensure "Altenburg" is a whole word, not part of another word.
-      // A simple way is to check if the character after "Altenburg" is a space or end of string.
-      if (name.length === altenburg.length || (name.length > altenburg.length && name[altenburg.length] === ' ')) {
-         name = name.substring(altenburg.length).trim();
+    if (name.toLowerCase().startsWith(PILLOW_BRAND_NAME.toLowerCase())) {
+      const brandNameLength = PILLOW_BRAND_NAME.length;
+      if (name.length === brandNameLength || (name.length > brandNameLength && name[brandNameLength] === ' ')) {
+         name = name.substring(brandNameLength).trim();
       }
     }
 
-    const words = name.split(/\s+/).filter(word => word.length > 0); // Split by space and remove empty strings
+    const words = name.split(/\s+/).filter(word => word.length > 0);
 
-    if (words.length === 0) { // No words left after stripping
-        return productName; // Fallback to full original name if parsing yields nothing useful
+    if (words.length === 0) {
+        return productName; 
     } else if (words.length === 1) {
-      return words[0]; // e.g., "Gellou"
-    } else { // words.length >= 2
-      return `${words[0]} ${words[1]}`; // e.g., "Plumi Gold"
+      return words[0]; 
+    } else { 
+      return `${words[0]} ${words[1]}`; 
     }
   }
-  // If the original name doesn't start with "Travesseiro", return the original name.
   return productName;
 }
 
@@ -98,7 +96,7 @@ export default function PillowStockPage() {
   }, []);
 
   useEffect(() => {
-    if (currentUser && allProducts.length === 0 && !isSavingFirestore) {
+    if (currentUser && allProducts.length === 0 && !isSavingFirestore && !isLoadingFirestore) {
       console.log(`PillowStockPage: Fetching products for user UID: ${currentUser.uid} because allProducts is empty.`);
       setIsLoadingFirestore(true);
       const fetchProducts = async () => {
@@ -124,7 +122,7 @@ export default function PillowStockPage() {
     } else if (!currentUser) {
       setIsLoadingFirestore(false);
     }
-  }, [currentUser, toast, allProducts.length, isSavingFirestore]);
+  }, [currentUser, toast, allProducts.length, isSavingFirestore, isLoadingFirestore]);
 
   const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
     if (!currentUser) {
@@ -140,26 +138,20 @@ export default function PillowStockPage() {
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
       if (!existingDocsSnapshot.empty) {
-        console.log(`PillowStockPage: Deleting ${existingDocsSnapshot.docs.length} existing documents in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < existingDocsSnapshot.docs.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
           const chunk = existingDocsSnapshot.docs.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(docSnapshot => { batch.delete(docSnapshot.ref); totalDeleted++; });
           await batch.commit();
-          console.log(`PillowStockPage: Committed a batch of ${chunk.length} deletions.`);
         }
-        console.log(`PillowStockPage: Successfully deleted ${totalDeleted} existing products.`);
       }
       if (productsToSave.length > 0) {
-        console.log(`PillowStockPage: Adding ${productsToSave.length} new products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
           const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(product => { const newDocRef = doc(productsColRef); batch.set(newDocRef, productToFirestore(product)); totalAdded++; });
           await batch.commit();
-          console.log(`PillowStockPage: Committed a batch of ${chunk.length} additions.`);
         }
-        console.log(`PillowStockPage: Successfully added ${totalAdded} new products.`);
       }
       setAllProducts(productsToSave);
       toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
@@ -172,39 +164,79 @@ export default function PillowStockPage() {
   }, [currentUser, toast]);
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
-    setIsProcessingExcel(true);
+    setIsProcessingExcel(true); // Indicate processing starts before saving
     await saveProductsToFirestore(parsedProducts);
-    setIsProcessingExcel(false);
+    setIsProcessingExcel(false); // Indicate processing ends after saving
   }, [saveProductsToFirestore]);
 
   const handleProcessingStart = () => setIsProcessingExcel(true);
   const handleProcessingEnd = () => setIsProcessingExcel(false);
 
+  const pillowProducts = useMemo(() => {
+    return allProducts.filter(p => p.productType?.toUpperCase() === PILLOW_PRODUCT_TYPE_EXCEL.toUpperCase());
+  }, [allProducts]);
+
   const aggregatedPillowStock = useMemo(() => {
     const pillowStockMap = new Map<string, number>();
-    allProducts
-      .filter(p => p.productType?.toUpperCase() === PILLOW_PRODUCT_TYPE)
-      .forEach(pillow => {
+    pillowProducts.forEach(pillow => {
         const displayName = derivePillowDisplayName(pillow.name);
-        // Use the derived display name as the key for aggregation
-        const key = displayName; 
-
-        pillowStockMap.set(key, (pillowStockMap.get(key) || 0) + pillow.stock);
+        pillowStockMap.set(displayName, (pillowStockMap.get(displayName) || 0) + pillow.stock);
       });
     
     const sortedPillows: AggregatedPillow[] = Array.from(pillowStockMap.entries())
       .map(([name, stock]) => ({ name, stock }))
-      .sort((a, b) => a.name.localeCompare(b.name)); // Sort alphabetically by pillow name
+      .sort((a, b) => a.name.localeCompare(b.name)); 
 
     if (searchTerm) {
       return sortedPillows.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()));
     }
     return sortedPillows;
-  }, [allProducts, searchTerm]);
+  }, [pillowProducts, searchTerm]);
 
-  const noPillowsFound = useMemo(() => {
-    return allProducts.filter(p => p.productType?.toUpperCase() === PILLOW_PRODUCT_TYPE).length === 0;
-  }, [allProducts]);
+  const pillowKPIs = useMemo(() => {
+    if (pillowProducts.length === 0) {
+      return {
+        totalPillowSKUs: 0,
+        totalPillowUnits: 0,
+        lowStockPillowTypes: 0,
+        zeroStockPillowTypes: 0,
+        averageStockPerType: 0,
+      };
+    }
+
+    // Use the non-filtered aggregatedPillowStock for KPIs related to *types* of pillows
+    // to get a true sense of all pillow types, not just the searched ones.
+    const allAggregatedPillows = Array.from(
+        pillowProducts.reduce((map, pillow) => {
+            const displayName = derivePillowDisplayName(pillow.name);
+            map.set(displayName, (map.get(displayName) || 0) + pillow.stock);
+            return map;
+        }, new Map<string, number>()).entries()
+    ).map(([name, stock]) => ({ name, stock }));
+
+
+    const totalPillowSKUs = allAggregatedPillows.length;
+    const totalPillowUnits = allAggregatedPillows.reduce((sum, p) => sum + p.stock, 0);
+    
+    const lowStockThreshold = MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE;
+    const lowStockPillowTypes = allAggregatedPillows.filter(p => p.stock > 0 && p.stock < lowStockThreshold).length;
+    const zeroStockPillowTypes = allAggregatedPillows.filter(p => p.stock === 0).length;
+    const averageStockPerType = totalPillowSKUs > 0 ? parseFloat((totalPillowUnits / totalPillowSKUs).toFixed(1)) : 0;
+
+    return {
+      totalPillowSKUs,
+      totalPillowUnits,
+      lowStockPillowTypes,
+      zeroStockPillowTypes,
+      averageStockPerType,
+    };
+  }, [pillowProducts]);
+
+  const noPillowsFoundInExcel = useMemo(() => {
+    return allProducts.length > 0 && pillowProducts.length === 0;
+  }, [allProducts, pillowProducts]);
+
+  const isAnyDataLoading = isLoadingFirestore || isSavingFirestore || isProcessingExcel;
 
   return (
     <div className="space-y-6">
@@ -212,10 +244,10 @@ export default function PillowStockPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center">
             <BedDouble className="mr-3 h-8 w-8 text-primary" />
-            Controle de Estoque de Travesseiros
+            Controle Analítico de Estoque de Travesseiros
           </h1>
           <p className="text-muted-foreground">
-            Visualize o estoque de cada tipo de travesseiro em colunas de empilhamento.
+            Visualize o estoque de travesseiros em colunas de empilhamento e analise os principais indicadores.
           </p>
         </div>
       </div>
@@ -224,18 +256,18 @@ export default function PillowStockPage() {
         onDataParsed={handleExcelDataProcessed}
         onProcessingStart={handleProcessingStart}
         onProcessingEnd={handleProcessingEnd}
-        collectionColumnKey="Descrição Linha Comercial" // Or any other relevant key if needed for general product data
+        collectionColumnKey="Descrição Linha Comercial" 
         cardTitle="1. Carregar/Atualizar Dados da Planilha"
-        cardDescription="Faça o upload da planilha de produtos. Os dados substituirão os existentes. Os travesseiros serão filtrados pela coluna 'Tipo. Produto'."
+        cardDescription={`Faça o upload da planilha de produtos. Os dados substituirão os existentes. Os travesseiros serão filtrados pela coluna 'Tipo. Produto' (esperado: "${PILLOW_PRODUCT_TYPE_EXCEL}").`}
         isProcessingParent={isSavingFirestore || isProcessingExcel}
       />
 
-      {(isLoadingFirestore || isSavingFirestore) && (
+      {isAnyDataLoading && (
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center">
               <Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" />
-              {isSavingFirestore ? "Salvando dados..." : "Carregando dados..."}
+              {isSavingFirestore ? "Salvando dados..." : (isProcessingExcel ? "Processando planilha..." : "Carregando dados...")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -244,7 +276,7 @@ export default function PillowStockPage() {
         </Card>
       )}
 
-      {!isLoadingFirestore && !isSavingFirestore && allProducts.length === 0 && !isProcessingExcel && (
+      {!isAnyDataLoading && allProducts.length === 0 && (
         <Card className="shadow-lg text-center py-10">
           <CardHeader>
             <CardTitle className="flex items-center justify-center text-xl">
@@ -261,17 +293,82 @@ export default function PillowStockPage() {
         </Card>
       )}
 
-      {!isLoadingFirestore && !isSavingFirestore && allProducts.length > 0 && (
+      {!isAnyDataLoading && allProducts.length > 0 && (
         <>
-          <Card>
+          <Card className="shadow-md border-primary/30 border-l-4">
+            <CardHeader>
+                <CardTitle className="flex items-center"><BarChart3 className="mr-2 h-5 w-5 text-primary" />Indicadores Chave de Travesseiros</CardTitle>
+            </CardHeader>
+            <CardContent>
+                {pillowProducts.length === 0 && !noPillowsFoundInExcel && (
+                     <p className="text-muted-foreground">Nenhum travesseiro encontrado nos dados carregados para exibir indicadores. Verifique a coluna "Tipo. Produto" na sua planilha.</p>
+                )}
+                {noPillowsFoundInExcel && (
+                    <p className="text-muted-foreground">Nenhum produto com "Tipo. Produto" igual a "{PILLOW_PRODUCT_TYPE_EXCEL}" foi encontrado na planilha para exibir indicadores.</p>
+                )}
+                {pillowProducts.length > 0 && (
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                        <Card className="shadow-sm hover:shadow-md transition-shadow">
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Tipos de Travesseiros</CardTitle>
+                                <BedDouble className="h-4 w-4 text-muted-foreground" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold">{pillowKPIs.totalPillowSKUs}</div>
+                            </CardContent>
+                        </Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow">
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Total em Estoque</CardTitle>
+                                <ShoppingBag className="h-4 w-4 text-muted-foreground" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold">{pillowKPIs.totalPillowUnits.toLocaleString()}</div>
+                            </CardContent>
+                        </Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow">
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Tipos Estoque Baixo</CardTitle>
+                                <TrendingDown className="h-4 w-4 text-destructive" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold text-destructive">{pillowKPIs.lowStockPillowTypes}</div>
+                                <p className="text-xs text-muted-foreground">&lt; {LOW_STOCK_THRESHOLD_PERCENTAGE*100}% do máx.</p>
+                            </CardContent>
+                        </Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow">
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Tipos Estoque Zerado</CardTitle>
+                                <PackageX className="h-4 w-4 text-red-700" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold text-red-700">{pillowKPIs.zeroStockPillowTypes}</div>
+                            </CardContent>
+                        </Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow">
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Média Estoque/Tipo</CardTitle>
+                                <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold">{pillowKPIs.averageStockPerType.toLocaleString()}</div>
+                            </CardContent>
+                        </Card>
+                    </div>
+                )}
+            </CardContent>
+          </Card>
+
+
+          <Card className="shadow-md">
             <CardHeader>
               <CardTitle className="flex items-center">
                 <Filter className="mr-2 h-5 w-5 text-primary" />
-                Filtrar Travesseiros
+                Filtrar Visualização de Travesseiros
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <Label htmlFor="searchPillow">Buscar por nome do travesseiro:</Label>
+              <Label htmlFor="searchPillow">Buscar por nome do travesseiro (após processamento do nome):</Label>
               <Input
                 id="searchPillow"
                 type="text"
@@ -279,30 +376,31 @@ export default function PillowStockPage() {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="mt-1"
+                disabled={pillowProducts.length === 0 && !noPillowsFoundInExcel}
               />
             </CardContent>
           </Card>
 
-          {noPillowsFound && !isProcessingExcel && (
+          {noPillowsFoundInExcel && (
             <Card className="shadow-md my-6 border-blue-500/50 border-l-4">
                 <CardHeader>
                     <CardTitle className="flex items-center text-blue-700">
                         <AlertTriangle className="mr-2 h-5 w-5" />
-                        Nenhum Travesseiro Encontrado
+                        Nenhum Travesseiro Encontrado na Planilha
                     </CardTitle>
                 </CardHeader>
                 <CardContent>
                     <p className="text-muted-foreground">
-                        Nenhum produto com "Tipo. Produto" igual a "{PILLOW_PRODUCT_TYPE}" foi encontrado na planilha carregada.
+                        Nenhum produto com "Tipo. Produto" igual a "{PILLOW_PRODUCT_TYPE_EXCEL}" foi encontrado na planilha carregada.
                     </p>
                     <p className="text-muted-foreground mt-2">
-                        Verifique sua planilha ou carregue uma nova contendo travesseiros.
+                        Verifique sua planilha ou carregue uma nova contendo travesseiros. Os KPIs e as colunas de empilhamento não serão exibidos.
                     </p>
                 </CardContent>
             </Card>
           )}
 
-          {!noPillowsFound && aggregatedPillowStock.length === 0 && searchTerm && (
+          {!noPillowsFoundInExcel && aggregatedPillowStock.length === 0 && searchTerm && (
              <Card className="shadow-md my-6">
                 <CardHeader>
                     <CardTitle className="flex items-center">
@@ -319,16 +417,24 @@ export default function PillowStockPage() {
           )}
           
           {aggregatedPillowStock.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 p-4 rounded-lg">
-              {aggregatedPillowStock.map((pillow) => (
-                <PillowStackColumn
-                  key={pillow.name} // The name here is now the derived display name
-                  pillowName={pillow.name}
-                  currentStock={pillow.stock}
-                  maxStock={100} // Assuming maxStock is always 100 per your requirement
-                />
-              ))}
-            </div>
+            <Card className="shadow-lg">
+                <CardHeader>
+                    <CardTitle className="flex items-center"><BedDouble className="mr-2 h-5 w-5 text-primary" /> Colunas de Estoque de Travesseiros</CardTitle>
+                    <CardDescription>Cada coluna representa um tipo de travesseiro e seu estoque atual (máx. {MAX_STOCK_PER_PILLOW_COLUMN} unidades por coluna).</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 p-4 rounded-lg bg-muted/20">
+                    {aggregatedPillowStock.map((pillow) => (
+                        <PillowStackColumn
+                        key={pillow.name} 
+                        pillowName={pillow.name}
+                        currentStock={pillow.stock}
+                        maxStock={MAX_STOCK_PER_PILLOW_COLUMN} 
+                        />
+                    ))}
+                    </div>
+                </CardContent>
+            </Card>
           )}
         </>
       )}
@@ -336,4 +442,3 @@ export default function PillowStockPage() {
   );
 }
 
-    
