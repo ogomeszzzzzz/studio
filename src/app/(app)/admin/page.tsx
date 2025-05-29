@@ -12,36 +12,50 @@ import { useAuth } from '@/contexts/AuthContext';
 import type { UserProfile } from '@/types';
 import { getPendingUsers, approveUserInFirestore } from '@/app/actions/admin';
 
+// Fallback admin email for client-side checks, primary source should be context or env.
 const ADMIN_PRIMARY_EMAIL_CLIENT = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br";
 
 export default function AdminPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, isLoading: authLoading } = useAuth();
+  const { currentUser, isLoading: authLoading } = useAuth(); // AuthContext provides the current user state
   const [isDefinitelyAdmin, setIsDefinitelyAdmin] = useState(false);
   const [pendingUsers, setPendingUsers] = useState<UserProfile[]>([]);
   const [isLoadingPendingUsers, setIsLoadingPendingUsers] = useState(false);
   const [isApproving, startApproveTransition] = useTransition();
 
   useEffect(() => {
+    console.log("AdminPage: useEffect for auth check triggered. authLoading:", authLoading, "currentUser:", currentUser);
     if (!authLoading) {
       if (currentUser && currentUser.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase() && currentUser.isAdmin) {
+        console.log("AdminPage: User is definitely admin.");
         setIsDefinitelyAdmin(true);
       } else {
+        console.log("AdminPage: User is NOT admin or currentUser is null/not admin.");
         setIsDefinitelyAdmin(false);
+        if (!currentUser) { // If no user at all, redirect to login (should be handled by AppLayout ideally)
+            router.replace('/login');
+        }
       }
     }
-  }, [authLoading, currentUser]);
+  }, [authLoading, currentUser, router]);
 
   const fetchPendingUsers = useCallback(async () => {
+    console.log("AdminPage: fetchPendingUsers called. currentUser:", currentUser, "isDefinitelyAdmin:", isDefinitelyAdmin);
     if (!currentUser || !isDefinitelyAdmin) {
+      console.log("AdminPage: fetchPendingUsers prerequisites not met (no current user or not admin). Aborting fetch.");
       setIsLoadingPendingUsers(false);
+      if (currentUser && !isDefinitelyAdmin) { // Logged in but not admin, no need to show loading for pending users
+          setPendingUsers([]);
+      }
       return;
     }
     setIsLoadingPendingUsers(true);
     try {
       // Pass the admin's email for server-side verification context
+      console.log(`AdminPage: Calling getPendingUsers server action with admin email: ${currentUser.email}`);
       const result = await getPendingUsers(currentUser.email);
+      console.log("AdminPage: getPendingUsers server action result:", result);
       if (result.status === 'success' && result.users) {
         setPendingUsers(result.users);
         if (result.users.length === 0) {
@@ -53,14 +67,16 @@ export default function AdminPage() {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Erro desconhecido ao buscar usuários pendentes.";
+      console.error("AdminPage: Critical error in fetchPendingUsers:", error);
       toast({ title: "Erro Crítico ao Buscar Usuários", description: errorMessage, variant: "destructive" });
       setPendingUsers([]);
     } finally {
       setIsLoadingPendingUsers(false);
     }
-  }, [currentUser, toast, isDefinitelyAdmin]);
+  }, [currentUser, toast, isDefinitelyAdmin]); // Added isDefinitelyAdmin
 
   useEffect(() => {
+    console.log("AdminPage: useEffect for fetching pending users triggered. authLoading:", authLoading, "isDefinitelyAdmin:", isDefinitelyAdmin);
     if (!authLoading && isDefinitelyAdmin) {
       fetchPendingUsers();
     } else if (!authLoading && !isDefinitelyAdmin) {
@@ -75,9 +91,11 @@ export default function AdminPage() {
          toast({ title: "Ação não permitida", description: "Apenas administradores podem aprovar usuários.", variant: "destructive" });
          return;
       }
+      console.log(`AdminPage: Attempting to approve user: ${userEmailToApprove} by admin: ${currentUser.email}`);
       try {
         // Pass admin's email for server-side verification context
         const result = await approveUserInFirestore(currentUser.email, userEmailToApprove);
+        console.log("AdminPage: approveUserInFirestore server action result:", result);
         if (result.status === 'success') {
           toast({ title: "Usuário Aprovado!", description: result.message });
           await fetchPendingUsers(); // Refresh list
@@ -86,6 +104,7 @@ export default function AdminPage() {
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Erro desconhecido ao aprovar usuário.";
+        console.error("AdminPage: Critical error in handleApproveUser:", error);
         toast({ title: "Erro Crítico na Aprovação", description: errorMessage, variant: "destructive" });
       }
     });
@@ -114,6 +133,7 @@ export default function AdminPage() {
   // which should have been handled by AppLayout redirecting to /login.
   // This is a safeguard.
   if (!currentUser) {
+     console.log("AdminPage: currentUser is null after authLoading is false. Redirecting to login.");
      router.replace('/login');
      return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Sessão expirada. Redirecionando...</p></div>;
   }
