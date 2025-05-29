@@ -14,7 +14,6 @@ interface AdminActionResult {
 const ADMIN_PRIMARY_EMAIL_SERVER = process.env.ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br";
 
 // This function is a simple check if the provided email matches the admin email.
-// The server action itself should ensure it's being called by an authenticated admin.
 async function verifyAdminByEmail(callerEmail: string | undefined): Promise<boolean> {
   console.log('[Admin Verification by Email] Starting verification...');
   console.log(`[Admin Verification by Email] Expected ADMIN_EMAIL from server env: '${ADMIN_PRIMARY_EMAIL_SERVER}'`);
@@ -61,10 +60,17 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
 
   console.log('[Get Pending Users Action] Admin verified. Fetching pending users...');
   try {
-    // IMPORTANT: This query requires a composite index in Firestore.
-    // If you see a "FAILED_PRECONDITION" error, Firestore will provide a link
-    // in the server logs to create this index.
-    // The index will likely involve fields: `pendingApproval` (Ascending), `isApproved` (Ascending), and `createdAt` (Ascending).
+    // =====================================================================================
+    // IMPORTANTE: Esta consulta requer um ÍNDICE COMPOSTO no Firestore.
+    // Se você receber um erro "FAILED_PRECONDITION", o Firestore geralmente fornecerá
+    // um link direto nos logs do servidor para criar este índice.
+    // O índice geralmente envolve os campos:
+    // Coleção: `auth_users`
+    // Campos:
+    //   1. `pendingApproval` (Ascendente)
+    //   2. `isApproved` (Ascendente)
+    //   3. `createdAt` (Ascendente ou Descendente, dependendo da sua ordenação preferida)
+    // =====================================================================================
     const snapshot = await adminFirestore
       .collection('auth_users')
       .where('pendingApproval', '==', true)
@@ -105,8 +111,12 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
     return { message: 'Usuários pendentes carregados.', status: 'success', users };
   } catch (error) {
     console.error('[Get Pending Users Action] Error fetching pending users from Firestore:', error);
-    // Make sure to return a simple string message
     const errorMessage = error instanceof Error ? error.message : "Erro desconhecido ao buscar usuários pendentes.";
+    // Verifique se o erro é de FAILED_PRECONDITION (índice faltando) e adicione o link se for o caso.
+    if (error instanceof Error && (error as any).code === 9 && (error as any).details?.includes('create_composite=')) {
+        const firebaseErrorDetails = (error as any).details;
+        return { message: `Erro ao buscar usuários pendentes no servidor: ${errorMessage.substring(0,100)}. ${firebaseErrorDetails}`, status: 'error' };
+    }
     return { message: `Erro ao buscar usuários pendentes no servidor: ${errorMessage.substring(0, 200)}`, status: 'error' };
   }
 }
