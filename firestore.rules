@@ -2,13 +2,23 @@
 rules_version = '2';
 
 service cloud.firestore {
-  match /databases/{database}/documents {
-    // Permite que um usuário autenticado leia e escreva (crie, atualize, exclua)
-    // QUALQUER documento ou subcoleção sob seu próprio caminho /users/{userId}.
-    // 'read' inclui 'get' e 'list'.
-    // 'write' inclui 'create', 'update', e 'delete'.
+  // This rule applies to a specific database ID named "ecom".
+  // If your client SDKs are configured to connect to this named database,
+  // this rule will be used. If "ecom" is the (default) database,
+  // using /databases/(default)/documents would also work.
+  match /databases/ecom/documents {
+
+    // Allow authenticated users to read and write (create, update, delete)
+    // any documents or subcollections within their own user-specific path.
+    // This covers:
+    // - /users/{userId} (for potential future user profile data)
+    // - /users/{userId}/products/{productId} (for their product lists)
+    // - /users/{userId}/products/_metadata (for the lastUploadTimestamp)
     match /users/{userId}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
+
+    // By default, all other paths in the "ecom" database that are not
+    // explicitly matched above will deny all access.
   }
 }
