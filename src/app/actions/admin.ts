@@ -1,7 +1,7 @@
 
 'use server';
 
-import { adminAuth, adminFirestore } from '@/lib/firebase/adminConfig';
+import { adminAuth, adminFirestore, adminSDKInitializationError } from '@/lib/firebase/adminConfig';
 import type { UserProfile } from '@/types';
 import { Timestamp } from 'firebase-admin/firestore';
 
@@ -12,35 +12,47 @@ interface AdminActionResult {
 }
 
 async function verifyAdmin(adminIdToken: string | null | undefined): Promise<boolean> {
-  if (!adminIdToken) {
-    console.warn('Admin verification failed: No ID token provided.');
+  if (adminSDKInitializationError) {
+    console.warn(`[Admin Verification] Cannot verify admin, Admin SDK not initialized: ${adminSDKInitializationError}`);
     return false;
   }
   if (!adminAuth) {
-    console.error('Admin verification failed: Firebase Admin Auth SDK not initialized.');
+     console.warn('[Admin Verification] Cannot verify admin, adminAuth is null.');
+     return false;
+  }
+
+  if (!adminIdToken) {
+    console.warn('[Admin Verification] Failed: No ID token provided.');
     return false;
   }
+  
   try {
     const decodedToken = await adminAuth.verifyIdToken(adminIdToken);
+    // Ensure ADMIN_EMAIL is set in your .env for server-side checks
     if (decodedToken.email === process.env.ADMIN_EMAIL) {
       return true;
     }
-    console.warn(`Admin verification failed: Email mismatch. Token email: ${decodedToken.email}, Expected admin: ${process.env.ADMIN_EMAIL}`);
+    console.warn(`[Admin Verification] Failed: Email mismatch. Token email: ${decodedToken.email}, Expected admin: ${process.env.ADMIN_EMAIL}`);
     return false;
   } catch (error) {
-    console.error('Admin verification failed: Error verifying ID token:', error);
+    console.error('[Admin Verification] Failed: Error verifying ID token:', error);
     return false;
   }
 }
 
 export async function getPendingUsers(adminIdToken: string): Promise<AdminActionResult> {
-  if (!await verifyAdmin(adminIdToken)) {
-    return { message: 'Acesso não autorizado.', status: 'error' };
+  if (adminSDKInitializationError) {
+    console.error(`[Get Pending Users Action] Admin SDK not initialized: ${adminSDKInitializationError}`);
+    return { message: `Erro Crítico no Servidor: Falha na configuração do Firebase Admin. (Detalhe: ${adminSDKInitializationError})`, status: 'error' };
+  }
+  if (!adminFirestore) {
+    const errorDetail = adminSDKInitializationError || "adminFirestore is null post-initialization check.";
+    console.error(`[Get Pending Users Action] Firebase Admin Firestore SDK not available: ${errorDetail}`);
+    return { message: `Erro Crítico no Servidor: Firestore Admin não está pronto. (Detalhe: ${errorDetail})`, status: 'error' };
   }
 
-  if (!adminFirestore) {
-    console.error('Firebase Admin Firestore SDK não inicializado.');
-    return { message: 'Erro no servidor. Tente novamente mais tarde. (Admin SDK Firestore)', status: 'error' };
+  if (!await verifyAdmin(adminIdToken)) {
+    return { message: 'Acesso não autorizado para buscar usuários pendentes.', status: 'error' };
   }
 
   try {
@@ -57,13 +69,10 @@ export async function getPendingUsers(adminIdToken: string): Promise<AdminAction
 
     const users: UserProfile[] = snapshot.docs.map(doc => {
         const data = doc.data();
-        // Convert Firestore Timestamp to a serializable format (e.g., ISO string or Date object if handled by client)
-        // For simplicity, we'll let client handle Date object if it's Timestamp, or pass as is.
-        // Or explicitly convert:
         let createdAtDate : Date | undefined = undefined;
         if (data.createdAt && data.createdAt instanceof Timestamp) {
             createdAtDate = data.createdAt.toDate();
-        } else if (data.createdAt) { // if it's already some other date format
+        } else if (data.createdAt) { 
             try { createdAtDate = new Date(data.createdAt); } catch(e) { /* ignore */}
         }
 
@@ -73,26 +82,31 @@ export async function getPendingUsers(adminIdToken: string): Promise<AdminAction
             email: data.email,
             isApproved: data.isApproved,
             pendingApproval: data.pendingApproval,
-            createdAt: createdAtDate, // Send as Date object
+            createdAt: createdAtDate, 
         } as UserProfile;
     });
     return { message: 'Usuários pendentes carregados.', status: 'success', users };
   } catch (error) {
-    console.error('Error fetching pending users:', error);
-    return { message: 'Erro ao buscar usuários pendentes.', status: 'error' };
+    console.error('[Get Pending Users Action] Error fetching pending users:', error);
+    return { message: 'Erro ao buscar usuários pendentes no servidor.', status: 'error' };
   }
 }
 
 export async function approveUser(adminIdToken: string, userIdToApprove: string): Promise<AdminActionResult> {
-  if (!await verifyAdmin(adminIdToken)) {
-    return { message: 'Acesso não autorizado.', status: 'error' };
+  if (adminSDKInitializationError) {
+    console.error(`[Approve User Action] Admin SDK not initialized: ${adminSDKInitializationError}`);
+    return { message: `Erro Crítico no Servidor: Falha na configuração do Firebase Admin. (Detalhe: ${adminSDKInitializationError})`, status: 'error' };
   }
-  
-  if (!adminFirestore) {
-    console.error('Firebase Admin Firestore SDK não inicializado.');
-    return { message: 'Erro no servidor. Tente novamente mais tarde. (Admin SDK Firestore)', status: 'error' };
+  if (!adminFirestore || !adminAuth) { // Also check adminAuth for verifyAdmin
+    const errorDetail = adminSDKInitializationError || "adminFirestore or adminAuth is null post-initialization check.";
+    console.error(`[Approve User Action] Firebase Admin SDK components not available: ${errorDetail}`);
+    return { message: `Erro Crítico no Servidor: Componentes do Firebase Admin não estão prontos. (Detalhe: ${errorDetail})`, status: 'error' };
   }
 
+  if (!await verifyAdmin(adminIdToken)) {
+    return { message: 'Acesso não autorizado para aprovar usuário.', status: 'error' };
+  }
+  
   if (!userIdToApprove) {
     return { message: 'ID do usuário para aprovação é obrigatório.', status: 'error' };
   }
@@ -102,15 +116,10 @@ export async function approveUser(adminIdToken: string, userIdToApprove: string)
     await userDocRef.update({
       isApproved: true,
       pendingApproval: false,
-      // Optionally: approvedAt: Timestamp.now(), approvedBy: adminUid (from decodedToken)
     });
-    // Optionally, set a custom claim on Firebase Auth user
-    // if (adminAuth) {
-    //   await adminAuth.setCustomUserClaims(userIdToApprove, { approved: true });
-    // }
     return { message: 'Usuário aprovado com sucesso!', status: 'success' };
   } catch (error) {
-    console.error('Error approving user:', error);
-    return { message: 'Erro ao aprovar usuário.', status: 'error' };
+    console.error('[Approve User Action] Error approving user:', error);
+    return { message: 'Erro ao aprovar usuário no servidor.', status: 'error' };
   }
 }
