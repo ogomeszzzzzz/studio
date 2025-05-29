@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import {
   ShoppingBag, AlertTriangle, FileSpreadsheet,
   Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler,
-  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon, ListFilter, Clock
+  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon, ListFilter, Clock, BarChartHorizontal
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -44,11 +44,6 @@ interface AggregatedPrintData {
   stock: number;
 }
 
-interface ZeroStockData {
-  name: string;
-  count: number;
-}
-
 interface CollectionRuptureData {
   name: string;
   rupturePercentage: number;
@@ -59,8 +54,15 @@ interface SkuStockStatusData {
   value: number;
 }
 
+interface CollectionSkuStatusData {
+  name: string;
+  activeSkus: number;
+  zeroStockSkus: number;
+}
+
+
 const ALL_COLLECTIONS_VALUE = "_ALL_DASHBOARD_COLLECTIONS_";
-const FIRESTORE_BATCH_LIMIT = 450;
+const FIRESTORE_BATCH_LIMIT = 450; // Firestore batch limit
 
 const chartConfigBase = {
   stock: {
@@ -82,6 +84,14 @@ const chartConfigBase = {
   },
   skusWithoutStock: {
     label: "SKUs s/ Estoque",
+    color: "hsl(var(--destructive))",
+  },
+  activeSkus: {
+    label: "SKUs Ativos",
+    color: "hsl(var(--chart-1))",
+  },
+  zeroStockSkus: {
+    label: "SKUs Zerados",
     color: "hsl(var(--destructive))",
   }
 } satisfies ChartConfig;
@@ -142,14 +152,12 @@ export default function DashboardPage() {
           const snapshot = await getDocs(query(productsCol));
           const productsFromDb: Product[] = [];
           snapshot.docs.forEach(doc => {
-            // Exclude the metadata document from product list
             if (doc.id !== '_metadata') {
               productsFromDb.push(productFromFirestore(doc.data()));
             }
           });
           setDashboardProducts(productsFromDb);
 
-          // Fetch last update timestamp
           const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
           const metadataDocSnap = await getDoc(metadataDocRef);
           if (metadataDocSnap.exists()) {
@@ -158,7 +166,7 @@ export default function DashboardPage() {
               setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
             }
           } else {
-            setLastDataUpdateTimestamp(null); // No metadata, so no timestamp
+            setLastDataUpdateTimestamp(null);
           }
 
           if (productsFromDb.length > 0) {
@@ -175,7 +183,6 @@ export default function DashboardPage() {
     } else if (currentUser && dashboardProducts.length > 0) {
       console.log(`DashboardPage: Products already loaded for user UID: ${currentUser.uid}. Skipping fetch.`);
       setIsLoadingFirestore(false);
-      // Optionally re-fetch just the timestamp if it's not already loaded or to refresh it
       if (!lastDataUpdateTimestamp) {
         const fetchTimestamp = async () => {
           try {
@@ -196,7 +203,7 @@ export default function DashboardPage() {
     } else if (!currentUser) {
       setIsLoadingFirestore(false);
     }
-  }, [currentUser, dashboardProducts.length, isSavingFirestore, lastDataUpdateTimestamp]);
+  }, [currentUser, dashboardProducts.length, isSavingFirestore, toast, lastDataUpdateTimestamp]); // Added toast to dependencies
 
 
   const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
@@ -220,13 +227,12 @@ export default function DashboardPage() {
           const batch = writeBatch(firestore);
           const chunk = existingDocsSnapshot.docs.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(docSnapshot => {
-            // Do not delete the _metadata document along with products
             if (docSnapshot.id !== '_metadata') {
               batch.delete(docSnapshot.ref);
               totalDeleted++;
             }
           });
-          if (chunk.filter(d => d.id !== '_metadata').length > 0) { // Only commit if there are actual product docs to delete
+          if (chunk.filter(d => d.id !== '_metadata').length > 0) {
             await batch.commit();
             console.log(`DashboardPage: Committed a batch of ${chunk.filter(d => d.id !== '_metadata').length} deletions.`);
           }
@@ -240,7 +246,7 @@ export default function DashboardPage() {
           const batch = writeBatch(firestore);
           const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(product => {
-            const newDocRef = doc(productsColRef);
+            const newDocRef = doc(productsColRef); // Auto-generate ID
             batch.set(newDocRef, productToFirestore(product));
             totalAdded++;
           });
@@ -250,17 +256,13 @@ export default function DashboardPage() {
         console.log(`DashboardPage: Successfully added ${totalAdded} new products.`);
       }
 
-      // Update last update timestamp
       const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
       const newTimestamp = serverTimestamp();
       await setDoc(metadataDocRef, { lastUpdatedAt: newTimestamp });
-      // Optimistically update local timestamp - serverTimestamp() will resolve to a server time
-      // For immediate UI update, we can use client's current time, or wait for a re-fetch,
-      // or set it to new Date() for an approximation.
       setLastDataUpdateTimestamp(new Date());
 
 
-      setDashboardProducts(productsToSave);
+      setDashboardProducts(productsToSave); // Update local state
       toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
 
     } catch (error) {
@@ -303,7 +305,7 @@ export default function DashboardPage() {
         skusByProductType: [],
         skusBySize: [],
         stockByPrint: [],
-        zeroStockSkusByCollection: [],
+        collectionSkuStatus: [], // Changed from zeroStockSkusByCollection
         collectionRupturePercentage: [],
         skuStockStatus: [],
         totalStock: 0,
@@ -319,7 +321,7 @@ export default function DashboardPage() {
     const skusByProductTypeMap = new Map<string, { totalSkus: number; skusWithStock: number; skusWithoutStock: number }>();
     const skusBySizeMap = new Map<string, { totalSkus: number; skusWithStock: number; skusWithoutStock: number }>();
     const stockByPrintMap = new Map<string, { stock: number }>();
-    const zeroStockSkusByCollectionMap = new Map<string, { count: number }>();
+    const zeroStockSkusByCollectionMap = new Map<string, number>(); // Simplified: collectionName -> zeroStockCount
 
     let totalStock = 0;
     let totalSkus = filteredProductsForDashboard.length;
@@ -356,9 +358,7 @@ export default function DashboardPage() {
       stockByPrintMap.set(printKey, currentPrint);
 
       if (product.stock === 0) {
-        const currentZeroCol = zeroStockSkusByCollectionMap.get(collectionKey) || { count: 0 };
-        currentZeroCol.count += 1;
-        zeroStockSkusByCollectionMap.set(collectionKey, currentZeroCol);
+        zeroStockSkusByCollectionMap.set(collectionKey, (zeroStockSkusByCollectionMap.get(collectionKey) || 0) + 1);
         totalZeroStockSkus++;
       }
       totalStock += product.stock;
@@ -367,9 +367,18 @@ export default function DashboardPage() {
       totalOpenOrders += product.openOrders;
     });
 
+    const collectionSkuStatusData: CollectionSkuStatusData[] = Array.from(stockByCollectionMap.entries()).map(([name, collData]) => {
+      const zeroSkusCount = zeroStockSkusByCollectionMap.get(name) || 0;
+      const activeSkusCount = collData.skus - zeroSkusCount;
+      return {
+        name,
+        activeSkus: activeSkusCount,
+        zeroStockSkus: zeroSkusCount,
+      };
+    }).sort((a,b) => (b.activeSkus + b.zeroStockSkus) - (a.activeSkus + a.zeroStockSkus)); // Sort by total SKUs
+
     const collectionRupturePercentageData: CollectionRuptureData[] = Array.from(stockByCollectionMap.entries()).map(([name, collData]) => {
-      const zeroStockData = zeroStockSkusByCollectionMap.get(name);
-      const zeroStockCount = zeroStockData ? zeroStockData.count : 0;
+      const zeroStockCount = zeroStockSkusByCollectionMap.get(name) || 0;
       const totalSkusInCollection = collData.skus;
       const rupturePercentage = totalSkusInCollection > 0 ? (zeroStockCount / totalSkusInCollection) * 100 : 0;
       return {
@@ -389,7 +398,7 @@ export default function DashboardPage() {
       skusByProductType: Array.from(skusByProductTypeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.totalSkus - a.totalSkus),
       skusBySize: Array.from(skusBySizeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.totalSkus - a.totalSkus),
       stockByPrint: Array.from(stockByPrintMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock).slice(0, 15),
-      zeroStockSkusByCollection: Array.from(zeroStockSkusByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.count - a.count),
+      collectionSkuStatus: collectionSkuStatusData,
       collectionRupturePercentage: collectionRupturePercentageData,
       skuStockStatus: skuStockStatusData,
       totalStock,
@@ -420,7 +429,9 @@ export default function DashboardPage() {
   const skusByProductTypeChartConfig = useMemo(() => createChartConfig(aggregatedData.skusByProductType), [aggregatedData.skusByProductType]);
   const skusBySizeChartConfig = useMemo(() => createChartConfig(aggregatedData.skusBySize), [aggregatedData.skusBySize]);
   const stockByPrintChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByPrint, true), [aggregatedData.stockByPrint]);
-  const zeroStockSkusChartConfig = useMemo(() => createChartConfig(aggregatedData.zeroStockSkusByCollection, true), [aggregatedData.zeroStockSkusByCollection]);
+  // zeroStockSkusChartConfig removed, replaced by collectionSkuStatusChartConfig
+  const collectionSkuStatusChartConfig = useMemo(() => createChartConfig(aggregatedData.collectionSkuStatus), [aggregatedData.collectionSkuStatus]);
+
 
   const collectionRuptureChartConfig = useMemo(() => {
     const config: ChartConfig = {
@@ -589,7 +600,7 @@ export default function DashboardPage() {
         { id: 'chart-skus-by-size', title: 'SKUs por Tamanho (Excel)', data: aggregatedData.skusBySize },
         { id: 'chart-stock-by-print', title: 'Estoque por Estampa (Top 15 - Coluna Descrição)', data: aggregatedData.stockByPrint },
         { id: 'chart-skus-by-product-type', title: 'SKUs por Tipo de Produto (Coluna Tipo. Produto)', data: aggregatedData.skusByProductType },
-        { id: 'chart-zero-stock-skus', title: 'SKUs Zerados por Descrição Linha Comercial', data: aggregatedData.zeroStockSkusByCollection },
+        { id: 'chart-collection-sku-status', title: 'Status de SKUs por Descrição Linha Comercial (Ativos vs. Zerados)', data: aggregatedData.collectionSkuStatus },
       ];
 
       for (const chartInfo of chartSections) {
@@ -972,22 +983,23 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {aggregatedData.zeroStockSkusByCollection.length > 0 && (
-            <Card id="chart-zero-stock-skus" className="shadow-lg hover:shadow-xl transition-shadow">
+          {aggregatedData.collectionSkuStatus.length > 0 && (
+            <Card id="chart-collection-sku-status" className="shadow-lg hover:shadow-xl transition-shadow">
                 <CardHeader>
-                <CardTitle className="flex items-center"><TrendingDown className="mr-2 h-5 w-5 text-destructive" />SKUs Zerados por Descrição Linha Comercial</CardTitle>
-                <CardDescription>Contagem de SKUs com estoque zero em cada descrição linha comercial (coluna "Descrição Linha Comercial" do Excel).</CardDescription>
+                <CardTitle className="flex items-center"><BarChartHorizontal className="mr-2 h-5 w-5 text-primary" />Status de SKUs por Descrição Linha Comercial (Ativos vs. Zerados)</CardTitle>
+                <CardDescription>Contagem de SKUs ativos (com estoque) e zerados em cada descrição linha comercial.</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[400px]">
-                <ChartContainer config={zeroStockSkusChartConfig} className="h-full w-full">
+                <ChartContainer config={collectionSkuStatusChartConfig} className="h-full w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={aggregatedData.zeroStockSkusByCollection} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                            <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/>
-                            <YAxis allowDecimals={false} tickFormatter={(value) => value.toLocaleString()}/>
+                        <BarChart data={aggregatedData.collectionSkuStatus} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                            <XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/>
+                            <YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/>
                             <Tooltip content={<ChartTooltipContent />} />
                             <Legend />
-                            <Bar dataKey="count" name="SKUs Zerados" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="activeSkus" name="SKUs Ativos" fill="hsl(var(--chart-1))" stackId="collection" radius={[0, 4, 4, 0]}/>
+                            <Bar dataKey="zeroStockSkus" name="SKUs Zerados" fill="hsl(var(--destructive))" stackId="collection" radius={[0, 4, 4, 0]}/>
                         </BarChart>
                     </ResponsiveContainer>
                     </ChartContainer>
@@ -999,3 +1011,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+

@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
+// ExcelUploadSection import removed
 import { PillowStackColumn } from '@/components/domain/PillowStackColumn';
 import type { Product } from '@/types';
 import { BedDouble, Loader2, Database, Filter as FilterIcon, AlertTriangle, ShoppingBag, TrendingDown, PackageX, BarChart3, ListFilter, SortAsc, SortDesc, Clock } from 'lucide-react';
@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useToast } from '@/hooks/use-toast';
 import { clientAuth, firestore } from '@/lib/firebase/config';
 import type { User } from 'firebase/auth';
-import { collection, getDocs, writeBatch, doc, Timestamp, query, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, doc, Timestamp, query, getDoc } from 'firebase/firestore'; // Removed writeBatch, setDoc, serverTimestamp
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -19,7 +19,6 @@ import { format as formatDateFns } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 
-const FIRESTORE_BATCH_LIMIT = 450;
 const PILLOW_PRODUCT_TYPE_EXCEL = "TRAVESSEIRO";
 const PILLOW_NAME_PREFIX = "Travesseiro";
 const PILLOW_BRAND_NAME = "Altenburg";
@@ -37,18 +36,11 @@ interface AggregatedPillow {
   name: string;
   stock: number;
   fillPercentage: number;
-  derivation?: string; 
-  vtexId?: string | number; 
+  derivation?: string;
+  vtexId?: string | number;
 }
 
-const productToFirestore = (product: Product): any => {
-  return {
-    ...product,
-    collectionStartDate: product.collectionStartDate ? Timestamp.fromDate(product.collectionStartDate) : null,
-    collectionEndDate: product.collectionEndDate ? Timestamp.fromDate(product.collectionEndDate) : null,
-  };
-};
-
+// productToFirestore removed as no saving happens here
 const productFromFirestore = (data: any): Product => {
   return {
     ...data,
@@ -70,7 +62,7 @@ function derivePillowDisplayName(productNameInput: string | undefined): string {
       }
     }
     const words = name.split(/\s+/).filter(word => word.length > 0);
-    if (words.length === 0) return productName; 
+    if (words.length === 0) return productName;
     else if (words.length === 1) return words[0];
     else return `${words[0]} ${words[1]}`;
   }
@@ -82,8 +74,7 @@ export default function PillowStockPage() {
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [aggregatedPillowStockState, setAggregatedPillowStockState] = useState<AggregatedPillow[]>([]);
   const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
-  const [isSavingFirestore, setIsSavingFirestore] = useState(false);
-  const [isProcessingExcel, setIsProcessingExcel] = useState(false);
+  // isSavingFirestore and isProcessingExcel removed
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
@@ -107,7 +98,7 @@ export default function PillowStockPage() {
   }, []);
 
   useEffect(() => {
-    if (currentUser && allProducts.length === 0 && !isSavingFirestore && !isProcessingExcel) {
+    if (currentUser && allProducts.length === 0 ) { // Removed !isSavingFirestore && !isProcessingExcel
       console.log(`PillowStockPage: Fetching products for user UID: ${currentUser.uid} because allProducts is empty.`);
       setIsLoadingFirestore(true);
       const fetchProducts = async () => {
@@ -115,9 +106,9 @@ export default function PillowStockPage() {
           const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
           const snapshot = await getDocs(query(productsCol));
           const productsFromDb: Product[] = [];
-           snapshot.docs.forEach(doc => {
-            if (doc.id !== '_metadata') {
-              productsFromDb.push(productFromFirestore(doc.data()));
+           snapshot.docs.forEach(docSnap => { // Renamed doc to docSnap
+            if (docSnap.id !== '_metadata') {
+              productsFromDb.push(productFromFirestore(docSnap.data()));
             }
           });
           setAllProducts(productsFromDb);
@@ -164,71 +155,9 @@ export default function PillowStockPage() {
     } else if (!currentUser) {
       setIsLoadingFirestore(false);
     }
-  }, [currentUser, toast, allProducts.length, isSavingFirestore, isProcessingExcel, lastDataUpdateTimestamp]);
+  }, [currentUser, toast, allProducts.length, lastDataUpdateTimestamp]); // Removed isSavingFirestore, isProcessingExcel
 
-  const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
-    if (!currentUser) {
-      toast({ title: "Usuário não autenticado", description: "Faça login para salvar os dados.", variant: "destructive" });
-      return;
-    }
-    setIsSavingFirestore(true);
-    let totalDeleted = 0, totalAdded = 0;
-    try {
-      const productsColRef = collection(firestore, 'users', currentUser.uid, 'products');
-      const existingDocsSnapshot = await getDocs(query(productsColRef));
-      
-      if (existingDocsSnapshot.docs.length > 0) {
-        console.log(`PillowStockPage: Deleting ${existingDocsSnapshot.docs.length} existing products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
-        for (let i = 0; i < existingDocsSnapshot.docs.length; i += FIRESTORE_BATCH_LIMIT) {
-          const batch = writeBatch(firestore);
-          const chunk = existingDocsSnapshot.docs.slice(i, i + FIRESTORE_BATCH_LIMIT);
-          chunk.forEach(docSnapshot => { 
-            if (docSnapshot.id !== '_metadata') {
-              batch.delete(docSnapshot.ref); totalDeleted++; 
-            }
-          });
-          if (chunk.filter(d => d.id !== '_metadata').length > 0) {
-            await batch.commit();
-            console.log(`PillowStockPage: Committed a batch of ${chunk.filter(d => d.id !== '_metadata').length} deletions.`);
-          }
-        }
-      }
-      
-      if (productsToSave.length > 0) {
-        console.log(`PillowStockPage: Adding ${productsToSave.length} new products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
-        for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
-            const batch = writeBatch(firestore);
-            const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
-            chunk.forEach(product => { 
-                const newDocRef = doc(productsColRef); 
-                batch.set(newDocRef, productToFirestore(product)); 
-                totalAdded++; 
-            });
-            await batch.commit();
-            console.log(`PillowStockPage: Committed a batch of ${chunk.length} additions.`);
-        }
-        console.log(`PillowStockPage: Successfully added ${totalAdded} new products.`);
-      }
-
-      const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
-      await setDoc(metadataDocRef, { lastUpdatedAt: serverTimestamp() });
-      setLastDataUpdateTimestamp(new Date());
-
-      setAllProducts(productsToSave); 
-      toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
-    } catch (error) {
-      console.error("Error saving products to Firestore (Pillow Stock):", error);
-      toast({ title: "Erro ao Salvar", description: `Não foi possível salvar: ${(error as Error).message}`, variant: "destructive" });
-    } finally {
-      setIsSavingFirestore(false);
-    }
-  }, [currentUser, toast]);
-
-  const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
-    setIsProcessingExcel(true);
-    await saveProductsToFirestore(parsedProducts);
-    setIsProcessingExcel(false);
-  }, [saveProductsToFirestore]);
+  // saveProductsToFirestore and handleExcelDataProcessed removed
 
   const pillowProducts = useMemo(() => {
     return allProducts.filter(p => p.productType?.toUpperCase() === PILLOW_PRODUCT_TYPE_EXCEL.toUpperCase());
@@ -238,13 +167,13 @@ export default function PillowStockPage() {
     const pillowStockMap = new Map<string, { stock: number; derivation?: string; vtexId?: string | number }>();
     pillowProducts.forEach(pillow => {
         const displayName = derivePillowDisplayName(pillow.name);
-        const currentPillowData = pillowStockMap.get(displayName) || { 
-            stock: 0, 
+        const currentPillowData = pillowStockMap.get(displayName) || {
+            stock: 0,
             derivation: pillow.productDerivation || String(pillow.productId || pillow.vtexId || ''),
-            vtexId: pillow.vtexId 
+            vtexId: pillow.vtexId
         };
         currentPillowData.stock += pillow.stock;
-        
+
         if (!pillowStockMap.has(displayName)) {
             currentPillowData.derivation = pillow.productDerivation || String(pillow.productId || pillow.vtexId || '');
             currentPillowData.vtexId = pillow.vtexId;
@@ -298,8 +227,8 @@ export default function PillowStockPage() {
 
   const pillowKPIs = useMemo(() => {
     if (pillowProducts.length === 0) return { totalPillowSKUs: 0, totalPillowUnits: 0, lowStockPillowTypes: 0, zeroStockPillowTypes: 0, averageStockPerType: 0 };
-    
-    const uniquePillowDisplays = aggregatedPillowStockState; 
+
+    const uniquePillowDisplays = aggregatedPillowStockState;
 
     const totalPillowSKUs = uniquePillowDisplays.length;
     const totalPillowUnits = uniquePillowDisplays.reduce((sum, p) => sum + p.stock, 0);
@@ -308,14 +237,14 @@ export default function PillowStockPage() {
     const zeroStockPillowTypes = uniquePillowDisplays.filter(p => p.stock === 0).length;
     const averageStockPerType = totalPillowSKUs > 0 ? parseFloat((totalPillowUnits / totalPillowSKUs).toFixed(1)) : 0;
     return { totalPillowSKUs, totalPillowUnits, lowStockPillowTypes, zeroStockPillowTypes, averageStockPerType };
-  }, [pillowProducts, aggregatedPillowStockState]); 
+  }, [pillowProducts, aggregatedPillowStockState]);
 
   const noPillowsFoundInExcel = useMemo(() => {
     return allProducts.length > 0 && pillowProducts.length === 0;
   }, [allProducts, pillowProducts]);
 
 
-  const isAnyDataLoading = isLoadingFirestore || isSavingFirestore || isProcessingExcel;
+  const isAnyDataLoading = isLoadingFirestore; // Simplified
   const lowStockFilterThreshold = (MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE).toFixed(0);
   const goodStockFilterThreshold = (MAX_STOCK_PER_PILLOW_COLUMN * GOOD_STOCK_THRESHOLD_PERCENTAGE).toFixed(0);
 
@@ -329,7 +258,7 @@ export default function PillowStockPage() {
             Controle Analítico de Estoque de Travesseiros
           </h1>
           <p className="text-muted-foreground">
-            Visualize o estoque de travesseiros em colunas de empilhamento e analise os principais indicadores.
+            Visualize o estoque de travesseiros em colunas de empilhamento. Os dados são carregados do último upload feito no Dashboard.
           </p>
         </div>
       </div>
@@ -340,28 +269,20 @@ export default function PillowStockPage() {
         </div>
       )}
 
-      <ExcelUploadSection
-        onDataParsed={handleExcelDataProcessed}
-        onProcessingStart={() => setIsProcessingExcel(true)}
-        onProcessingEnd={() => setIsProcessingExcel(false)}
-        collectionColumnKey="Descrição Linha Comercial"
-        cardTitle="1. Carregar/Atualizar Dados da Planilha"
-        cardDescription={`Faça o upload da planilha. Os travesseiros serão filtrados pela coluna 'Tipo. Produto' (esperado: "${PILLOW_PRODUCT_TYPE_EXCEL}").`}
-        isProcessingParent={isSavingFirestore}
-      />
+      {/* ExcelUploadSection removed */}
 
       {isAnyDataLoading && (
         <Card className="shadow-lg"><CardHeader><CardTitle className="flex items-center">
               <Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" />
-              {isSavingFirestore ? "Salvando..." : (isProcessingExcel ? "Processando..." : "Carregando...")}
+              Carregando dados...
             </CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Aguarde.</p></CardContent></Card>
       )}
 
       {!isAnyDataLoading && allProducts.length === 0 && (
         <Card className="shadow-lg text-center py-10"><CardHeader><CardTitle className="flex items-center justify-center text-xl">
-              <Database className="mr-2 h-7 w-7 text-primary" /> Comece Carregando os Dados
-            </CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Carregue um arquivo Excel para visualizar o estoque de travesseiros.</p>
-            <p className="text-sm text-muted-foreground mt-2">Os dados da planilha serão salvos em seu perfil.</p></CardContent></Card>
+              <Database className="mr-2 h-7 w-7 text-primary" /> Sem dados para exibir
+            </CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Por favor, carregue um arquivo Excel na página do Dashboard para visualizar o estoque de travesseiros.</p>
+            <p className="text-sm text-muted-foreground mt-2">Os dados da planilha serão salvos em seu perfil e carregados aqui.</p></CardContent></Card>
       )}
 
       {!isAnyDataLoading && allProducts.length > 0 && (
@@ -370,7 +291,7 @@ export default function PillowStockPage() {
             <CardHeader><CardTitle className="flex items-center"><BarChart3 className="mr-2 h-5 w-5 text-primary" />Indicadores Chave de Travesseiros</CardTitle></CardHeader>
             <CardContent>
                 {pillowProducts.length === 0 && !noPillowsFoundInExcel && (<p className="text-muted-foreground">Nenhum travesseiro encontrado (coluna "Tipo. Produto" diferente de "{PILLOW_PRODUCT_TYPE_EXCEL}").</p>)}
-                {noPillowsFoundInExcel && (<p className="text-muted-foreground">Nenhum produto com "Tipo. Produto" igual a "{PILLOW_PRODUCT_TYPE_EXCEL}" foi encontrado na planilha carregada.</p>)}
+                {noPillowsFoundInExcel && (<p className="text-muted-foreground">Nenhum produto com "Tipo. Produto" igual a "{PILLOW_PRODUCT_TYPE_EXCEL}" foi encontrado nos dados carregados.</p>)}
                 {pillowProducts.length > 0 && (
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
                         <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Modelos de Travesseiros</CardTitle><BedDouble className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{pillowKPIs.totalPillowSKUs}</div><p className="text-xs text-muted-foreground">Modelos únicos</p></CardContent></Card>
@@ -432,8 +353,8 @@ export default function PillowStockPage() {
 
           {noPillowsFoundInExcel && (
             <Card className="shadow-md my-6 border-blue-500/50 border-l-4"><CardHeader><CardTitle className="flex items-center text-blue-700">
-                  <AlertTriangle className="mr-2 h-5 w-5" />Nenhum Travesseiro na Planilha</CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Nenhum produto com "Tipo. Produto" igual a "{PILLOW_PRODUCT_TYPE_EXCEL}" foi encontrado na planilha carregada.</p>
-                <p className="text-muted-foreground mt-2">Verifique sua planilha ou carregue uma nova.</p></CardContent></Card>
+                  <AlertTriangle className="mr-2 h-5 w-5" />Nenhum Travesseiro nos Dados</CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Nenhum produto com "Tipo. Produto" igual a "{PILLOW_PRODUCT_TYPE_EXCEL}" foi encontrado nos dados carregados.</p>
+                <p className="text-muted-foreground mt-2">Verifique os dados carregados no Dashboard ou o filtro de tipo de produto.</p></CardContent></Card>
           )}
 
           {!noPillowsFoundInExcel && aggregatedPillowStockState.length === 0 && (searchTerm || stockStatusFilter !== 'all') && (
@@ -467,3 +388,4 @@ export default function PillowStockPage() {
     </div>
   );
 }
+

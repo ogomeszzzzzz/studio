@@ -42,14 +42,14 @@ export default function RestockOpportunitiesPage() {
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
   const [baseFilters, setBaseFilters] = useState<FilterState | null>(null);
-  const [isLoading, setIsLoading] = useState(false); 
+  const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [lowStockThreshold, setLowStockThreshold] = useState<string>(DEFAULT_LOW_STOCK_THRESHOLD.toString());
   const { toast } = useToast();
   const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
+  const [isLoadingFirestore, setIsLoadingFirestore] = useState(true); // Start as true
 
   useEffect(() => {
     const unsubscribe = clientAuth.onAuthStateChanged((user) => {
@@ -65,16 +65,17 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-    if (currentUser && allProducts.length === 0 && isLoadingFirestore) {
+    if (currentUser && allProducts.length === 0 && !isLoading) { // ensure not already loading general data
       console.log(`RestockOpportunitiesPage: Fetching products for user UID: ${currentUser.uid} because allProducts is empty.`);
+      setIsLoadingFirestore(true);
       const fetchProducts = async () => {
         try {
           const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
           const snapshot = await getDocs(query(productsCol));
           const productsFromDb: Product[] = [];
-          snapshot.docs.forEach(doc => {
-            if (doc.id !== '_metadata') {
-                productsFromDb.push(productFromFirestore(doc.data()));
+          snapshot.docs.forEach(docSnap => { // Renamed doc to docSnap to avoid conflict
+            if (docSnap.id !== '_metadata') {
+                productsFromDb.push(productFromFirestore(docSnap.data()));
             }
           });
           setAllProducts(productsFromDb);
@@ -90,12 +91,10 @@ export default function RestockOpportunitiesPage() {
              setLastDataUpdateTimestamp(null);
           }
 
-
            if (productsFromDb.length > 0) {
             toast({ title: "Dados Carregados", description: "Dados de produtos carregados do banco de dados." });
-          } else {
-            toast({ title: "Sem Dados Iniciais", description: "Nenhum produto encontrado. Faça upload na página do Dashboard.", variant: "default" });
           }
+          // No "no data" toast here, let the UI handle it
         } catch (error) {
           console.error("Error fetching products from Firestore (Restock):", error);
           toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${(error as Error).message}`, variant: "destructive" });
@@ -106,7 +105,7 @@ export default function RestockOpportunitiesPage() {
       fetchProducts();
     } else if (currentUser && allProducts.length > 0) {
         console.log(`RestockOpportunitiesPage: Products already loaded for user UID: ${currentUser.uid}. Skipping fetch.`);
-        setIsLoadingFirestore(false); 
+        setIsLoadingFirestore(false);
         if (!lastDataUpdateTimestamp) {
           const fetchTimestamp = async () => {
             try {
@@ -125,9 +124,9 @@ export default function RestockOpportunitiesPage() {
           fetchTimestamp();
         }
     } else if (!currentUser) {
-        setIsLoadingFirestore(false); 
+        setIsLoadingFirestore(false);
     }
-  }, [currentUser, allProducts.length, isLoadingFirestore, toast, lastDataUpdateTimestamp]); 
+  }, [currentUser, allProducts.length, isLoading, toast, lastDataUpdateTimestamp]); // Added isLoading to dependencies
 
 
   const availableCollections = useMemo(() => {
@@ -141,9 +140,9 @@ export default function RestockOpportunitiesPage() {
   }, [allProducts]);
 
   const applyAllFilters = useCallback(() => {
-    if (isLoadingFirestore) return; 
+    if (isLoadingFirestore) return;
 
-    setIsLoading(true); 
+    setIsLoading(true);
     console.log("Applying filters with baseFilters:", baseFilters, "lowStockThreshold:", lowStockThreshold);
     let tempFiltered = [...allProducts];
     const effectiveThreshold = parseInt(lowStockThreshold, 10);
@@ -185,7 +184,7 @@ export default function RestockOpportunitiesPage() {
 
     console.log("Filtered products count:", tempFiltered.length);
     setFilteredProducts(tempFiltered);
-    setIsLoading(false); 
+    setIsLoading(false);
   }, [allProducts, baseFilters, lowStockThreshold, toast, isLoadingFirestore]);
 
 
@@ -194,10 +193,10 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-   if(!isLoadingFirestore ) { 
+   if(!isLoadingFirestore && allProducts.length > 0) { // Ensure allProducts is populated before applying filters
     applyAllFilters();
-   } else if (!isLoadingFirestore && allProducts.length === 0) { 
-    setFilteredProducts([]);
+   } else if (!isLoadingFirestore && allProducts.length === 0) {
+    setFilteredProducts([]); // Clear filtered products if no base data
    }
   }, [allProducts, lowStockThreshold, baseFilters, applyAllFilters, isLoadingFirestore]);
 
@@ -239,7 +238,7 @@ export default function RestockOpportunitiesPage() {
       "Descrição (Estampa)": p.description,
       "Tamanho": p.size,
       "Tipo Produto": p.productType,
-      "Status Coleção": getCollectionStatus(p).text, 
+      "Status Coleção": getCollectionStatus(p).text,
     }));
 
     try {
@@ -270,7 +269,7 @@ export default function RestockOpportunitiesPage() {
     if (product.collectionEndDate instanceof Date && !isNaN(product.collectionEndDate.getTime())) {
       endDate = product.collectionEndDate;
     } else if (typeof product.collectionEndDate === 'string') {
-      const parsedDate = new Date(product.collectionEndDate); 
+      const parsedDate = new Date(product.collectionEndDate);
       if (!isNaN(parsedDate.getTime())) endDate = parsedDate;
     }
 
@@ -307,6 +306,7 @@ export default function RestockOpportunitiesPage() {
             </h1>
             <p className="text-muted-foreground">
                 Identifique SKUs com baixo estoque que podem ser repostos utilizando unidades de "Pronta Entrega" ou "Regulador".
+                <br />
                 Os dados são carregados do último upload feito na página do Dashboard.
             </p>
         </div>
@@ -319,7 +319,7 @@ export default function RestockOpportunitiesPage() {
       )}
 
 
-      {(isLoadingFirestore) && (
+      {(isLoadingFirestore && allProducts.length === 0) && ( // Show loading only if fetching initial data
          <Card className="shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center">
@@ -357,7 +357,7 @@ export default function RestockOpportunitiesPage() {
             <CardHeader>
               <CardTitle className="flex items-center">
                 <ListFilter className="mr-2 h-5 w-5 text-primary" />
-                1. Definir Critérios e Filtros Adicionais 
+                Definir Critérios e Filtros
               </CardTitle>
               <CardDescription>
                 Defina o "Estoque Atual Máximo" para identificar itens com baixo estoque.
@@ -393,12 +393,12 @@ export default function RestockOpportunitiesPage() {
                     </div>
                     <div className="md:col-span-2">
                         <Button onClick={handleApplyMainFilters} className="w-full py-2.5 text-base" disabled={isLoading || isLoadingFirestore}>
-                            {isLoading ? (
+                            {isLoading && !isLoadingFirestore ? ( // Show loading only for filter application
                                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                             ) : (
                                 <Filter className="mr-2 h-5 w-5" />
                             )}
-                            {isLoading ? 'Analisando...' : 'Analisar Oportunidades'}
+                            {isLoading && !isLoadingFirestore ? 'Analisando...' : 'Analisar Oportunidades'}
                         </Button>
                     </div>
                 </div>
@@ -415,7 +415,7 @@ export default function RestockOpportunitiesPage() {
             <CardHeader>
                 <CardTitle className="flex items-center">
                     <PackageSearch className="mr-2 h-5 w-5 text-primary" />
-                    2. Resultados da Análise de Reabastecimento
+                    Resultados da Análise de Reabastecimento
                 </CardTitle>
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                     <CardDescription>
@@ -463,7 +463,7 @@ export default function RestockOpportunitiesPage() {
 
                 <ProductDataTableSection
                     products={filteredProducts}
-                    isLoading={(isLoading || isLoadingFirestore) && filteredProducts.length === 0 && allProducts.length > 0}
+                    isLoading={(isLoading && !isLoadingFirestore) && filteredProducts.length === 0 && allProducts.length > 0} // More specific loading for table
                     cardIcon={PackageSearch}
                     cardTitle="Produtos com Oportunidade de Reabastecimento"
                     cardDescription="Lista de produtos com baixo estoque, disponibilidade em 'Pronta Entrega' ou 'Regulador', e sem 'Pedidos em Aberto'. Clique nos cabeçalhos para ordenar."
@@ -474,13 +474,13 @@ export default function RestockOpportunitiesPage() {
                     showReadyToShipColumn={true}
                     showRegulatorStockColumn={true}
                     showOpenOrdersColumn={true}
-                    showCanRestockAmountColumn={true} 
-                    lowStockThresholdForRestock={parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD} 
+                    showCanRestockAmountColumn={true}
+                    lowStockThresholdForRestock={parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD}
                     showCollectionColumn={true}
-                    showDescriptionColumn={false} 
+                    showDescriptionColumn={false}
                     showSizeColumn={true}
                     showProductTypeColumn={true}
-                    showStatusColumn={true} 
+                    showStatusColumn={true}
                 />
                  {allProducts.length > 0 && filteredProducts.length === 0 && !isLoading && !isLoadingFirestore && (
                     <Card className="shadow-md my-6 border-blue-500/50 border-l-4">
@@ -517,28 +517,28 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
   const endDateInput = product.collectionEndDate;
 
   let endDate: Date | null = null;
-  if (endDateInput instanceof Date && !isNaN(endDateInput.getTime())) { 
+  if (endDateInput instanceof Date && !isNaN(endDateInput.getTime())) {
     endDate = endDateInput;
   } else if (typeof endDateInput === 'string') {
-    const parsedDate = new Date(endDateInput); 
-    if (!isNaN(parsedDate.getTime())) { 
+    const parsedDate = new Date(endDateInput);
+    if (!isNaN(parsedDate.getTime())) {
       endDate = parsedDate;
     }
   }
-  
 
 
-  if (endDate && !isNaN(endDate.getTime())) { 
+
+  if (endDate && !isNaN(endDate.getTime())) {
     endDate.setHours(0,0,0,0);
 
-    if (endDate < today) { 
+    if (endDate < today) {
       return product.stock > 0
         ? { text: 'Coleção Passada (Em Estoque)', variant: 'destructive', colorClass: 'bg-destructive/80 text-destructive-foreground' }
         : { text: 'Coleção Passada (Sem Estoque)', variant: 'outline', colorClass: 'border-muted-foreground text-muted-foreground' };
     }
     const thirtyDaysFromNow = new Date(today);
     thirtyDaysFromNow.setDate(today.getDate() + 30);
-    if (endDate < thirtyDaysFromNow) { 
+    if (endDate < thirtyDaysFromNow) {
       return { text: 'Próximo ao Fim', variant: 'default', colorClass: 'bg-amber-500 text-white' };
     }
   }
@@ -550,3 +550,4 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
   }
   return { text: 'Status N/A', variant: 'outline' };
 };
+
