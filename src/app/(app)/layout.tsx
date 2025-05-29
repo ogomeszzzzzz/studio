@@ -8,8 +8,8 @@ import { onAuthStateChanged, signOut, type User as FirebaseUser } from 'firebase
 import { clientAuth, firestore } from '@/lib/firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'; // Added Card imports
-import { Loader2, LogOut, LayoutDashboard, UserCircle, PackageSearch, BedDouble, Store, Building, TrendingUp, BarChart, ShieldCheck, Settings } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Loader2, LogOut, LayoutDashboard, UserCircle, ShieldCheck, Store, Building, TrendingUp, BarChart, BedDouble } from 'lucide-react'; // Removed PackageSearch, BedDouble, Store, Building, TrendingUp, BarChart
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 import type { UserProfile } from '@/types';
@@ -25,6 +25,8 @@ interface AppLayoutProps {
   children: ReactNode;
 }
 
+const ADMIN_PRIMARY_EMAIL = "gustavo.cordeiro@altenburg.com.br"; // For direct comparison
+
 export default function AppLayout({ children }: AppLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -36,12 +38,23 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const [isApproved, setIsApproved] = useState(false);
   const [activeAccordionItem, setActiveAccordionItem] = useState<string | undefined>(undefined);
 
-  const isAdmin = userProfile?.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL;
+  // Use NEXT_PUBLIC_ADMIN_EMAIL from .env for client-side checks if available, otherwise fallback
+  const effectiveAdminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL || ADMIN_PRIMARY_EMAIL;
+  const isAdmin = userProfile?.email === effectiveAdminEmail;
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(clientAuth, async (fbUser) => {
       setFirebaseUser(fbUser);
       if (fbUser) {
+        // Directly approve if it's the primary admin email
+        if (fbUser.email === ADMIN_PRIMARY_EMAIL) {
+          setUserProfile({ uid: fbUser.uid, email: fbUser.email, isApproved: true, name: "Admin", pendingApproval: false });
+          setIsApproved(true);
+          setApprovalStatusLoading(false);
+          setAuthLoading(false);
+          return; // Skip Firestore check for the primary admin
+        }
+
         setApprovalStatusLoading(true);
         try {
           const userDocRef = doc(firestore, 'users', fbUser.uid);
@@ -54,21 +67,18 @@ export default function AppLayout({ children }: AppLayoutProps) {
             } else {
               setIsApproved(false);
               // User exists but is not approved
-              // No redirect here, let content rendering handle "Pending Approval"
             }
           } else {
-            // User exists in Auth but not in Firestore (should not happen with new registration flow)
-            // Or new user who hasn't had their Firestore doc created by admin action yet (old system)
-            // For new system, this means an issue or they need to complete registration/wait for approval.
-            setUserProfile({ uid: fbUser.uid, email: fbUser.email, isApproved: false, pendingApproval: true });
+            // User exists in Auth but not in Firestore
+            setUserProfile({ uid: fbUser.uid, email: fbUser.email, isApproved: false, pendingApproval: true, name: fbUser.displayName || fbUser.email || 'Usuário' });
             setIsApproved(false);
-            toast({ title: "Conta Pendente", description: "Seu perfil não foi encontrado ou ainda não foi aprovado.", variant: "default" });
+            // No toast here, let the UI show pending/denied message
           }
         } catch (error) {
           console.error("Error fetching user profile:", error);
           toast({ title: "Erro de Perfil", description: "Não foi possível carregar seu perfil.", variant: "destructive" });
-          setIsApproved(false); // Default to not approved on error
-          setUserProfile({ uid: fbUser.uid, email: fbUser.email }); // Basic profile
+          setIsApproved(false); 
+          setUserProfile({ uid: fbUser.uid, email: fbUser.email, name: fbUser.displayName || fbUser.email || 'Usuário' });
         } finally {
           setApprovalStatusLoading(false);
         }
@@ -101,7 +111,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     }
   };
 
-  if (authLoading || (firebaseUser && approvalStatusLoading)) {
+  if (authLoading || (firebaseUser && approvalStatusLoading && firebaseUser.email !== ADMIN_PRIMARY_EMAIL)) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -112,7 +122,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     );
   }
 
-  if (!firebaseUser) { // Should be caught by onAuthStateChanged, but as a fallback
+  if (!firebaseUser) { 
     return (
        <div className="flex items-center justify-center min-h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -146,7 +156,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     </header>
   );
 
-  if (!isApproved && userProfile?.pendingApproval) {
+  if (!isApproved && userProfile?.pendingApproval) { // Check if userProfile exists before checking pendingApproval
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6">
         <Card className="w-full max-w-md text-center shadow-lg">
@@ -170,8 +180,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
   }
   
   if (!isApproved && userProfile && !userProfile.pendingApproval) {
-     // This case might happen if isApproved is explicitly false but pendingApproval is also false/undefined.
-     // Or if user document exists but doesn't have approval fields (older users before this system)
       return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6">
         <Card className="w-full max-w-md text-center shadow-lg">
@@ -203,7 +211,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <AccordionItem value="admin-category" className="border-b-0">
               <AccordionTrigger className="p-3 rounded-md hover:bg-muted hover:text-primary transition-colors text-foreground font-medium text-sm no-underline [&[data-state=open]>svg]:text-primary">
                 <div className="flex items-center gap-3">
-                  <Settings className="h-5 w-5" />
+                  <ShieldCheck className="h-5 w-5" />
                   <span>Admin</span>
                 </div>
               </AccordionTrigger>
@@ -258,7 +266,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
       <div className="flex-1 flex flex-col bg-background">
         <AuthenticatedHeader />
         <main className="flex-grow p-4 md:p-6 lg:p-8">
-          {isApproved ? children : null /* Render children only if approved */}
+          {isApproved ? children : null}
         </main>
       </div>
     </div>

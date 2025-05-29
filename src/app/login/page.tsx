@@ -2,34 +2,30 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation'; // useSearchParams removido pois não é usado
-import { signInWithEmailAndPassword, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { FirebaseError } from 'firebase/app';
+import { useRouter } from 'next/navigation';
+import { signInWithEmailAndPassword, onAuthStateChanged, User as FirebaseUser, FirebaseError } from 'firebase/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { clientAuth } from '@/lib/firebase/config';
-import { LogIn, Loader2 } from 'lucide-react';
-// loginUserServerAction e useActionState removidos pois o login é puramente client-side agora
+import { LogIn, Loader2, UserPlus } from 'lucide-react';
+import Link from 'next/link';
+
 
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
-  // searchParams e formMessage/state não são mais necessários com o login puramente client-side.
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(clientAuth, (user) => {
       if (user) {
-        // Usuário está logado, redireciona para o dashboard.
-        // O toast de login bem-sucedido pode ser movido para após o signIn bem-sucedido
-        // ou mantido aqui, mas pode aparecer em cada recarregamento se o usuário já estiver logado.
-        // Vamos deixar o toast para o momento do login efetivo.
-        router.replace('/dashboard'); // Usar replace para não adicionar /login ao histórico
+        // O layout (app)/layout.tsx cuidará da verificação de aprovação e redirecionamento para dashboard
+        // ou para a tela de pendente. Se o usuário está logado, ele não deve estar na página de login.
+        router.replace('/dashboard'); 
       }
-      // Se o usuário não estiver logado, ele permanece na página de login.
     });
     return () => unsubscribe();
   }, [router]);
@@ -38,7 +34,6 @@ export default function LoginPage() {
   const handleClientFirebaseLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
-    // setFormMessage(null); // Removido
     
     const formData = new FormData(event.currentTarget);
     const email = formData.get('email') as string;
@@ -46,30 +41,23 @@ export default function LoginPage() {
     
     if (!email || !password) {
       toast({ title: 'Erro de Validação', description: 'Email e senha são obrigatórios.', variant: 'destructive' });
-      // setFormMessage({ message: 'Email e senha são obrigatórios.', status: 'error' }); // Removido
       setIsLoading(false);
       return;
     }
 
     try {
       await signInWithEmailAndPassword(clientAuth, email, password);
-      // Se o login for bem-sucedido, o onAuthStateChanged listener (no useEffect acima)
-      // irá detectar a mudança de estado e redirecionar para /dashboard.
-      // Adicionamos um toast aqui para feedback imediato.
-      toast({ title: 'Login Bem-sucedido', description: 'Redirecionando para o dashboard...' });
-      // Não precisamos de setIsLoading(false) aqui, pois o redirecionamento desmontará o componente.
-      // No entanto, se o redirecionamento demorar, o botão permanecerá em loading.
-      // Para ser seguro, e se o onAuthStateChanged demorar, vamos setar para false,
-      // mas o redirecionamento deve ser rápido.
-      // Na verdade, o onAuthStateChanged já trata o redirecionamento. Se houver erro, o catch trata o isLoading.
-      // Se não houver erro, o redirecionamento vai acontecer.
+      // Não redireciona aqui, deixa o listener onAuthStateChanged e o layout lidarem com isso.
+      // Apenas um toast de sucesso.
+      toast({ title: 'Login Bem-sucedido', description: 'Verificando status da conta...' });
+      // setIsLoading(false) será tratado no catch ou o componente será desmontado.
     } catch (e: unknown) {
       setIsLoading(false);
       let errorMessage = 'Falha no login. Verifique suas credenciais.';
       let consoleLogFn: 'error' | 'warn' = 'error';
       let logMessagePrefix = 'Login error:';
 
-      if (e instanceof FirebaseError) {
+      if (e instanceof FirebaseError) { 
         logMessagePrefix = `Firebase login attempt failed (${e.code}):`;
         switch (e.code) {
           case 'auth/user-not-found':
@@ -108,10 +96,7 @@ export default function LoginPage() {
         description: errorMessage,
         variant: 'destructive'
       });
-      // setFormMessage({ message: errorMessage, status: 'error' }); // Removido
     }
-    // Não é necessário setIsLoading(false) aqui, pois ou houve erro (tratado no catch)
-    // ou houve sucesso (e o onAuthStateChanged cuidará do redirecionamento, desmontando o componente)
   };
   
   return (
@@ -125,7 +110,6 @@ export default function LoginPage() {
           <CardDescription>Faça login para acessar o Painel de Controle de Estoque e Ruptura do E-commerce.</CardDescription>
         </CardHeader>
         <CardContent>
-          {/* formAction removido do form, onSubmit é suficiente para client-side auth */}
           <form onSubmit={handleClientFirebaseLogin} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
@@ -153,9 +137,15 @@ export default function LoginPage() {
             </Button>
           </form>
         </CardContent>
-        <CardFooter className="flex flex-col items-center space-y-2 pt-4">
-           {/* formMessage removido, toasts são usados para feedback */}
-           <p className="text-xs text-muted-foreground">
+        <CardFooter className="flex flex-col items-center space-y-4 pt-6"> {/* Aumentei o padding-top e space-y */}
+           <p className="text-sm">
+             Não tem uma conta?{' '}
+             <Link href="/register" className="font-medium text-primary hover:underline flex items-center gap-1">
+               <UserPlus className="h-4 w-4" />
+               Registre-se
+             </Link>
+           </p>
+           <p className="text-xs text-muted-foreground pt-2">
              Todos os direitos reservados ao E-Commerce Altenburg
            </p>
         </CardFooter>
