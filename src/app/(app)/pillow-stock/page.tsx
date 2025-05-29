@@ -5,7 +5,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import { PillowStackColumn } from '@/components/domain/PillowStackColumn';
 import type { Product } from '@/types';
-import { BedDouble, Loader2, Database, Filter as FilterIcon, AlertTriangle, ShoppingBag, TrendingDown, PackageX, BarChart3, ListFilter, SortAsc, SortDesc } from 'lucide-react';
+import { BedDouble, Loader2, Database, Filter as FilterIcon, AlertTriangle, ShoppingBag, TrendingDown, PackageX, BarChart3, ListFilter, SortAsc, SortDesc, RefreshCw } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { clientAuth, firestore } from '@/lib/firebase/config';
@@ -15,6 +15,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
+import { fetchPillowStockFromVtex, type UpdatedPillowStockInfo } from '@/app/actions/vtex';
+
 
 const FIRESTORE_BATCH_LIMIT = 450;
 const PILLOW_PRODUCT_TYPE_EXCEL = "TRAVESSEIRO";
@@ -34,7 +36,8 @@ interface AggregatedPillow {
   name: string;
   stock: number;
   fillPercentage: number;
-  derivation?: string; // Added to store product derivation
+  derivation?: string; 
+  vtexId?: string | number; // For potential direct VTEX ID usage
 }
 
 const productToFirestore = (product: Product): any => {
@@ -66,7 +69,7 @@ function derivePillowDisplayName(productNameInput: string | undefined): string {
       }
     }
     const words = name.split(/\s+/).filter(word => word.length > 0);
-    if (words.length === 0) return productName; // Fallback if stripping leaves nothing
+    if (words.length === 0) return productName; 
     else if (words.length === 1) return words[0];
     else return `${words[0]} ${words[1]}`;
   }
@@ -76,9 +79,11 @@ function derivePillowDisplayName(productNameInput: string | undefined): string {
 
 export default function PillowStockPage() {
   const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [aggregatedPillowStockState, setAggregatedPillowStockState] = useState<AggregatedPillow[]>([]);
   const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
   const [isSavingFirestore, setIsSavingFirestore] = useState(false);
   const [isProcessingExcel, setIsProcessingExcel] = useState(false);
+  const [isUpdatingVtexStock, setIsUpdatingVtexStock] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
@@ -92,6 +97,7 @@ export default function PillowStockPage() {
       setCurrentUser(user);
       if (!user) {
         setAllProducts([]);
+        setAggregatedPillowStockState([]);
         setIsLoadingFirestore(false);
       }
     });
@@ -135,13 +141,15 @@ export default function PillowStockPage() {
       const productsColRef = collection(firestore, 'users', currentUser.uid, 'products');
       const existingDocsSnapshot = await getDocs(query(productsColRef));
       
-      console.log(`PillowStockPage: Deleting ${existingDocsSnapshot.docs.length} existing products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
-      for (let i = 0; i < existingDocsSnapshot.docs.length; i += FIRESTORE_BATCH_LIMIT) {
-        const batch = writeBatch(firestore);
-        const chunk = existingDocsSnapshot.docs.slice(i, i + FIRESTORE_BATCH_LIMIT);
-        chunk.forEach(docSnapshot => { batch.delete(docSnapshot.ref); totalDeleted++; });
-        await batch.commit();
-        console.log(`PillowStockPage: Committed a batch of ${chunk.length} deletions.`);
+      if (existingDocsSnapshot.docs.length > 0) {
+        console.log(`PillowStockPage: Deleting ${existingDocsSnapshot.docs.length} existing products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
+        for (let i = 0; i < existingDocsSnapshot.docs.length; i += FIRESTORE_BATCH_LIMIT) {
+          const batch = writeBatch(firestore);
+          const chunk = existingDocsSnapshot.docs.slice(i, i + FIRESTORE_BATCH_LIMIT);
+          chunk.forEach(docSnapshot => { batch.delete(docSnapshot.ref); totalDeleted++; });
+          await batch.commit();
+          console.log(`PillowStockPage: Committed a batch of ${chunk.length} deletions.`);
+        }
       }
       
       if (productsToSave.length > 0) {
@@ -159,7 +167,7 @@ export default function PillowStockPage() {
         }
         console.log(`PillowStockPage: Successfully added ${totalAdded} new products.`);
       }
-      setAllProducts(productsToSave);
+      setAllProducts(productsToSave); // Update the base list of all products
       toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
     } catch (error) {
       console.error("Error saving products to Firestore (Pillow Stock):", error);
@@ -179,23 +187,32 @@ export default function PillowStockPage() {
     return allProducts.filter(p => p.productType?.toUpperCase() === PILLOW_PRODUCT_TYPE_EXCEL.toUpperCase());
   }, [allProducts]);
 
-  const aggregatedPillowStock = useMemo(() => {
-    const pillowStockMap = new Map<string, { stock: number; derivation?: string }>();
+  // Recalculate aggregatedPillowStock when dependencies change
+  useEffect(() => {
+    const pillowStockMap = new Map<string, { stock: number; derivation?: string; vtexId?: string | number }>();
     pillowProducts.forEach(pillow => {
         const displayName = derivePillowDisplayName(pillow.name);
-        const currentPillowData = pillowStockMap.get(displayName) || { stock: 0, derivation: pillow.productDerivation || String(pillow.productId || '') };
+        const currentPillowData = pillowStockMap.get(displayName) || { 
+            stock: 0, 
+            derivation: pillow.productDerivation || String(pillow.productId || pillow.vtexId || ''),
+            vtexId: pillow.vtexId 
+        };
         currentPillowData.stock += pillow.stock;
-        if (!pillowStockMap.has(displayName)) { // Set derivation only for the first product encountered for this display name
-             currentPillowData.derivation = pillow.productDerivation || String(pillow.productId || '');
+        
+        // Ensure derivation and vtexId are set from the first encountered product for this display name
+        if (!pillowStockMap.has(displayName)) {
+            currentPillowData.derivation = pillow.productDerivation || String(pillow.productId || pillow.vtexId || '');
+            currentPillowData.vtexId = pillow.vtexId;
         }
         pillowStockMap.set(displayName, currentPillowData);
-      });
+    });
 
     let derivedPillows: AggregatedPillow[] = Array.from(pillowStockMap.entries())
       .map(([name, data]) => ({
         name,
         stock: data.stock,
         derivation: data.derivation,
+        vtexId: data.vtexId,
         fillPercentage: (data.stock / MAX_STOCK_PER_PILLOW_COLUMN) * 100
       }));
 
@@ -230,33 +247,100 @@ export default function PillowStockPage() {
       }
       return sortOrder === 'asc' ? comparison : -comparison;
     });
-
-    return derivedPillows;
+    setAggregatedPillowStockState(derivedPillows);
   }, [pillowProducts, searchTerm, sortCriteria, sortOrder, stockStatusFilter]);
+
 
   const pillowKPIs = useMemo(() => {
     if (pillowProducts.length === 0) return { totalPillowSKUs: 0, totalPillowUnits: 0, lowStockPillowTypes: 0, zeroStockPillowTypes: 0, averageStockPerType: 0 };
+    
+    // Use aggregatedPillowStockState for KPIs if it's already computed based on display names
+    const uniquePillowDisplays = aggregatedPillowStockState; // Or re-aggregate from pillowProducts if more accurate for KPIs
 
-    const allAggregatedPillowsForKPIs = Array.from(
-        pillowProducts.reduce((map, pillow) => {
-            const displayName = derivePillowDisplayName(pillow.name);
-            map.set(displayName, (map.get(displayName) || 0) + pillow.stock);
-            return map;
-        }, new Map<string, number>()).entries()
-    ).map(([name, stock]) => ({ name, stock }));
-
-    const totalPillowSKUs = allAggregatedPillowsForKPIs.length;
-    const totalPillowUnits = allAggregatedPillowsForKPIs.reduce((sum, p) => sum + p.stock, 0);
+    const totalPillowSKUs = uniquePillowDisplays.length;
+    const totalPillowUnits = uniquePillowDisplays.reduce((sum, p) => sum + p.stock, 0);
     const lowStockThresholdValue = MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE;
-    const lowStockPillowTypes = allAggregatedPillowsForKPIs.filter(p => p.stock > 0 && p.stock < lowStockThresholdValue).length;
-    const zeroStockPillowTypes = allAggregatedPillowsForKPIs.filter(p => p.stock === 0).length;
+    const lowStockPillowTypes = uniquePillowDisplays.filter(p => p.stock > 0 && p.stock < lowStockThresholdValue).length;
+    const zeroStockPillowTypes = uniquePillowDisplays.filter(p => p.stock === 0).length;
     const averageStockPerType = totalPillowSKUs > 0 ? parseFloat((totalPillowUnits / totalPillowSKUs).toFixed(1)) : 0;
     return { totalPillowSKUs, totalPillowUnits, lowStockPillowTypes, zeroStockPillowTypes, averageStockPerType };
-  }, [pillowProducts]);
+  }, [pillowProducts, aggregatedPillowStockState]); // Added aggregatedPillowStockState
 
   const noPillowsFoundInExcel = useMemo(() => {
     return allProducts.length > 0 && pillowProducts.length === 0;
   }, [allProducts, pillowProducts]);
+
+
+  const handleUpdateVtexStock = async () => {
+    if (!currentUser) {
+      toast({ title: "Usuário não autenticado", description: "Faça login para atualizar o estoque.", variant: "destructive" });
+      return;
+    }
+    if (aggregatedPillowStockState.length === 0) {
+      toast({ title: "Sem Travesseiros", description: "Nenhum travesseiro para atualizar.", variant: "default" });
+      return;
+    }
+
+    setIsUpdatingVtexStock(true);
+    toast({ title: "Atualizando Estoque VTEX...", description: "Buscando dados da VTEX. Isso pode levar alguns instantes." });
+
+    const pillowsToUpdate: UpdatePillowStockInputEntry[] = aggregatedPillowStockState
+        .filter(p => p.derivation) // Only include pillows with a derivation ID
+        .map(p => ({
+            derivation: p.derivation!,
+            displayName: p.name,
+        }));
+    
+    if (pillowsToUpdate.length === 0) {
+        toast({ title: "Sem Identificadores", description: "Nenhum travesseiro com ID de derivação encontrado para atualização.", variant: "destructive" });
+        setIsUpdatingVtexStock(false);
+        return;
+    }
+
+    try {
+        const updatedStockInfo = await fetchPillowStockFromVtex(pillowsToUpdate);
+        
+        let successfulUpdates = 0;
+        let failedUpdates = 0;
+
+        setAggregatedPillowStockState(prevPillows => {
+            return prevPillows.map(pillow => {
+                const updateInfo = updatedStockInfo.find(u => u.derivation === pillow.derivation);
+                if (updateInfo && typeof updateInfo.newStock === 'number') {
+                    successfulUpdates++;
+                    return {
+                        ...pillow,
+                        stock: updateInfo.newStock,
+                        fillPercentage: (updateInfo.newStock / MAX_STOCK_PER_PILLOW_COLUMN) * 100,
+                    };
+                } else if (updateInfo && updateInfo.error) {
+                    failedUpdates++;
+                    toast({
+                        title: `Erro ao atualizar ${pillow.name}`,
+                        description: updateInfo.error,
+                        variant: "destructive",
+                        duration: 5000,
+                    });
+                }
+                return pillow;
+            });
+        });
+        
+        if (successfulUpdates > 0) {
+            toast({ title: "Estoque Atualizado!", description: `${successfulUpdates} travesseiro(s) atualizado(s) com dados da VTEX.` });
+        }
+        if (failedUpdates === 0 && successfulUpdates === 0) {
+             toast({ title: "Nenhuma Atualização", description: "Não foi possível obter novos dados de estoque da VTEX ou não houve mudanças.", variant: "default" });
+        }
+
+    } catch (error) {
+        console.error("Error calling fetchPillowStockFromVtex action:", error);
+        toast({ title: "Erro na Atualização", description: `Falha ao buscar dados da VTEX: ${(error as Error).message}`, variant: "destructive" });
+    } finally {
+        setIsUpdatingVtexStock(false);
+    }
+  };
+
 
   const isAnyDataLoading = isLoadingFirestore || isSavingFirestore || isProcessingExcel;
   const lowStockFilterThreshold = (MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE).toFixed(0);
@@ -275,6 +359,18 @@ export default function PillowStockPage() {
             Visualize o estoque de travesseiros em colunas de empilhamento e analise os principais indicadores.
           </p>
         </div>
+        <Button 
+            onClick={handleUpdateVtexStock} 
+            disabled={isAnyDataLoading || isUpdatingVtexStock || aggregatedPillowStockState.length === 0}
+            variant="outline"
+        >
+            {isUpdatingVtexStock ? (
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+            ) : (
+                <RefreshCw className="mr-2 h-5 w-5" />
+            )}
+            Atualizar Estoque da VTEX
+        </Button>
       </div>
 
       <ExcelUploadSection
@@ -287,21 +383,21 @@ export default function PillowStockPage() {
         isProcessingParent={isSavingFirestore}
       />
 
-      {isAnyDataLoading && (
+      {(isAnyDataLoading || isUpdatingVtexStock) && (
         <Card className="shadow-lg"><CardHeader><CardTitle className="flex items-center">
               <Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" />
-              {isSavingFirestore ? "Salvando..." : (isProcessingExcel ? "Processando..." : "Carregando...")}
+              {isSavingFirestore ? "Salvando..." : (isProcessingExcel ? "Processando..." : (isUpdatingVtexStock ? "Atualizando da VTEX..." : "Carregando..."))}
             </CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Aguarde.</p></CardContent></Card>
       )}
 
-      {!isAnyDataLoading && allProducts.length === 0 && (
+      {!isAnyDataLoading && !isUpdatingVtexStock && allProducts.length === 0 && (
         <Card className="shadow-lg text-center py-10"><CardHeader><CardTitle className="flex items-center justify-center text-xl">
               <Database className="mr-2 h-7 w-7 text-primary" /> Comece Carregando os Dados
             </CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Carregue um arquivo Excel para visualizar o estoque de travesseiros.</p>
             <p className="text-sm text-muted-foreground mt-2">Os dados da planilha serão salvos em seu perfil.</p></CardContent></Card>
       )}
 
-      {!isAnyDataLoading && allProducts.length > 0 && (
+      {!isAnyDataLoading && !isUpdatingVtexStock && allProducts.length > 0 && (
         <>
           <Card className="shadow-md border-primary/30 border-l-4">
             <CardHeader><CardTitle className="flex items-center"><BarChart3 className="mr-2 h-5 w-5 text-primary" />Indicadores Chave de Travesseiros</CardTitle></CardHeader>
@@ -373,12 +469,12 @@ export default function PillowStockPage() {
                 <p className="text-muted-foreground mt-2">Verifique sua planilha ou carregue uma nova.</p></CardContent></Card>
           )}
 
-          {!noPillowsFoundInExcel && aggregatedPillowStock.length === 0 && (searchTerm || stockStatusFilter !== 'all') && (
+          {!noPillowsFoundInExcel && aggregatedPillowStockState.length === 0 && (searchTerm || stockStatusFilter !== 'all') && (
              <Card className="shadow-md my-6"><CardHeader><CardTitle className="flex items-center">
                   <FilterIcon className="mr-2 h-5 w-5" />Nenhum Travesseiro Encontrado</CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Nenhum travesseiro corresponde aos filtros ou termo de busca atuais. Tente ajustar os filtros.</p></CardContent></Card>
           )}
 
-          {aggregatedPillowStock.length > 0 && (
+          {aggregatedPillowStockState.length > 0 && (
             <Card className="shadow-lg">
                 <CardHeader>
                     <CardTitle className="flex items-center"><BedDouble className="mr-2 h-5 w-5 text-primary" /> Colunas de Estoque de Travesseiros</CardTitle>
@@ -386,7 +482,7 @@ export default function PillowStockPage() {
                 </CardHeader>
                 <CardContent>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 p-4 rounded-lg bg-muted/20">
-                    {aggregatedPillowStock.map((pillow) => (
+                    {aggregatedPillowStockState.map((pillow) => (
                         <PillowStackColumn
                         key={`${pillow.name}-${pillow.derivation}`}
                         pillowName={pillow.name}
