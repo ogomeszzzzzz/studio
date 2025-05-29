@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import {
   ShoppingBag, AlertTriangle, FileSpreadsheet,
   Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler,
-  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon, ListFilter
+  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon, ListFilter, Clock
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -21,8 +21,10 @@ import html2canvas from 'html2canvas';
 import autoTable from 'jspdf-autotable';
 import { clientAuth, firestore } from '@/lib/firebase/config';
 import type { User } from 'firebase/auth';
-import { collection, getDocs, writeBatch, doc, Timestamp, query } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, Timestamp, query, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { Tooltip as ShadTooltip, TooltipContent as ShadTooltipContent, TooltipProvider as ShadTooltipProvider, TooltipTrigger as ShadTooltipTrigger } from "@/components/ui/tooltip";
+import { format as formatDateFns } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 interface AggregatedCollectionData {
   name: string;
@@ -58,7 +60,7 @@ interface SkuStockStatusData {
 }
 
 const ALL_COLLECTIONS_VALUE = "_ALL_DASHBOARD_COLLECTIONS_";
-const FIRESTORE_BATCH_LIMIT = 450; // Max operations in a single batch (deletes + adds)
+const FIRESTORE_BATCH_LIMIT = 450;
 
 const chartConfigBase = {
   stock: {
@@ -113,6 +115,7 @@ export default function DashboardPage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
   const [isSavingFirestore, setIsSavingFirestore] = useState(false);
+  const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
 
   const [selectedCollection, setSelectedCollection] = useState<string>(ALL_COLLECTIONS_VALUE);
 
@@ -122,6 +125,7 @@ export default function DashboardPage() {
       setCurrentUser(user);
       if (!user) {
         setDashboardProducts([]);
+        setLastDataUpdateTimestamp(null);
         setIsLoadingFirestore(false);
       }
     });
@@ -136,8 +140,27 @@ export default function DashboardPage() {
         try {
           const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
           const snapshot = await getDocs(query(productsCol));
-          const productsFromDb = snapshot.docs.map(doc => productFromFirestore(doc.data()));
+          const productsFromDb: Product[] = [];
+          snapshot.docs.forEach(doc => {
+            // Exclude the metadata document from product list
+            if (doc.id !== '_metadata') {
+              productsFromDb.push(productFromFirestore(doc.data()));
+            }
+          });
           setDashboardProducts(productsFromDb);
+
+          // Fetch last update timestamp
+          const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
+          const metadataDocSnap = await getDoc(metadataDocRef);
+          if (metadataDocSnap.exists()) {
+            const data = metadataDocSnap.data();
+            if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
+              setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
+            }
+          } else {
+            setLastDataUpdateTimestamp(null); // No metadata, so no timestamp
+          }
+
           if (productsFromDb.length > 0) {
             toast({ title: "Dados Carregados", description: "Dados de produtos carregados do banco de dados." });
           }
@@ -152,10 +175,28 @@ export default function DashboardPage() {
     } else if (currentUser && dashboardProducts.length > 0) {
       console.log(`DashboardPage: Products already loaded for user UID: ${currentUser.uid}. Skipping fetch.`);
       setIsLoadingFirestore(false);
+      // Optionally re-fetch just the timestamp if it's not already loaded or to refresh it
+      if (!lastDataUpdateTimestamp) {
+        const fetchTimestamp = async () => {
+          try {
+            const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
+            const metadataDocSnap = await getDoc(metadataDocRef);
+            if (metadataDocSnap.exists()) {
+              const data = metadataDocSnap.data();
+              if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
+                setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
+              }
+            }
+          } catch (tsError) {
+            console.warn("Could not fetch last update timestamp on subsequent load:", tsError);
+          }
+        };
+        fetchTimestamp();
+      }
     } else if (!currentUser) {
       setIsLoadingFirestore(false);
     }
-  }, [currentUser, toast, dashboardProducts.length, isSavingFirestore]);
+  }, [currentUser, dashboardProducts.length, isSavingFirestore, lastDataUpdateTimestamp]);
 
 
   const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
@@ -170,8 +211,6 @@ export default function DashboardPage() {
 
     try {
       const productsColRef = collection(firestore, 'users', currentUser.uid, 'products');
-
-      // Delete existing products in chunks
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
 
@@ -181,23 +220,27 @@ export default function DashboardPage() {
           const batch = writeBatch(firestore);
           const chunk = existingDocsSnapshot.docs.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(docSnapshot => {
-            batch.delete(docSnapshot.ref);
-            totalDeleted++;
+            // Do not delete the _metadata document along with products
+            if (docSnapshot.id !== '_metadata') {
+              batch.delete(docSnapshot.ref);
+              totalDeleted++;
+            }
           });
-          await batch.commit();
-          console.log(`DashboardPage: Committed a batch of ${chunk.length} deletions.`);
+          if (chunk.filter(d => d.id !== '_metadata').length > 0) { // Only commit if there are actual product docs to delete
+            await batch.commit();
+            console.log(`DashboardPage: Committed a batch of ${chunk.filter(d => d.id !== '_metadata').length} deletions.`);
+          }
         }
         console.log(`DashboardPage: Successfully deleted ${totalDeleted} existing products.`);
       }
 
-      // Add new products in chunks
       if (productsToSave.length > 0) {
         console.log(`DashboardPage: Adding ${productsToSave.length} new products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
           const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(product => {
-            const newDocRef = doc(productsColRef); // Auto-generate ID
+            const newDocRef = doc(productsColRef);
             batch.set(newDocRef, productToFirestore(product));
             totalAdded++;
           });
@@ -206,6 +249,16 @@ export default function DashboardPage() {
         }
         console.log(`DashboardPage: Successfully added ${totalAdded} new products.`);
       }
+
+      // Update last update timestamp
+      const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
+      const newTimestamp = serverTimestamp();
+      await setDoc(metadataDocRef, { lastUpdatedAt: newTimestamp });
+      // Optimistically update local timestamp - serverTimestamp() will resolve to a server time
+      // For immediate UI update, we can use client's current time, or wait for a re-fetch,
+      // or set it to new Date() for an approximation.
+      setLastDataUpdateTimestamp(new Date());
+
 
       setDashboardProducts(productsToSave);
       toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
@@ -433,7 +486,13 @@ export default function DashboardPage() {
 
       doc.setFontSize(10);
       doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`, pageWidth / 2, yPos, { align: "center" });
-      yPos += 10;
+      yPos += 7;
+      if (lastDataUpdateTimestamp) {
+        doc.setFontSize(9);
+        doc.text(`Dados atualizados em: ${formatDateFns(lastDataUpdateTimestamp, 'dd/MM/yyyy HH:mm:ss', { locale: ptBR })}`, pageWidth / 2, yPos, { align: "center" });
+        yPos += 7;
+      }
+
 
       doc.setFontSize(12);
       doc.text("Resumo Geral dos Indicadores:", margin, yPos);
@@ -595,6 +654,12 @@ export default function DashboardPage() {
             Baixar Relatório PDF
         </Button>
       </div>
+      {lastDataUpdateTimestamp && (
+        <div className="text-sm text-muted-foreground flex items-center">
+            <Clock className="mr-2 h-4 w-4" />
+            Última atualização dos dados: {formatDateFns(lastDataUpdateTimestamp, 'dd/MM/yyyy HH:mm:ss', { locale: ptBR })}
+        </div>
+      )}
 
        {dashboardProducts.length > 0 && (
         <Card className="shadow-md border-primary/30 border-l-4">

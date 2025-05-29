@@ -2,11 +2,10 @@
 'use client';
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
-// ExcelUploadSection REMOVED
 import { FilterControlsSection } from '@/components/domain/FilterControlsSection';
 import { ProductDataTableSection } from '@/components/domain/ProductDataTableSection';
 import type { Product, FilterState } from '@/types';
-import { PackageSearch, Download, TrendingUp, ClipboardList, CheckSquare, Loader2, Database, Filter, HelpCircle, ListFilter } from 'lucide-react';
+import { PackageSearch, Download, TrendingUp, ClipboardList, CheckSquare, Loader2, Database, Filter, HelpCircle, ListFilter, Clock } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,13 +20,14 @@ import {
 } from "@/components/ui/tooltip";
 import { clientAuth, firestore } from '@/lib/firebase/config';
 import type { User } from 'firebase/auth';
-import { collection, getDocs, writeBatch, doc, Timestamp, query } from 'firebase/firestore';
+import { collection, getDocs, doc, Timestamp, query, getDoc } from 'firebase/firestore';
+import { format as formatDateFns } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 
 const ALL_COLLECTIONS_VALUE = "_ALL_COLLECTIONS_";
 const ALL_PRODUCT_TYPES_VALUE = "_ALL_PRODUCT_TYPES_";
 const DEFAULT_LOW_STOCK_THRESHOLD = 10;
-// FIRESTORE_BATCH_LIMIT REMOVED as saving is no longer done here
 
 const productFromFirestore = (data: any): Product => {
   return {
@@ -42,14 +42,14 @@ export default function RestockOpportunitiesPage() {
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
   const [baseFilters, setBaseFilters] = useState<FilterState | null>(null);
-  const [isLoading, setIsLoading] = useState(false); // For filtering
+  const [isLoading, setIsLoading] = useState(false); 
   const [isExporting, setIsExporting] = useState(false);
   const [lowStockThreshold, setLowStockThreshold] = useState<string>(DEFAULT_LOW_STOCK_THRESHOLD.toString());
   const { toast } = useToast();
+  const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
-  // isSavingFirestore and isProcessingExcel REMOVED
 
   useEffect(() => {
     const unsubscribe = clientAuth.onAuthStateChanged((user) => {
@@ -57,6 +57,7 @@ export default function RestockOpportunitiesPage() {
        if (!user) {
         setAllProducts([]);
         setFilteredProducts([]);
+        setLastDataUpdateTimestamp(null);
         setIsLoadingFirestore(false);
       }
     });
@@ -64,19 +65,36 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-    // Only fetch if currentUser is available, allProducts is empty, and not already loading
     if (currentUser && allProducts.length === 0 && isLoadingFirestore) {
       console.log(`RestockOpportunitiesPage: Fetching products for user UID: ${currentUser.uid} because allProducts is empty.`);
       const fetchProducts = async () => {
         try {
           const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
           const snapshot = await getDocs(query(productsCol));
-          const productsFromDb = snapshot.docs.map(doc => productFromFirestore(doc.data()));
+          const productsFromDb: Product[] = [];
+          snapshot.docs.forEach(doc => {
+            if (doc.id !== '_metadata') {
+                productsFromDb.push(productFromFirestore(doc.data()));
+            }
+          });
           setAllProducts(productsFromDb);
+
+          const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
+          const metadataDocSnap = await getDoc(metadataDocRef);
+          if (metadataDocSnap.exists()) {
+            const data = metadataDocSnap.data();
+            if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
+              setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
+            }
+          } else {
+             setLastDataUpdateTimestamp(null);
+          }
+
+
            if (productsFromDb.length > 0) {
             toast({ title: "Dados Carregados", description: "Dados de produtos carregados do banco de dados." });
           } else {
-            toast({ title: "Sem Dados Iniciais", description: "Nenhum produto encontrado no banco de dados. Faça upload na página do Dashboard.", variant: "default" });
+            toast({ title: "Sem Dados Iniciais", description: "Nenhum produto encontrado. Faça upload na página do Dashboard.", variant: "default" });
           }
         } catch (error) {
           console.error("Error fetching products from Firestore (Restock):", error);
@@ -88,14 +106,29 @@ export default function RestockOpportunitiesPage() {
       fetchProducts();
     } else if (currentUser && allProducts.length > 0) {
         console.log(`RestockOpportunitiesPage: Products already loaded for user UID: ${currentUser.uid}. Skipping fetch.`);
-        setIsLoadingFirestore(false); // Ensure loading is false if products are already there
+        setIsLoadingFirestore(false); 
+        if (!lastDataUpdateTimestamp) {
+          const fetchTimestamp = async () => {
+            try {
+              const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
+              const metadataDocSnap = await getDoc(metadataDocRef);
+              if (metadataDocSnap.exists()) {
+                const data = metadataDocSnap.data();
+                if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
+                  setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
+                }
+              }
+            } catch (tsError) {
+              console.warn("Could not fetch last update timestamp on subsequent load (Restock):", tsError);
+            }
+          };
+          fetchTimestamp();
+        }
     } else if (!currentUser) {
-        setIsLoadingFirestore(false); // Not logged in, so not loading
+        setIsLoadingFirestore(false); 
     }
-  }, [currentUser, allProducts.length, isLoadingFirestore, toast]); // Added allProducts.length and isLoadingFirestore
+  }, [currentUser, allProducts.length, isLoadingFirestore, toast, lastDataUpdateTimestamp]); 
 
-
-  // saveProductsToFirestore and handleExcelDataProcessed REMOVED
 
   const availableCollections = useMemo(() => {
     const collections = new Set(allProducts.map(p => p.collection).filter(Boolean).sort((a,b) => (a as string).localeCompare(b as string)));
@@ -108,9 +141,9 @@ export default function RestockOpportunitiesPage() {
   }, [allProducts]);
 
   const applyAllFilters = useCallback(() => {
-    if (isLoadingFirestore) return; // Don't filter if initial data is still loading
+    if (isLoadingFirestore) return; 
 
-    setIsLoading(true); // For filtering operation
+    setIsLoading(true); 
     console.log("Applying filters with baseFilters:", baseFilters, "lowStockThreshold:", lowStockThreshold);
     let tempFiltered = [...allProducts];
     const effectiveThreshold = parseInt(lowStockThreshold, 10);
@@ -152,7 +185,7 @@ export default function RestockOpportunitiesPage() {
 
     console.log("Filtered products count:", tempFiltered.length);
     setFilteredProducts(tempFiltered);
-    setIsLoading(false); // For filtering operation
+    setIsLoading(false); 
   }, [allProducts, baseFilters, lowStockThreshold, toast, isLoadingFirestore]);
 
 
@@ -161,14 +194,13 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-   if(!isLoadingFirestore ) { // Only apply if not loading initial data
+   if(!isLoadingFirestore ) { 
     applyAllFilters();
-   } else if (!isLoadingFirestore && allProducts.length === 0) { // If done loading and no products, clear filtered
+   } else if (!isLoadingFirestore && allProducts.length === 0) { 
     setFilteredProducts([]);
    }
   }, [allProducts, lowStockThreshold, baseFilters, applyAllFilters, isLoadingFirestore]);
 
-  // handleProcessingStart and handleProcessingEnd REMOVED
 
   const summaryStats = useMemo(() => {
     const totalSkusToRestock = filteredProducts.length;
@@ -207,7 +239,7 @@ export default function RestockOpportunitiesPage() {
       "Descrição (Estampa)": p.description,
       "Tamanho": p.size,
       "Tipo Produto": p.productType,
-      "Status Coleção": getCollectionStatus(p).text, // Added status text
+      "Status Coleção": getCollectionStatus(p).text, 
     }));
 
     try {
@@ -231,7 +263,6 @@ export default function RestockOpportunitiesPage() {
     applyAllFilters();
   }
 
-  // Helper function for collection status, can be moved to utils if used elsewhere
   const getCollectionStatus = (product: Product): { text: string } => {
     const today = new Date();
     today.setHours(0,0,0,0);
@@ -239,7 +270,7 @@ export default function RestockOpportunitiesPage() {
     if (product.collectionEndDate instanceof Date && !isNaN(product.collectionEndDate.getTime())) {
       endDate = product.collectionEndDate;
     } else if (typeof product.collectionEndDate === 'string') {
-      const parsedDate = new Date(product.collectionEndDate); // More direct parsing
+      const parsedDate = new Date(product.collectionEndDate); 
       if (!isNaN(parsedDate.getTime())) endDate = parsedDate;
     }
 
@@ -280,8 +311,13 @@ export default function RestockOpportunitiesPage() {
             </p>
         </div>
       </div>
+      {lastDataUpdateTimestamp && (
+        <div className="text-sm text-muted-foreground flex items-center">
+            <Clock className="mr-2 h-4 w-4" />
+            Última atualização dos dados: {formatDateFns(lastDataUpdateTimestamp, 'dd/MM/yyyy HH:mm:ss', { locale: ptBR })}
+        </div>
+      )}
 
-      {/* ExcelUploadSection REMOVED */}
 
       {(isLoadingFirestore) && (
          <Card className="shadow-lg">
@@ -481,28 +517,28 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
   const endDateInput = product.collectionEndDate;
 
   let endDate: Date | null = null;
-  if (endDateInput instanceof Date && !isNaN(endDateInput.getTime())) { // Check for valid Date object
+  if (endDateInput instanceof Date && !isNaN(endDateInput.getTime())) { 
     endDate = endDateInput;
   } else if (typeof endDateInput === 'string') {
-    const parsedDate = new Date(endDateInput); // Attempt to parse string
-    if (!isNaN(parsedDate.getTime())) { // Check if parsing was successful
+    const parsedDate = new Date(endDateInput); 
+    if (!isNaN(parsedDate.getTime())) { 
       endDate = parsedDate;
     }
   }
-  // Removed direct number to date conversion as it's usually handled by parser
+  
 
 
-  if (endDate && !isNaN(endDate.getTime())) { // Ensure endDate is a valid date
+  if (endDate && !isNaN(endDate.getTime())) { 
     endDate.setHours(0,0,0,0);
 
-    if (endDate < today) { // Direct comparison of Date objects works
+    if (endDate < today) { 
       return product.stock > 0
         ? { text: 'Coleção Passada (Em Estoque)', variant: 'destructive', colorClass: 'bg-destructive/80 text-destructive-foreground' }
         : { text: 'Coleção Passada (Sem Estoque)', variant: 'outline', colorClass: 'border-muted-foreground text-muted-foreground' };
     }
     const thirtyDaysFromNow = new Date(today);
     thirtyDaysFromNow.setDate(today.getDate() + 30);
-    if (endDate < thirtyDaysFromNow) { // Direct comparison
+    if (endDate < thirtyDaysFromNow) { 
       return { text: 'Próximo ao Fim', variant: 'default', colorClass: 'bg-amber-500 text-white' };
     }
   }

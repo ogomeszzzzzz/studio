@@ -5,17 +5,18 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import { PillowStackColumn } from '@/components/domain/PillowStackColumn';
 import type { Product } from '@/types';
-import { BedDouble, Loader2, Database, Filter as FilterIcon, AlertTriangle, ShoppingBag, TrendingDown, PackageX, BarChart3, ListFilter, SortAsc, SortDesc } from 'lucide-react';
+import { BedDouble, Loader2, Database, Filter as FilterIcon, AlertTriangle, ShoppingBag, TrendingDown, PackageX, BarChart3, ListFilter, SortAsc, SortDesc, Clock } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { clientAuth, firestore } from '@/lib/firebase/config';
 import type { User } from 'firebase/auth';
-import { collection, getDocs, writeBatch, doc, Timestamp, query } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, Timestamp, query, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-// Removed: import { fetchPillowStockFromVtex, type UpdatedPillowStockInfo } from '@/app/actions/vtex';
+import { format as formatDateFns } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 
 const FIRESTORE_BATCH_LIMIT = 450;
@@ -37,7 +38,7 @@ interface AggregatedPillow {
   stock: number;
   fillPercentage: number;
   derivation?: string; 
-  vtexId?: string | number; // For potential direct VTEX ID usage
+  vtexId?: string | number; 
 }
 
 const productToFirestore = (product: Product): any => {
@@ -83,10 +84,10 @@ export default function PillowStockPage() {
   const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
   const [isSavingFirestore, setIsSavingFirestore] = useState(false);
   const [isProcessingExcel, setIsProcessingExcel] = useState(false);
-  // Removed: const [isUpdatingVtexStock, setIsUpdatingVtexStock] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
+  const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
 
   const [sortCriteria, setSortCriteria] = useState<SortCriteria>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
@@ -98,6 +99,7 @@ export default function PillowStockPage() {
       if (!user) {
         setAllProducts([]);
         setAggregatedPillowStockState([]);
+        setLastDataUpdateTimestamp(null);
         setIsLoadingFirestore(false);
       }
     });
@@ -112,8 +114,25 @@ export default function PillowStockPage() {
         try {
           const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
           const snapshot = await getDocs(query(productsCol));
-          const productsFromDb = snapshot.docs.map(doc => productFromFirestore(doc.data()));
+          const productsFromDb: Product[] = [];
+           snapshot.docs.forEach(doc => {
+            if (doc.id !== '_metadata') {
+              productsFromDb.push(productFromFirestore(doc.data()));
+            }
+          });
           setAllProducts(productsFromDb);
+
+          const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
+          const metadataDocSnap = await getDoc(metadataDocRef);
+          if (metadataDocSnap.exists()) {
+            const data = metadataDocSnap.data();
+            if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
+              setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
+            }
+          } else {
+             setLastDataUpdateTimestamp(null);
+          }
+
         } catch (error) {
           console.error("Error fetching products from Firestore (Pillow Stock):", error);
           toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${(error as Error).message}`, variant: "destructive" });
@@ -125,10 +144,27 @@ export default function PillowStockPage() {
     } else if (currentUser && allProducts.length > 0) {
       console.log(`PillowStockPage: Products already loaded for user UID: ${currentUser.uid}. Skipping fetch.`);
       setIsLoadingFirestore(false);
+      if (!lastDataUpdateTimestamp) {
+        const fetchTimestamp = async () => {
+          try {
+            const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
+            const metadataDocSnap = await getDoc(metadataDocRef);
+            if (metadataDocSnap.exists()) {
+              const data = metadataDocSnap.data();
+              if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
+                setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
+              }
+            }
+          } catch (tsError) {
+            console.warn("Could not fetch last update timestamp on subsequent load (Pillow):", tsError);
+          }
+        };
+        fetchTimestamp();
+      }
     } else if (!currentUser) {
       setIsLoadingFirestore(false);
     }
-  }, [currentUser, toast, allProducts.length, isSavingFirestore, isProcessingExcel]);
+  }, [currentUser, toast, allProducts.length, isSavingFirestore, isProcessingExcel, lastDataUpdateTimestamp]);
 
   const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
     if (!currentUser) {
@@ -146,9 +182,15 @@ export default function PillowStockPage() {
         for (let i = 0; i < existingDocsSnapshot.docs.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
           const chunk = existingDocsSnapshot.docs.slice(i, i + FIRESTORE_BATCH_LIMIT);
-          chunk.forEach(docSnapshot => { batch.delete(docSnapshot.ref); totalDeleted++; });
-          await batch.commit();
-          console.log(`PillowStockPage: Committed a batch of ${chunk.length} deletions.`);
+          chunk.forEach(docSnapshot => { 
+            if (docSnapshot.id !== '_metadata') {
+              batch.delete(docSnapshot.ref); totalDeleted++; 
+            }
+          });
+          if (chunk.filter(d => d.id !== '_metadata').length > 0) {
+            await batch.commit();
+            console.log(`PillowStockPage: Committed a batch of ${chunk.filter(d => d.id !== '_metadata').length} deletions.`);
+          }
         }
       }
       
@@ -167,7 +209,12 @@ export default function PillowStockPage() {
         }
         console.log(`PillowStockPage: Successfully added ${totalAdded} new products.`);
       }
-      setAllProducts(productsToSave); // Update the base list of all products
+
+      const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
+      await setDoc(metadataDocRef, { lastUpdatedAt: serverTimestamp() });
+      setLastDataUpdateTimestamp(new Date());
+
+      setAllProducts(productsToSave); 
       toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
     } catch (error) {
       console.error("Error saving products to Firestore (Pillow Stock):", error);
@@ -187,7 +234,6 @@ export default function PillowStockPage() {
     return allProducts.filter(p => p.productType?.toUpperCase() === PILLOW_PRODUCT_TYPE_EXCEL.toUpperCase());
   }, [allProducts]);
 
-  // Recalculate aggregatedPillowStock when dependencies change
   useEffect(() => {
     const pillowStockMap = new Map<string, { stock: number; derivation?: string; vtexId?: string | number }>();
     pillowProducts.forEach(pillow => {
@@ -199,7 +245,6 @@ export default function PillowStockPage() {
         };
         currentPillowData.stock += pillow.stock;
         
-        // Ensure derivation and vtexId are set from the first encountered product for this display name
         if (!pillowStockMap.has(displayName)) {
             currentPillowData.derivation = pillow.productDerivation || String(pillow.productId || pillow.vtexId || '');
             currentPillowData.vtexId = pillow.vtexId;
@@ -254,7 +299,6 @@ export default function PillowStockPage() {
   const pillowKPIs = useMemo(() => {
     if (pillowProducts.length === 0) return { totalPillowSKUs: 0, totalPillowUnits: 0, lowStockPillowTypes: 0, zeroStockPillowTypes: 0, averageStockPerType: 0 };
     
-    // Use aggregatedPillowStockState for KPIs if it's already computed based on display names
     const uniquePillowDisplays = aggregatedPillowStockState; 
 
     const totalPillowSKUs = uniquePillowDisplays.length;
@@ -270,7 +314,6 @@ export default function PillowStockPage() {
     return allProducts.length > 0 && pillowProducts.length === 0;
   }, [allProducts, pillowProducts]);
 
-  // Removed handleUpdateVtexStock function
 
   const isAnyDataLoading = isLoadingFirestore || isSavingFirestore || isProcessingExcel;
   const lowStockFilterThreshold = (MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE).toFixed(0);
@@ -289,8 +332,13 @@ export default function PillowStockPage() {
             Visualize o estoque de travesseiros em colunas de empilhamento e analise os principais indicadores.
           </p>
         </div>
-        {/* Removed VTEX Update Button */}
       </div>
+      {lastDataUpdateTimestamp && (
+        <div className="text-sm text-muted-foreground flex items-center">
+            <Clock className="mr-2 h-4 w-4" />
+            Última atualização dos dados: {formatDateFns(lastDataUpdateTimestamp, 'dd/MM/yyyy HH:mm:ss', { locale: ptBR })}
+        </div>
+      )}
 
       <ExcelUploadSection
         onDataParsed={handleExcelDataProcessed}
@@ -419,5 +467,3 @@ export default function PillowStockPage() {
     </div>
   );
 }
-
-    
