@@ -8,6 +8,7 @@ import { onAuthStateChanged, signOut, type User as FirebaseUser } from 'firebase
 import { clientAuth, firestore } from '@/lib/firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'; // Added Card imports
 import { Loader2, LogOut, LayoutDashboard, UserCircle, PackageSearch, BedDouble, Store, Building, TrendingUp, BarChart, ShieldCheck, Settings } from 'lucide-react';
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
