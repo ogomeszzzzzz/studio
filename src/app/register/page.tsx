@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useTransition } from 'react'; // Added useTransition
 import { useActionState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -9,8 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { LogIn, Loader2, UserPlus } from 'lucide-react';
-import { registerUser } from '@/app/actions/auth'; // We'll create/update this
+import { Loader2, UserPlus } from 'lucide-react'; // Removed LogIn as it's not used
+import { registerUser } from '@/app/actions/auth'; 
 import Link from 'next/link';
 import { onAuthStateChanged } from 'firebase/auth';
 import { clientAuth } from '@/lib/firebase/config';
@@ -18,14 +18,15 @@ import { clientAuth } from '@/lib/firebase/config';
 export default function RegisterPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const [state, formAction, isPending] = useActionState(registerUser, null);
+  const [state, formAction, isFormPending] = useActionState(registerUser, null); // Renamed isPending to avoid conflict
   const [passwordsMatch, setPasswordsMatch] = useState(true);
+  const [, startTransition] = useTransition(); // Get startTransition
 
  useEffect(() => {
     // If user is already logged in, redirect them from register page
     const unsubscribe = onAuthStateChanged(clientAuth, (user) => {
       if (user) {
-        router.replace('/dashboard'); // Or wherever logged-in users should go
+        router.replace('/dashboard'); 
       }
     });
     return () => unsubscribe();
@@ -38,7 +39,6 @@ export default function RegisterPage() {
         description: state.message,
         duration: 5000,
       });
-      // Optionally redirect to login or a page saying "awaiting approval"
       // router.push('/login'); 
     } else if (state?.status === 'error') {
       toast({
@@ -65,7 +65,9 @@ export default function RegisterPage() {
       return;
     }
     setPasswordsMatch(true);
-    formAction(formData);
+    startTransition(() => { // Wrap formAction call
+      formAction(formData);
+    });
   };
 
   return (
@@ -97,8 +99,8 @@ export default function RegisterPage() {
               <Input id="confirmPassword" name="confirmPassword" type="password" placeholder="••••••••" required minLength={6}/>
               {!passwordsMatch && <p className="text-sm text-destructive mt-1">As senhas não coincidem.</p>}
             </div>
-            <Button type="submit" className="w-full text-lg py-3" disabled={isPending}>
-              {isPending ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <UserPlus className="mr-2 h-5 w-5" />}
+            <Button type="submit" className="w-full text-lg py-3" disabled={isFormPending}>
+              {isFormPending ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <UserPlus className="mr-2 h-5 w-5" />}
               Registrar
             </Button>
           </form>
