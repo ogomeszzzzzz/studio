@@ -12,6 +12,10 @@ interface AdminActionResult {
 }
 
 async function verifyAdmin(adminIdToken: string | null | undefined): Promise<boolean> {
+  console.log('[Admin Verification] Starting verification process...');
+  const expectedAdminEmailFromServer = process.env.ADMIN_EMAIL;
+  console.log(`[Admin Verification] Expected ADMIN_EMAIL from server env: '${expectedAdminEmailFromServer}'`);
+
   if (adminSDKInitializationError) {
     console.warn(`[Admin Verification] Cannot verify admin, Admin SDK not initialized: ${adminSDKInitializationError}`);
     return false;
@@ -26,19 +30,23 @@ async function verifyAdmin(adminIdToken: string | null | undefined): Promise<boo
     return false;
   }
   
-  const expectedAdminEmail = process.env.ADMIN_EMAIL;
-  if (!expectedAdminEmail) {
-    console.error('[Admin Verification] Failed: ADMIN_EMAIL environment variable is not set on the server.');
+  if (!expectedAdminEmailFromServer) {
+    console.error('[Admin Verification] Failed: ADMIN_EMAIL environment variable is NOT SET on the server. This is a critical configuration issue.');
     return false;
   }
 
   try {
+    console.log('[Admin Verification] Attempting to verify ID token...');
     const decodedToken = await adminAuth.verifyIdToken(adminIdToken);
-    if (decodedToken.email === expectedAdminEmail) {
-      console.log(`[Admin Verification] Success: Token email ${decodedToken.email} matches expected admin ${expectedAdminEmail}.`);
+    console.log(`[Admin Verification] ID Token decoded. Email from token: ${decodedToken.email}`);
+    
+    // Case-insensitive comparison for robustness, though emails are typically case-sensitive.
+    // However, for this specific admin check, it's safer.
+    if (decodedToken.email?.toLowerCase() === expectedAdminEmailFromServer.toLowerCase()) {
+      console.log(`[Admin Verification] Success: Token email '${decodedToken.email}' matches expected admin '${expectedAdminEmailFromServer}'.`);
       return true;
     }
-    console.warn(`[Admin Verification] Failed: Email mismatch. Token email: ${decodedToken.email}, Expected admin: ${expectedAdminEmail}`);
+    console.warn(`[Admin Verification] Failed: Email mismatch. Token email: '${decodedToken.email}', Expected admin: '${expectedAdminEmailFromServer}'`);
     return false;
   } catch (error) {
     console.error('[Admin Verification] Failed: Error verifying ID token:', error);
@@ -47,17 +55,20 @@ async function verifyAdmin(adminIdToken: string | null | undefined): Promise<boo
 }
 
 export async function getPendingUsers(adminIdToken: string): Promise<AdminActionResult> {
+  console.log('[Get Pending Users Action] Received request.');
   if (adminSDKInitializationError) {
     console.error(`[Get Pending Users Action] Admin SDK not initialized: ${adminSDKInitializationError}`);
     return { message: `Erro Crítico no Servidor: Falha na configuração do Firebase Admin. (Detalhe: ${adminSDKInitializationError})`, status: 'error' };
   }
-  if (!adminFirestore) {
-    const errorDetail = adminSDKInitializationError || "adminFirestore is null post-initialization check.";
-    console.error(`[Get Pending Users Action] Firebase Admin Firestore SDK not available: ${errorDetail}`);
-    return { message: `Erro Crítico no Servidor: Firestore Admin não está pronto. (Detalhe: ${errorDetail})`, status: 'error' };
+  if (!adminFirestore || !adminAuth) {
+    const errorDetail = adminSDKInitializationError || "adminFirestore or adminAuth is null post-initialization check.";
+    console.error(`[Get Pending Users Action] Firebase Admin SDK components not available: ${errorDetail}`);
+    return { message: `Erro Crítico no Servidor: Componentes do Firebase Admin não estão prontos. (Detalhe: ${errorDetail})`, status: 'error' };
   }
 
-  if (!await verifyAdmin(adminIdToken)) {
+  const isAdmin = await verifyAdmin(adminIdToken);
+  if (!isAdmin) {
+    console.warn('[Get Pending Users Action] Admin verification failed. Returning unauthorized.');
     return { message: 'Acesso não autorizado para buscar usuários pendentes.', status: 'error' };
   }
 
@@ -66,7 +77,7 @@ export async function getPendingUsers(adminIdToken: string): Promise<AdminAction
     const snapshot = await adminFirestore
       .collection('users')
       .where('pendingApproval', '==', true)
-      .where('isApproved', '==', false) // Explicitly check for isApproved: false
+      .where('isApproved', '==', false) 
       .orderBy('createdAt', 'asc')
       .get();
 
@@ -78,23 +89,22 @@ export async function getPendingUsers(adminIdToken: string): Promise<AdminAction
     const users: UserProfile[] = snapshot.docs.map(doc => {
         const data = doc.data();
         let createdAtDate : Date | undefined = undefined;
-        if (data.createdAt && data.createdAt instanceof Timestamp) {
-            createdAtDate = data.createdAt.toDate();
-        } else if (data.createdAt) { 
-            try { 
-              // Handle potential string or number timestamps from older data if necessary
-              const tsSeconds = (data.createdAt as any).seconds || (typeof data.createdAt === 'number' ? data.createdAt / 1000 : null);
-              if (tsSeconds) {
-                createdAtDate = new Date(tsSeconds * 1000);
-              } else if (typeof data.createdAt === 'string' && !isNaN(new Date(data.createdAt).getTime())) {
+        // Robust date parsing
+        if (data.createdAt) {
+            if (data.createdAt instanceof Timestamp) {
+                createdAtDate = data.createdAt.toDate();
+            } else if (typeof data.createdAt === 'object' && 'seconds' in data.createdAt && typeof (data.createdAt as any).seconds === 'number') {
+                 createdAtDate = new Date((data.createdAt as any).seconds * 1000);
+            } else if (typeof data.createdAt === 'string' && !isNaN(new Date(data.createdAt).getTime())) {
+                 createdAtDate = new Date(data.createdAt);
+            } else if (typeof data.createdAt === 'number') { // Handle plain number timestamps (e.g., milliseconds)
                 createdAtDate = new Date(data.createdAt);
-              }
-            } catch(e) { console.warn("Error parsing createdAt from Firestore data:", data.createdAt, e)}
+            }
         }
 
         return {
             uid: doc.id,
-            name: data.name || 'N/A', // Fallback for name
+            name: data.name || 'N/A', 
             email: data.email,
             isApproved: data.isApproved,
             pendingApproval: data.pendingApproval,
@@ -110,6 +120,7 @@ export async function getPendingUsers(adminIdToken: string): Promise<AdminAction
 }
 
 export async function approveUser(adminIdToken: string, userIdToApprove: string): Promise<AdminActionResult> {
+  console.log(`[Approve User Action] Received request to approve user ID: ${userIdToApprove}`);
   if (adminSDKInitializationError) {
     console.error(`[Approve User Action] Admin SDK not initialized: ${adminSDKInitializationError}`);
     return { message: `Erro Crítico no Servidor: Falha na configuração do Firebase Admin. (Detalhe: ${adminSDKInitializationError})`, status: 'error' };
@@ -120,11 +131,14 @@ export async function approveUser(adminIdToken: string, userIdToApprove: string)
     return { message: `Erro Crítico no Servidor: Componentes do Firebase Admin não estão prontos. (Detalhe: ${errorDetail})`, status: 'error' };
   }
 
-  if (!await verifyAdmin(adminIdToken)) {
+  const isAdmin = await verifyAdmin(adminIdToken);
+  if (!isAdmin) {
+    console.warn('[Approve User Action] Admin verification failed. Returning unauthorized.');
     return { message: 'Acesso não autorizado para aprovar usuário.', status: 'error' };
   }
   
   if (!userIdToApprove) {
+    console.warn('[Approve User Action] User ID to approve is missing.');
     return { message: 'ID do usuário para aprovação é obrigatório.', status: 'error' };
   }
 
@@ -133,7 +147,7 @@ export async function approveUser(adminIdToken: string, userIdToApprove: string)
     const userDocRef = adminFirestore.collection('users').doc(userIdToApprove);
     await userDocRef.update({
       isApproved: true,
-      pendingApproval: false, // Explicitly set pendingApproval to false
+      pendingApproval: false, 
     });
     console.log(`[Approve User Action] User ${userIdToApprove} approved successfully.`);
     return { message: 'Usuário aprovado com sucesso!', status: 'success' };
