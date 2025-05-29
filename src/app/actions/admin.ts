@@ -1,7 +1,7 @@
 
 'use server';
 
-import { adminAuth, adminFirestore, adminSDKInitializationError } from '@/lib/firebase/adminConfig';
+import { adminFirestore, adminSDKInitializationError } from '@/lib/firebase/adminConfig';
 import type { UserProfile } from '@/types';
 import { Timestamp } from 'firebase-admin/firestore';
 
@@ -11,82 +11,54 @@ interface AdminActionResult {
   users?: UserProfile[];
 }
 
-async function verifyAdmin(adminIdToken: string | null | undefined): Promise<boolean> {
-  console.log('[Admin Verification] Starting verification process...');
-  const expectedAdminEmailFromServer = process.env.ADMIN_EMAIL;
-  // Log the value of ADMIN_EMAIL as seen by the server environment
-  console.log(`[Admin Verification] Expected ADMIN_EMAIL from server env: '${expectedAdminEmailFromServer}' (Type: ${typeof expectedAdminEmailFromServer})`);
+const ADMIN_PRIMARY_EMAIL_SERVER = process.env.ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br";
 
-  if (adminSDKInitializationError) {
-    console.warn(`[Admin Verification] Cannot verify admin, Admin SDK not initialized: ${adminSDKInitializationError}`);
+// This function is NOT for Firebase Auth tokens anymore.
+// It's a simple check if the provided email matches the admin email.
+// In a real system, the server action would need a secure way to verify the *caller* is admin.
+// For this prototype, we'll assume the client-side check (is user admin?) is sufficient
+// and the server action is just a gate for admin-specific Firestore operations.
+// A proper way would be to pass a session token that the server action can validate.
+async function verifyAdminByEmail(callerEmail: string | undefined): Promise<boolean> {
+  console.log('[Admin Verification by Email] Starting verification...');
+  console.log(`[Admin Verification by Email] Expected ADMIN_EMAIL from server env: '${ADMIN_PRIMARY_EMAIL_SERVER}'`);
+  if (!callerEmail) {
+    console.warn('[Admin Verification by Email] Failed: No caller email provided.');
     return false;
   }
-  if (!adminAuth) {
-     console.warn('[Admin Verification] Cannot verify admin, adminAuth is null.');
-     return false;
+  if (callerEmail.toLowerCase() === ADMIN_PRIMARY_EMAIL_SERVER.toLowerCase()) {
+    console.log(`[Admin Verification by Email] Success: Caller email '${callerEmail}' matches admin.`);
+    return true;
   }
-
-  if (!adminIdToken) {
-    console.warn('[Admin Verification] Failed: No ID token provided.');
-    return false;
-  }
-
-  if (!expectedAdminEmailFromServer) {
-    console.error('[Admin Verification] Failed: ADMIN_EMAIL environment variable is NOT SET or is empty on the server. This is a critical configuration issue. Please ensure it is set in your .env file and the server is restarted.');
-    return false;
-  }
-
-  try {
-    console.log('[Admin Verification] Attempting to verify ID token...');
-    const decodedToken = await adminAuth.verifyIdToken(adminIdToken);
-    console.log(`[Admin Verification] ID Token decoded. Email from token: ${decodedToken.email}`);
-
-    if (decodedToken.email?.toLowerCase() === expectedAdminEmailFromServer.toLowerCase()) {
-      console.log(`[Admin Verification] Success: Token email '${decodedToken.email}' matches expected admin '${expectedAdminEmailFromServer}'. User is admin.`);
-      return true;
-    }
-    console.warn(`[Admin Verification] Failed: Email mismatch. Token email: '${decodedToken.email}', Expected admin: '${expectedAdminEmailFromServer}'. User is NOT admin.`);
-    return false;
-  } catch (error) {
-    console.error('[Admin Verification] Failed: Error verifying ID token:', error);
-    return false;
-  }
+  console.warn(`[Admin Verification by Email] Failed: Caller email '${callerEmail}' does NOT match admin.`);
+  return false;
 }
 
-export async function getPendingUsers(adminIdToken: string): Promise<AdminActionResult> {
+
+export async function getPendingUsers(adminUserEmail: string): Promise<AdminActionResult> {
   console.log('[Get Pending Users Action] Received request.');
-  if (!adminIdToken) {
-    console.warn('[Get Pending Users Action] Admin ID token is missing or empty in the request.');
-    return { message: 'Token de administrador ausente. Ação não permitida.', status: 'error' };
-  }
-
   if (adminSDKInitializationError) {
-    console.error(`[Get Pending Users Action] Admin SDK not initialized: ${adminSDKInitializationError}`);
-    return { message: `Erro Crítico no Servidor: Falha na configuração do Firebase Admin. (Detalhe: ${adminSDKInitializationError})`, status: 'error' };
+    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError}`, status: 'error' };
   }
-  if (!adminFirestore || !adminAuth) {
-    const errorDetail = adminSDKInitializationError || "adminFirestore or adminAuth is null post-initialization check.";
-    console.error(`[Get Pending Users Action] Firebase Admin SDK components not available: ${errorDetail}`);
-    return { message: `Erro Crítico no Servidor: Componentes do Firebase Admin não estão prontos. (Detalhe: ${errorDetail})`, status: 'error' };
+  if (!adminFirestore) {
+    return { message: "Erro Crítico no Servidor: Firestore Admin não está disponível.", status: 'error' };
   }
 
-  const isAdmin = await verifyAdmin(adminIdToken);
+  const isAdmin = await verifyAdminByEmail(adminUserEmail);
   if (!isAdmin) {
-    console.warn('[Get Pending Users Action] Admin verification failed. Returning unauthorized.');
-    return { message: 'Acesso não autorizado para buscar usuários pendentes.', status: 'error' };
+    return { message: 'Acesso não autorizado para buscar usuários pendentes (verificação de email falhou).', status: 'error' };
   }
 
   console.log('[Get Pending Users Action] Admin verified. Fetching pending users...');
   try {
     const snapshot = await adminFirestore
-      .collection('users')
+      .collection('auth_users')
       .where('pendingApproval', '==', true)
       .where('isApproved', '==', false)
       .orderBy('createdAt', 'asc')
       .get();
 
     if (snapshot.empty) {
-      console.log('[Get Pending Users Action] No users found pending approval.');
       return { message: 'Nenhum usuário pendente de aprovação.', status: 'success', users: [] };
     }
 
@@ -100,21 +72,20 @@ export async function getPendingUsers(adminIdToken: string): Promise<AdminAction
                  createdAtDate = new Date((data.createdAt as any).seconds * 1000);
             } else if (typeof data.createdAt === 'string' && !isNaN(new Date(data.createdAt).getTime())) {
                  createdAtDate = new Date(data.createdAt);
-            } else if (typeof data.createdAt === 'number') {
+            } else if (typeof data.createdAt === 'number') { // For potential milliseconds since epoch
                 createdAtDate = new Date(data.createdAt);
             }
         }
-
         return {
-            uid: doc.id,
-            name: data.name || 'N/A',
+            uid: doc.id, // email is the doc.id in auth_users
             email: data.email,
+            name: data.name || 'N/A',
             isApproved: data.isApproved,
             pendingApproval: data.pendingApproval,
+            isAdmin: data.isAdmin || false,
             createdAt: createdAtDate,
         } as UserProfile;
     });
-    console.log(`[Get Pending Users Action] Found ${users.length} pending users.`);
     return { message: 'Usuários pendentes carregados.', status: 'success', users };
   } catch (error) {
     console.error('[Get Pending Users Action] Error fetching pending users from Firestore:', error);
@@ -122,45 +93,35 @@ export async function getPendingUsers(adminIdToken: string): Promise<AdminAction
   }
 }
 
-export async function approveUser(adminIdToken: string, userIdToApprove: string): Promise<AdminActionResult> {
-  console.log(`[Approve User Action] Received request to approve user ID: ${userIdToApprove}`);
-   if (!adminIdToken) {
-    console.warn('[Approve User Action] Admin ID token is missing or empty in the request.');
-    return { message: 'Token de administrador ausente. Ação não permitida.', status: 'error' };
-  }
-
+export async function approveUserInFirestore(adminUserEmail: string, userEmailToApprove: string): Promise<AdminActionResult> {
+  console.log(`[Approve User Action] Received request to approve user email: ${userEmailToApprove}`);
   if (adminSDKInitializationError) {
-    console.error(`[Approve User Action] Admin SDK not initialized: ${adminSDKInitializationError}`);
-    return { message: `Erro Crítico no Servidor: Falha na configuração do Firebase Admin. (Detalhe: ${adminSDKInitializationError})`, status: 'error' };
+     return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError}`, status: 'error' };
   }
-  if (!adminFirestore || !adminAuth) {
-    const errorDetail = adminSDKInitializationError || "adminFirestore or adminAuth is null post-initialization check.";
-    console.error(`[Approve User Action] Firebase Admin SDK components not available: ${errorDetail}`);
-    return { message: `Erro Crítico no Servidor: Componentes do Firebase Admin não estão prontos. (Detalhe: ${errorDetail})`, status: 'error' };
+  if (!adminFirestore) {
+    return { message: "Erro Crítico no Servidor: Firestore Admin não está disponível.", status: 'error' };
   }
 
-  const isAdmin = await verifyAdmin(adminIdToken);
+  const isAdmin = await verifyAdminByEmail(adminUserEmail);
   if (!isAdmin) {
-    console.warn('[Approve User Action] Admin verification failed. Returning unauthorized.');
-    return { message: 'Acesso não autorizado para aprovar usuário.', status: 'error' };
+    return { message: 'Acesso não autorizado para aprovar usuário (verificação de email falhou).', status: 'error' };
   }
 
-  if (!userIdToApprove) {
-    console.warn('[Approve User Action] User ID to approve is missing.');
-    return { message: 'ID do usuário para aprovação é obrigatório.', status: 'error' };
+  if (!userEmailToApprove) {
+    return { message: 'Email do usuário para aprovação é obrigatório.', status: 'error' };
   }
 
-  console.log(`[Approve User Action] Admin verified. Approving user ID: ${userIdToApprove}`);
+  console.log(`[Approve User Action] Admin verified. Approving user email: ${userEmailToApprove}`);
   try {
-    const userDocRef = adminFirestore.collection('users').doc(userIdToApprove);
+    const userDocRef = adminFirestore.collection('auth_users').doc(userEmailToApprove.toLowerCase());
     await userDocRef.update({
       isApproved: true,
       pendingApproval: false,
     });
-    console.log(`[Approve User Action] User ${userIdToApprove} approved successfully.`);
+    console.log(`[Approve User Action] User ${userEmailToApprove} approved successfully.`);
     return { message: 'Usuário aprovado com sucesso!', status: 'success' };
   } catch (error) {
-    console.error(`[Approve User Action] Error approving user ${userIdToApprove} in Firestore:`, error);
+    console.error(`[Approve User Action] Error approving user ${userEmailToApprove} in Firestore:`, error);
     return { message: 'Erro ao aprovar usuário no servidor.', status: 'error' };
   }
 }

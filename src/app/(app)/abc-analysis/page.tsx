@@ -6,8 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { ProductDataTableSection } from '@/components/domain/ProductDataTableSection';
 import type { Product } from '@/types';
-import { clientAuth, firestore } from '@/lib/firebase/config';
-import type { User } from 'firebase/auth';
+import { firestore } from '@/lib/firebase/config'; // No clientAuth needed here
 import { collection, getDocs, doc, Timestamp, query, getDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, BarChart, PieChartIcon as PieChartLucide, Filter, Download, Database, ListFilter, Clock } from 'lucide-react';
@@ -18,6 +17,7 @@ import { format as formatDateFns } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
 
 const productFromFirestore = (data: any): Product => {
   return {
@@ -40,41 +40,26 @@ export default function AbcAnalysisPage() {
   const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
   const [isCalculatingAbc, setIsCalculatingAbc] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const { currentUser } = useAuth(); // Get currentUser from AuthContext
   const { toast } = useToast();
   const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
   const [selectedAbcFilter, setSelectedAbcFilter] = useState<'ALL' | 'A' | 'B' | 'C' | 'N/A'>('ALL');
 
 
   useEffect(() => {
-    const unsubscribe = clientAuth.onAuthStateChanged((user) => {
-      setCurrentUser(user);
-      if (!user) {
-        setAllProducts([]);
-        setAbcAnalyzedProducts([]);
-        setLastDataUpdateTimestamp(null);
-        setIsLoadingFirestore(false);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (currentUser && allProducts.length === 0) {
+    if (currentUser && allProducts.length === 0 && !isLoadingFirestore) { // Only fetch if not already loading
       setIsLoadingFirestore(true);
       const fetchProducts = async () => {
         try {
-          const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
+          // Path using user's email
+          const productsColPath = `user_products/${currentUser.email}/uploaded_products`;
+          const productsCol = collection(firestore, productsColPath);
           const snapshot = await getDocs(query(productsCol));
-          const productsFromDb: Product[] = [];
-          snapshot.docs.forEach(docSnap => {
-            if (docSnap.id !== '_metadata') {
-              productsFromDb.push(productFromFirestore(docSnap.data()));
-            }
-          });
+          const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
           setAllProducts(productsFromDb);
 
-          const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
+          const metadataDocPath = `user_products/${currentUser.email}/_metadata`;
+          const metadataDocRef = doc(firestore, metadataDocPath);
           const metadataDocSnap = await getDoc(metadataDocRef);
           if (metadataDocSnap.exists()) {
             const data = metadataDocSnap.data();
@@ -94,9 +79,15 @@ export default function AbcAnalysisPage() {
       };
       fetchProducts();
     } else if (!currentUser) {
-      setIsLoadingFirestore(false);
+      setIsLoadingFirestore(false); // Not logged in, stop loading
+      setAllProducts([]);
+      setAbcAnalyzedProducts([]);
+      setLastDataUpdateTimestamp(null);
+    } else if (isLoadingFirestore && !currentUser) {
+        // If it's set to loading but there's no current user, stop loading.
+        setIsLoadingFirestore(false);
     }
-  }, [currentUser, allProducts.length, toast]);
+  }, [currentUser, allProducts.length, toast, isLoadingFirestore]);
 
   const performAbcAnalysis = useCallback((products: Product[]): Product[] => {
     if (products.length === 0) return [];
@@ -107,7 +98,7 @@ export default function AbcAnalysisPage() {
         ...p,
         revenue30d: (p.price || 0) * (p.sales30d || 0),
       }))
-      .filter(p => p.revenue30d > 0); // Consider only products with positive revenue
+      .filter(p => p.revenue30d > 0);
 
     if (productsWithRevenue.length === 0) {
         setIsCalculatingAbc(false);
@@ -135,7 +126,6 @@ export default function AbcAnalysisPage() {
       return { ...p, abcCurve: curve, cumulativeRevenuePercentage: cumulativePercentage };
     });
 
-    // Add back products with no revenue as N/A
     const productsWithoutRevenue = products
         .filter(p => (p.price || 0) * (p.sales30d || 0) <= 0)
         .map(p => ({...p, abcCurve: 'N/A' as const, revenue30d: 0, cumulativeRevenuePercentage: 0}));
@@ -271,7 +261,7 @@ export default function AbcAnalysisPage() {
   };
 
 
-  if (isLoadingFirestore) {
+  if (isLoadingFirestore && allProducts.length === 0) { // Check if products are truly not loaded yet
     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Carregando dados...</p></div>;
   }
 
@@ -446,8 +436,8 @@ export default function AbcAnalysisPage() {
             showSales30dColumn={true}
             showRevenue30dColumn={true}
             showAbcCurveColumn={true}
-            showStockColumn={true} // Keep stock for context
-            showCollectionColumn={true} // Keep collection for context
+            showStockColumn={true} 
+            showCollectionColumn={true} 
             itemsPerPage={15}
           />
         </>

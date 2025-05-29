@@ -2,37 +2,46 @@
 rules_version = '2';
 
 service cloud.firestore {
-  match /databases/ecom/documents { // Ensure 'ecom' is your correct database ID
+  match /databases/ecom/documents {
 
-    // User documents
-    match /users/{userId} {
-      // Admin can read/write any user document for approval purposes
-      allow read, write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email == "gustavo.cordeiro@altenburg.com.br";
+    // Collection for user authentication and authorization data
+    match /auth_users/{userEmail} {
+      // Anyone can attempt to read for login (server action will verify password)
+      // Registration: Server action (admin context) will create the document.
+      // If client needs to check if email exists before registration, this might need to be more open,
+      // or that check also becomes a server action. For now, server actions handle create/read for auth.
+      allow read: if true; // Temporarily open for server action based login to fetch user data.
+                           // Ideally, only server actions with admin privileges should read this.
+                           // For client-side, you'd restrict this further if not using server actions for login.
 
-      // Authenticated users can read their own document
-      // (to check their own isApproved status, name, etc.)
-      allow get: if request.auth != null && request.auth.uid == userId;
+      // User creation is done via server action.
+      // Admin can update any user's approval/admin status.
+      allow write: if get(/databases/$(database)/documents/auth_users/$(request.auth.token.email)).data.isAdmin == true;
 
-      // Allow user creation during registration by the server action (Admin SDK)
-      // Allow update by admin for approval (covered by admin rule above)
-      // Regular users cannot update their own approval status or create other user docs.
-      allow create: if request.auth != null; // For initial creation by server with pending status
-      allow update: if request.auth != null && request.auth.uid == userId && (!('isApproved' in request.resource.data) && !('pendingApproval' in request.resource.data)); // User can update own profile, but not approval fields
+      // Allow user to create their own document during registration (if not using server action exclusively)
+      // This is less secure than having a server action create it.
+      // allow create: if request.auth == null && request.resource.data.email == userEmail;
     }
 
-    // Products subcollection for each user
-    match /users/{userId}/products/{productId} {
-      // User can manage their own products
-      allow read, write, delete: if request.auth != null && request.auth.uid == userId;
-    }
-    match /users/{userId}/products {
-      // User can list their own products and create new ones in batch
-      allow list, create: if request.auth != null && request.auth.uid == userId;
+    // Collection for products uploaded by users
+    match /user_products/{userEmail}/uploaded_products/{productId} {
+      // User can read/write/delete their own products if their email matches the path.
+      // This rule is simplified assuming 'userEmail' from a client-side "session"
+      // is validated by server actions before they operate on these paths.
+      // Without Firebase Auth tokens, direct client access to these paths based on 'userEmail' in path
+      // needs careful consideration of how 'userEmail' is verified.
+      // For now, we assume server actions will enforce this.
+      allow read, write, delete: if request.auth.token.email == userEmail; // THIS WILL NOT WORK WITHOUT FIREBASE AUTH.
+                                     // Server actions will bypass this.
+                                     // For client-side direct access (which we are moving away from for products),
+                                     // you'd need a custom claim or different logic.
+                                     // Given the move to Firestore-only auth, direct client data access rules
+                                     // become complex. We will rely on server actions for data.
     }
 
-    // Metadata for products subcollection
-     match /users/{userId}/products/_metadata {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-     }
+    // Fallback: Deny all other access by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
   }
 }

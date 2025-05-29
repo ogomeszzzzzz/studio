@@ -1,23 +1,24 @@
 
 'use server';
 
-import { adminAuth, adminFirestore, adminSDKInitializationError } from '@/lib/firebase/adminConfig';
-import { Timestamp } from 'firebase-admin/firestore'; // Import Timestamp from admin SDK
+import { adminFirestore, adminSDKInitializationError } from '@/lib/firebase/adminConfig';
+import { Timestamp } from 'firebase-admin/firestore';
+import type { UserProfile } from '@/types';
 
 interface ActionResult {
   message: string;
   status: 'success' | 'error' | 'pending';
+  user?: UserProfile; // For login
 }
 
-export async function registerUser(prevState: any, formData: FormData): Promise<ActionResult> {
+const ADMIN_PRIMARY_EMAIL = process.env.ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br";
+
+export async function registerUserInFirestore(prevState: any, formData: FormData): Promise<ActionResult> {
   if (adminSDKInitializationError) {
-    console.error(`[Register User Action] Admin SDK not initialized: ${adminSDKInitializationError}`);
-    return { message: `Erro Crítico no Servidor: Falha na configuração do Firebase Admin. Por favor, contate o suporte. (Detalhe: ${adminSDKInitializationError})`, status: 'error' };
+    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError}`, status: 'error' };
   }
-  if (!adminAuth || !adminFirestore) {
-    const errorDetail = adminSDKInitializationError || "adminAuth or adminFirestore is null post-initialization check.";
-    console.error(`[Register User Action] Firebase Admin SDK not fully available: ${errorDetail}`);
-    return { message: `Erro Crítico no Servidor: Componentes do Firebase Admin não estão prontos. Por favor, contate o suporte. (Detalhe: ${errorDetail})`, status: 'error' };
+  if (!adminFirestore) {
+    return { message: "Erro Crítico no Servidor: Firestore Admin não está disponível.", status: 'error' };
   }
 
   const name = formData.get('name') as string;
@@ -32,46 +33,96 @@ export async function registerUser(prevState: any, formData: FormData): Promise<
   }
 
   try {
-    // Create user in Firebase Authentication
-    const userRecord = await adminAuth.createUser({
-      email: email,
-      password: password,
-      displayName: name,
-      disabled: false, 
-    });
+    const userDocRef = adminFirestore.collection('auth_users').doc(email.toLowerCase());
+    const userDoc = await userDocRef.get();
 
-    // Create user document in Firestore
-    const userDocRef = adminFirestore.collection('users').doc(userRecord.uid);
-    await userDocRef.set({
-      uid: userRecord.uid,
-      name: name,
-      email: email,
-      createdAt: Timestamp.now(), 
-      isApproved: false,
-      pendingApproval: true,
-    });
-
-    return { message: 'Registro realizado com sucesso! Sua conta está pendente de aprovação pelo administrador.', status: 'success' };
-  } catch (error: any) {
-    console.error('[Register User Action] Error registering user:', error);
-    let errorMessage = 'Ocorreu um erro ao registrar. Tente novamente.';
-    if (error.code === 'auth/email-already-exists') {
-      errorMessage = 'Este email já está registrado.';
-    } else if (error.code === 'auth/invalid-email') {
-      errorMessage = 'O formato do email é inválido.';
+    if (userDoc.exists) {
+      return { message: 'Este email já está registrado.', status: 'error' };
     }
-    return { message: errorMessage, status: 'error' };
+
+    const isAdmin = email.toLowerCase() === ADMIN_PRIMARY_EMAIL.toLowerCase();
+    const newUserProfile: UserProfile = {
+      uid: email.toLowerCase(), // Use email as UID
+      email: email.toLowerCase(),
+      name,
+      // ADVERTÊNCIA DE SEGURANÇA: Armazenando senha em texto plano. NÃO FAÇA ISSO EM PRODUÇÃO!
+      // A senha deve ser hasheada antes de ser armazenada.
+      // password: hashedPassword, // Exemplo se estivesse usando hash
+      password: password, // Temporário para atender ao pedido, mas inseguro.
+      isApproved: isAdmin, // Admin é aprovado automaticamente
+      pendingApproval: !isAdmin, // Não admin precisa de aprovação
+      isAdmin: isAdmin,
+      createdAt: Timestamp.now(),
+    };
+
+    await userDocRef.set(newUserProfile);
+
+    return {
+      message: isAdmin
+        ? 'Conta de administrador registrada e aprovada automaticamente!'
+        : 'Registro realizado com sucesso! Sua conta está pendente de aprovação pelo administrador.',
+      status: 'success'
+    };
+  } catch (error: any) {
+    console.error('[Register User Firestore Action] Error:', error);
+    return { message: `Ocorreu um erro ao registrar: ${error.message || 'Erro desconhecido'}.`, status: 'error' };
   }
 }
 
+export async function loginUserWithFirestore(prevState: any, formData: FormData): Promise<ActionResult> {
+  if (adminSDKInitializationError) {
+    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError}`, status: 'error' };
+  }
+  if (!adminFirestore) {
+    return { message: "Erro Crítico no Servidor: Firestore Admin não está disponível.", status: 'error' };
+  }
 
-export async function loginUserServerAction(prevState: any, formData: FormData) {
   const email = formData.get('email') as string;
   const password = formData.get('password') as string;
 
   if (!email || !password) {
     return { message: 'Email e senha são obrigatórios.', status: 'error' };
   }
-  console.log(`[Server Action - Login Placeholder] Tentativa de login para: ${email}`);
-  return { message: 'Processando login...', status: 'pending' };
+
+  try {
+    const userDocRef = adminFirestore.collection('auth_users').doc(email.toLowerCase());
+    const userDocSnap = await userDocRef.get();
+
+    if (!userDocSnap.exists) {
+      return { message: 'Email não encontrado.', status: 'error' };
+    }
+
+    const userData = userDocSnap.data() as UserProfile & { password?: string };
+
+    // ADVERTÊNCIA DE SEGURANÇA: Comparação de senha em texto plano.
+    // Em um sistema real, você compararia um hash da senha fornecida com o hash armazenado.
+    if (userData.password !== password) {
+      return { message: 'Senha incorreta.', status: 'error' };
+    }
+
+    if (!userData.isApproved && userData.pendingApproval) {
+      return { message: 'Sua conta está pendente de aprovação pelo administrador.', status: 'pending' };
+    }
+    
+    if (!userData.isApproved && !userData.pendingApproval) {
+      return { message: 'Sua conta não foi aprovada. Contate o administrador.', status: 'error'};
+    }
+
+    // Login bem-sucedido
+    const userProfileToReturn: UserProfile = {
+      uid: userData.uid,
+      email: userData.email,
+      name: userData.name,
+      isApproved: userData.isApproved,
+      pendingApproval: userData.pendingApproval,
+      isAdmin: userData.isAdmin,
+      createdAt: userData.createdAt ? (userData.createdAt as Timestamp).toDate() : new Date(), // Convert Timestamp
+    };
+
+    return { message: 'Login bem-sucedido!', status: 'success', user: userProfileToReturn };
+
+  } catch (error: any) {
+    console.error('[Login User Firestore Action] Error:', error);
+    return { message: `Erro no login: ${error.message || 'Erro desconhecido'}.`, status: 'error' };
+  }
 }

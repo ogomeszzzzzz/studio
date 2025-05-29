@@ -1,6 +1,6 @@
 
 export interface Product {
-  vtexId: string | number; // Can be string like "#N/D" or a number
+  vtexId: string | number;
   name: string;
   productId?: string | number;
   derivation?: string | number;
@@ -23,7 +23,7 @@ export interface Product {
   isDiscontinued: boolean;
   rawCollectionStartDate?: string;
   rawCollectionEndDate?: string;
-  canRestockAmount?: number; // For restock opportunities
+  canRestockAmount?: number;
 
   price?: number;
   sales30d?: number;
@@ -39,11 +39,13 @@ export interface FilterState {
   productType: string;
 }
 
+// Updated UserProfile for Firestore-based auth
 export interface UserProfile {
-  uid: string;
-  name?: string; // Added for registration
-  email: string | null;
-  createdAt?: Date; // Consider using Firestore Timestamp for this
-  isApproved?: boolean; // Added for approval system
-  pendingApproval?: boolean; // Added for approval system
+  uid: string; // Will be the user's email
+  email: string;
+  name: string;
+  isApproved: boolean;
+  pendingApproval: boolean;
+  isAdmin: boolean;
+  createdAt?: Date | any; // Firestore Timestamp will be stored, Date on client
 }

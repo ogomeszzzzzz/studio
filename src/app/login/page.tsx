@@ -2,108 +2,64 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useActionState } from 'react';
 import { useRouter } from 'next/navigation';
-import { signInWithEmailAndPassword, onAuthStateChanged, type User as FirebaseUser } from 'firebase/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { clientAuth } from '@/lib/firebase/config';
 import { LogIn, Loader2, UserPlus } from 'lucide-react';
 import Link from 'next/link';
+import { loginUserWithFirestore } from '@/app/actions/auth';
+import { useAuth } from '@/contexts/AuthContext';
+import type { UserProfile } from '@/types';
 
+const initialLoginState = { message: '', status: '' as 'success' | 'error' | 'pending' | '', user: undefined as UserProfile | undefined };
 
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const [isLoading, setIsLoading] = useState(false);
+  const { setCurrentUser, currentUser: contextUser, isLoading: authLoading } = useAuth();
+  const [state, formAction, isFormPending] = useActionState(loginUserWithFirestore, initialLoginState);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(clientAuth, (user) => {
-      if (user) {
-        // O layout (app)/layout.tsx cuidará da verificação de aprovação e redirecionamento para dashboard
-        // ou para a tela de pendente. Se o usuário está logado, ele não deve estar na página de login.
-        router.replace('/dashboard');
-      }
-    });
-    return () => unsubscribe();
-  }, [router]);
-
-
-  const handleClientFirebaseLogin = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setIsLoading(true);
-    
-    const formData = new FormData(event.currentTarget);
-    const email = formData.get('email') as string;
-    const password = formData.get('password') as string;
-    
-    if (!email || !password) {
-      toast({ title: 'Erro de Validação', description: 'Email e senha são obrigatórios.', variant: 'destructive' });
-      setIsLoading(false);
-      return;
+    if (contextUser && contextUser.isApproved) {
+      router.replace('/dashboard');
     }
+  }, [contextUser, router]);
 
-    try {
-      await signInWithEmailAndPassword(clientAuth, email, password);
-      // Se o login for bem-sucedido, o onAuthStateChanged listener (no useEffect acima)
-      // irá detectar a mudança de estado e redirecionar para /dashboard.
-      // Adicionamos um toast aqui para feedback imediato.
-      toast({ title: 'Login Bem-sucedido', description: 'Verificando status da conta...' });
-      // O setIsLoading(false) não é estritamente necessário aqui porque a navegação deve ocorrer,
-      // desmontando o componente ou o estado de carregamento será interrompido pela mudança de página.
-      // Mas é bom ter em caso de falha no redirecionamento por algum motivo inesperado.
-    } catch (e: unknown) {
-      setIsLoading(false);
-      let errorMessage = 'Falha no login. Verifique suas credenciais.';
-      let consoleLogFn: 'error' | 'warn' = 'error';
-      let logMessagePrefix = 'Login error:';
-
-      // Check if 'e' is an object and has a 'code' property (typical for Firebase errors)
-      if (e && typeof e === 'object' && 'code' in e) {
-        const firebaseError = e as { code: string; message?: string }; // Type assertion
-        logMessagePrefix = `Firebase login attempt failed (${firebaseError.code}):`;
-        switch (firebaseError.code) {
-          case 'auth/user-not-found':
-          case 'auth/wrong-password':
-          case 'auth/invalid-credential':
-            errorMessage = 'Email ou senha inválidos.';
-            consoleLogFn = 'warn';
-            break;
-          case 'auth/user-disabled':
-            errorMessage = 'Esta conta está desabilitada.';
-            consoleLogFn = 'warn';
-            break;
-          case 'auth/invalid-email':
-             errorMessage = 'O formato do email é inválido.';
-             consoleLogFn = 'warn';
-             break;
-          default:
-            errorMessage = `Erro: ${firebaseError.message || 'Erro desconhecido ao tentar logar.'}`;
-            break;
-        }
-      } else if (e instanceof Error) {
-        errorMessage = e.message;
-        logMessagePrefix = 'Generic login error:';
-      } else {
-        logMessagePrefix = 'Unknown login error structure:';
-      }
-
-      if (consoleLogFn === 'warn') {
-        console.warn(logMessagePrefix, e);
-      } else {
-        console.error(logMessagePrefix, e);
-      }
-
-      toast({
-        title: 'Erro de Login',
-        description: errorMessage,
-        variant: 'destructive'
-      });
+  useEffect(() => {
+    if (state.status === 'success' && state.user) {
+      toast({ title: 'Login Bem-sucedido!', description: state.message });
+      setCurrentUser(state.user); // This will trigger redirect via contextUser change
+    } else if (state.status === 'error') {
+      toast({ title: 'Erro de Login', description: state.message, variant: 'destructive' });
+    } else if (state.status === 'pending') {
+      toast({ title: 'Conta Pendente', description: state.message, variant: 'default' });
     }
-  };
-  
+  }, [state, toast, router, setCurrentUser]);
+
+  if (authLoading) {
+     return (
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="ml-4 text-lg text-foreground">Carregando...</p>
+      </div>
+    );
+  }
+
+  if (contextUser && contextUser.isApproved) {
+    // Already handled by useEffect, but good for initial render if fast
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="ml-4 text-lg text-foreground">Redirecionando...</p>
+      </div>
+    );
+  }
+
+
   return (
     <div className="flex items-center justify-center min-h-screen bg-background p-4">
       <Card className="w-full max-w-md shadow-xl">
@@ -115,29 +71,31 @@ export default function LoginPage() {
           <CardDescription>Faça login para acessar o Painel de Controle de Estoque e Ruptura do E-commerce.</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleClientFirebaseLogin} className="space-y-6">
+          <form action={formAction} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input 
-                id="email" 
-                name="email" 
-                type="email" 
-                placeholder="seu@email.com" 
-                required 
-                className="text-base py-3 px-4"/>
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                placeholder="seu@email.com"
+                required
+                className="text-base py-3 px-4"
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Senha</Label>
-              <Input 
-                id="password" 
-                name="password" 
-                type="password" 
+              <Input
+                id="password"
+                name="password"
+                type="password"
                 placeholder="••••••••"
-                required 
-                className="text-base py-3 px-4"/>
+                required
+                className="text-base py-3 px-4"
+              />
             </div>
-            <Button type="submit" className="w-full text-lg py-6" disabled={isLoading}>
-              {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <LogIn className="mr-2 h-5 w-5" />}
+            <Button type="submit" className="w-full text-lg py-6" disabled={isFormPending}>
+              {isFormPending ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <LogIn className="mr-2 h-5 w-5" />}
               Entrar
             </Button>
           </form>

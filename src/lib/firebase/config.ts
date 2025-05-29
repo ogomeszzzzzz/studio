@@ -1,10 +1,7 @@
 
 import { initializeApp, getApps, getApp, type FirebaseOptions } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+// Do NOT import getAuth from 'firebase/auth' here anymore
 import { getFirestore } from 'firebase/firestore';
-
-// CRITICAL: Ensure all these NEXT_PUBLIC_ environment variables are correctly set in your .env file
-// The error "auth/api-key-not-valid" specifically points to an issue with NEXT_PUBLIC_FIREBASE_API_KEY.
 
 console.log('[Firebase Client Config] Reading environment variables:');
 console.log('NEXT_PUBLIC_FIREBASE_API_KEY:', process.env.NEXT_PUBLIC_FIREBASE_API_KEY);
@@ -23,10 +20,9 @@ const firebaseConfig: FirebaseOptions = {
   storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID, // Optional
+  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
-// Initialize Firebase for client-side
 let clientApp;
 if (!getApps().length) {
   console.log('[Firebase Client Config] Initializing Firebase app...');
@@ -35,8 +31,6 @@ if (!getApps().length) {
     console.log('[Firebase Client Config] Firebase app initialized successfully.');
   } catch (error) {
     console.error('[Firebase Client Config] Error initializing Firebase app:', error);
-    console.error('[Firebase Client Config] Ensure all NEXT_PUBLIC_FIREBASE_... variables in your .env file are correct and the server was restarted after changes.');
-    // Rethrow or handle as appropriate for your app's error strategy
     throw error;
   }
 } else {
@@ -44,10 +38,9 @@ if (!getApps().length) {
   console.log('[Firebase Client Config] Firebase app already initialized, getting existing app.');
 }
 
-const clientAuth = getAuth(clientApp);
-// Explicitly connect to the 'ecom' database
+// const clientAuth = getAuth(clientApp); // REMOVED: We are not using Firebase Auth client SDK anymore
 const firestore = getFirestore(clientApp, "ecom");
-console.log('[Firebase Client Config] Attempting to connect to Firestore database ID: ecom');
+console.log('[Firebase Client Config] Connected to Firestore database ID: ecom');
 
 
-export { clientApp, clientAuth, firestore };
+export { clientApp, firestore }; // REMOVED clientAuth from exports

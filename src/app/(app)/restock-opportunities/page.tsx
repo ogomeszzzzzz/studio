@@ -12,17 +12,12 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import * as XLSX from 'xlsx';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { clientAuth, firestore } from '@/lib/firebase/config';
-import type { User } from 'firebase/auth';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { firestore } from '@/lib/firebase/config';
 import { collection, getDocs, doc, Timestamp, query, getDoc } from 'firebase/firestore';
 import { format as formatDateFns } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
 
 
 const ALL_COLLECTIONS_VALUE = "_ALL_COLLECTIONS_";
@@ -42,59 +37,41 @@ export default function RestockOpportunitiesPage() {
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
   const [baseFilters, setBaseFilters] = useState<FilterState | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // For filtering logic
   const [isExporting, setIsExporting] = useState(false);
   const [lowStockThreshold, setLowStockThreshold] = useState<string>(DEFAULT_LOW_STOCK_THRESHOLD.toString());
   const { toast } = useToast();
   const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
 
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [isLoadingFirestore, setIsLoadingFirestore] = useState(true); // Start as true
+  const { currentUser } = useAuth(); // Get currentUser from AuthContext
+  const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
+
 
   useEffect(() => {
-    const unsubscribe = clientAuth.onAuthStateChanged((user) => {
-      setCurrentUser(user);
-       if (!user) {
-        setAllProducts([]);
-        setFilteredProducts([]);
-        setLastDataUpdateTimestamp(null);
-        setIsLoadingFirestore(false);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (currentUser && allProducts.length === 0 && !isLoading) { // ensure not already loading general data
-      console.log(`RestockOpportunitiesPage: Fetching products for user UID: ${currentUser.uid} because allProducts is empty.`);
+    if (currentUser && allProducts.length === 0 && !isLoadingFirestore) {
+      console.log(`RestockOpportunitiesPage: Fetching products for user email: ${currentUser.email} because allProducts is empty.`);
       setIsLoadingFirestore(true);
       const fetchProducts = async () => {
         try {
-          const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
+          const productsColPath = `user_products/${currentUser.email}/uploaded_products`;
+          const productsCol = collection(firestore, productsColPath);
           const snapshot = await getDocs(query(productsCol));
-          const productsFromDb: Product[] = [];
-          snapshot.docs.forEach(docSnap => { // Renamed doc to docSnap to avoid conflict
-            if (docSnap.id !== '_metadata') {
-                productsFromDb.push(productFromFirestore(docSnap.data()));
-            }
-          });
+          const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
+          
           setAllProducts(productsFromDb);
 
-          const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
+          const metadataDocPath = `user_products/${currentUser.email}/_metadata`;
+          const metadataDocRef = doc(firestore, metadataDocPath);
           const metadataDocSnap = await getDoc(metadataDocRef);
           if (metadataDocSnap.exists()) {
             const data = metadataDocSnap.data();
             if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
               setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
             }
-          } else {
-             setLastDataUpdateTimestamp(null);
           }
-
-           if (productsFromDb.length > 0) {
+          if (productsFromDb.length > 0) {
             toast({ title: "Dados Carregados", description: "Dados de produtos carregados do banco de dados." });
           }
-          // No "no data" toast here, let the UI handle it
         } catch (error) {
           console.error("Error fetching products from Firestore (Restock):", error);
           toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${(error as Error).message}`, variant: "destructive" });
@@ -103,30 +80,15 @@ export default function RestockOpportunitiesPage() {
         }
       };
       fetchProducts();
-    } else if (currentUser && allProducts.length > 0) {
-        console.log(`RestockOpportunitiesPage: Products already loaded for user UID: ${currentUser.uid}. Skipping fetch.`);
-        setIsLoadingFirestore(false);
-        if (!lastDataUpdateTimestamp) {
-          const fetchTimestamp = async () => {
-            try {
-              const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
-              const metadataDocSnap = await getDoc(metadataDocRef);
-              if (metadataDocSnap.exists()) {
-                const data = metadataDocSnap.data();
-                if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
-                  setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
-                }
-              }
-            } catch (tsError) {
-              console.warn("Could not fetch last update timestamp on subsequent load (Restock):", tsError);
-            }
-          };
-          fetchTimestamp();
-        }
     } else if (!currentUser) {
+      setIsLoadingFirestore(false);
+      setAllProducts([]);
+      setFilteredProducts([]);
+      setLastDataUpdateTimestamp(null);
+    } else if (isLoadingFirestore && !currentUser) {
         setIsLoadingFirestore(false);
     }
-  }, [currentUser, allProducts.length, isLoading, toast, lastDataUpdateTimestamp]); // Added isLoading to dependencies
+  }, [currentUser, allProducts.length, toast, isLoadingFirestore]);
 
 
   const availableCollections = useMemo(() => {
@@ -140,14 +102,19 @@ export default function RestockOpportunitiesPage() {
   }, [allProducts]);
 
   const applyAllFilters = useCallback(() => {
-    if (isLoadingFirestore) return;
+    if (isLoadingFirestore || !allProducts.length) { // Don't filter if still loading or no products
+        if (!isLoadingFirestore && allProducts.length === 0){
+            setFilteredProducts([]); // Clear if no products at all
+        }
+        return;
+    }
 
-    setIsLoading(true);
+    setIsLoading(true); // For feedback on filtering action
     console.log("Applying filters with baseFilters:", baseFilters, "lowStockThreshold:", lowStockThreshold);
     let tempFiltered = [...allProducts];
     const effectiveThreshold = parseInt(lowStockThreshold, 10);
-
     const currentThreshold = isNaN(effectiveThreshold) || lowStockThreshold.trim() === '' ? DEFAULT_LOW_STOCK_THRESHOLD : effectiveThreshold;
+
     if (isNaN(effectiveThreshold) && lowStockThreshold.trim() !== '') {
         toast({ title: "Aviso", description: `Limite de baixo estoque inválido, usando padrão: ${DEFAULT_LOW_STOCK_THRESHOLD}.`, variant: "default" });
     }
@@ -193,10 +160,10 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-   if(!isLoadingFirestore && allProducts.length > 0) { // Ensure allProducts is populated before applying filters
+   if(!isLoadingFirestore && allProducts.length > 0) {
     applyAllFilters();
    } else if (!isLoadingFirestore && allProducts.length === 0) {
-    setFilteredProducts([]); // Clear filtered products if no base data
+    setFilteredProducts([]);
    }
   }, [allProducts, lowStockThreshold, baseFilters, applyAllFilters, isLoadingFirestore]);
 
@@ -262,39 +229,6 @@ export default function RestockOpportunitiesPage() {
     applyAllFilters();
   }
 
-  const getCollectionStatus = (product: Product): { text: string } => {
-    const today = new Date();
-    today.setHours(0,0,0,0);
-    let endDate: Date | null = null;
-    if (product.collectionEndDate instanceof Date && !isNaN(product.collectionEndDate.getTime())) {
-      endDate = product.collectionEndDate;
-    } else if (typeof product.collectionEndDate === 'string') {
-      const parsedDate = new Date(product.collectionEndDate);
-      if (!isNaN(parsedDate.getTime())) endDate = parsedDate;
-    }
-
-    if (endDate) {
-      endDate.setHours(0,0,0,0);
-      if (endDate < today) {
-        return product.stock > 0
-          ? { text: 'Coleção Passada (Em Estoque)' }
-          : { text: 'Coleção Passada (Sem Estoque)' };
-      }
-      const thirtyDaysFromNow = new Date(today);
-      thirtyDaysFromNow.setDate(today.getDate() + 30);
-      if (endDate < thirtyDaysFromNow) {
-        return { text: 'Próximo ao Fim' };
-      }
-    }
-    if (product.isCurrentCollection === false && product.stock > 0) {
-       return { text: 'Não Atual (Em Estoque)' };
-    }
-    if (product.isCurrentCollection === true) {
-      return { text: 'Coleção Atual' };
-    }
-    return { text: 'Status N/A' };
-  };
-
 
   return (
     <div className="space-y-6">
@@ -319,7 +253,7 @@ export default function RestockOpportunitiesPage() {
       )}
 
 
-      {(isLoadingFirestore && allProducts.length === 0) && ( // Show loading only if fetching initial data
+      {(isLoadingFirestore && allProducts.length === 0) && (
          <Card className="shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center">
@@ -393,12 +327,12 @@ export default function RestockOpportunitiesPage() {
                     </div>
                     <div className="md:col-span-2">
                         <Button onClick={handleApplyMainFilters} className="w-full py-2.5 text-base" disabled={isLoading || isLoadingFirestore}>
-                            {isLoading && !isLoadingFirestore ? ( // Show loading only for filter application
+                            {(isLoading && !isLoadingFirestore) ? (
                                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                             ) : (
                                 <Filter className="mr-2 h-5 w-5" />
                             )}
-                            {isLoading && !isLoadingFirestore ? 'Analisando...' : 'Analisar Oportunidades'}
+                            {(isLoading && !isLoadingFirestore) ? 'Analisando...' : 'Analisar Oportunidades'}
                         </Button>
                     </div>
                 </div>
@@ -463,7 +397,7 @@ export default function RestockOpportunitiesPage() {
 
                 <ProductDataTableSection
                     products={filteredProducts}
-                    isLoading={(isLoading && !isLoadingFirestore) && filteredProducts.length === 0 && allProducts.length > 0} // More specific loading for table
+                    isLoading={(isLoading && !isLoadingFirestore) && filteredProducts.length === 0 && allProducts.length > 0}
                     cardIcon={PackageSearch}
                     cardTitle="Produtos com Oportunidade de Reabastecimento"
                     cardDescription="Lista de produtos com baixo estoque, disponibilidade em 'Pronta Entrega' ou 'Regulador', e sem 'Pedidos em Aberto'. Clique nos cabeçalhos para ordenar."
@@ -477,7 +411,7 @@ export default function RestockOpportunitiesPage() {
                     showCanRestockAmountColumn={true}
                     lowStockThresholdForRestock={parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD}
                     showCollectionColumn={true}
-                    showDescriptionColumn={false}
+                    showDescriptionColumn={false} 
                     showSizeColumn={true}
                     showProductTypeColumn={true}
                     showStatusColumn={true}
@@ -509,23 +443,29 @@ export default function RestockOpportunitiesPage() {
   );
 }
 
-// Helper function for getCollectionStatus (can be moved to utils)
+// Helper function for getCollectionStatus
 const getCollectionStatus = (product: Product): { text: string; variant: 'default' | 'secondary' | 'destructive' | 'outline', colorClass?: string } => {
   const today = new Date();
   today.setHours(0,0,0,0);
 
   const endDateInput = product.collectionEndDate;
-
   let endDate: Date | null = null;
+  // Check if endDateInput is a valid Date object
   if (endDateInput instanceof Date && !isNaN(endDateInput.getTime())) {
-    endDate = endDateInput;
-  } else if (typeof endDateInput === 'string') {
-    const parsedDate = new Date(endDateInput);
+    endDate = new Date(endDateInput.valueOf()); 
+  } else if (typeof endDateInput === 'string') { // Check if it's a string
+    const parsedDate = new Date(endDateInput); // Try parsing common date string formats
     if (!isNaN(parsedDate.getTime())) {
       endDate = parsedDate;
     }
   }
-
+  // Add check for Excel date numbers (less common if cellDates:true is used in parser, but good fallback)
+  else if (typeof endDateInput === 'number' && !isNaN(endDateInput)) { 
+      // Excel date to JS Date conversion (approximate, assumes date is number of days since 1899-12-30)
+      const excelBaseDate = new Date(Date.UTC(1899, 11, 30)); // Excel's epoch
+      const d = new Date(excelBaseDate.getTime() + endDateInput * 24 * 60 * 60 * 1000);
+      if (!isNaN(d.getTime())) endDate = d;
+  }
 
 
   if (endDate && !isNaN(endDate.getTime())) {
@@ -550,4 +490,3 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
   }
   return { text: 'Status N/A', variant: 'outline' };
 };
-

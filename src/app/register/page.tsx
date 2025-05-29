@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect, useState, useTransition } from 'react'; // Added useTransition
+import { useEffect, useState, useTransition } from 'react';
 import { useActionState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -9,28 +9,27 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, UserPlus } from 'lucide-react'; // Removed LogIn as it's not used
-import { registerUser } from '@/app/actions/auth'; 
+import { Loader2, UserPlus } from 'lucide-react';
+import { registerUserInFirestore } from '@/app/actions/auth';
 import Link from 'next/link';
-import { onAuthStateChanged } from 'firebase/auth';
-import { clientAuth } from '@/lib/firebase/config';
+import { useAuth } from '@/contexts/AuthContext';
+
+
+const initialRegisterState = { message: '', status: '' as 'success' | 'error' | 'pending' | '' };
 
 export default function RegisterPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const [state, formAction, isFormPending] = useActionState(registerUser, null); // Renamed isPending to avoid conflict
+  const [state, formAction, isFormPending] = useActionState(registerUserInFirestore, initialRegisterState);
   const [passwordsMatch, setPasswordsMatch] = useState(true);
-  const [, startTransition] = useTransition(); // Get startTransition
+  const [, startTransition] = useTransition();
+  const { currentUser: contextUser, isLoading: authLoading } = useAuth();
 
  useEffect(() => {
-    // If user is already logged in, redirect them from register page
-    const unsubscribe = onAuthStateChanged(clientAuth, (user) => {
-      if (user) {
-        router.replace('/dashboard'); 
-      }
-    });
-    return () => unsubscribe();
-  }, [router]);
+    if (contextUser && contextUser.isApproved) {
+      router.replace('/dashboard');
+    }
+  }, [contextUser, router]);
 
   useEffect(() => {
     if (state?.status === 'success') {
@@ -39,7 +38,8 @@ export default function RegisterPage() {
         description: state.message,
         duration: 5000,
       });
-      // router.push('/login'); 
+       // Optionally redirect to login or a specific "pending approval" info page
+       router.push('/login');
     } else if (state?.status === 'error') {
       toast({
         title: 'Erro no Registro',
@@ -65,10 +65,28 @@ export default function RegisterPage() {
       return;
     }
     setPasswordsMatch(true);
-    startTransition(() => { // Wrap formAction call
+    startTransition(() => {
       formAction(formData);
     });
   };
+  
+  if (authLoading) {
+     return (
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="ml-4 text-lg text-foreground">Carregando...</p>
+      </div>
+    );
+  }
+  if (contextUser && contextUser.isApproved) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="ml-4 text-lg text-foreground">Redirecionando...</p>
+      </div>
+    );
+  }
+
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-background p-4">

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import {
   ShoppingBag, AlertTriangle, FileSpreadsheet,
   Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler,
-  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon, ListFilter, Clock, BarChartHorizontal, SearchIcon
+  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon as PieChartLucide, ListFilter, Clock, BarChartHorizontal, SearchIcon
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -19,12 +19,12 @@ import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import autoTable from 'jspdf-autotable';
-import { clientAuth, firestore } from '@/lib/firebase/config';
-import type { User } from 'firebase/auth';
+import { firestore } from '@/lib/firebase/config'; // No clientAuth needed here for data
 import { collection, getDocs, writeBatch, doc, Timestamp, query, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { Tooltip as ShadTooltip, TooltipContent as ShadTooltipContent, TooltipProvider as ShadTooltipProvider, TooltipTrigger as ShadTooltipTrigger } from "@/components/ui/tooltip";
 import { format as formatDateFns } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
 
 interface AggregatedCollectionData {
   name: string;
@@ -62,8 +62,7 @@ interface CollectionSkuStatusData {
 
 
 const ALL_COLLECTIONS_VALUE = "_ALL_DASHBOARD_COLLECTIONS_";
-const ALL_ID_STATUS_VALUE = "_ALL_ID_STATUS_";
-const FIRESTORE_BATCH_LIMIT = 450;
+const FIRESTORE_BATCH_LIMIT = 450; // Firestore batch limit
 
 const chartConfigBase = {
   stock: {
@@ -100,6 +99,7 @@ const chartConfigBase = {
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
 const PIE_COLORS = ["hsl(var(--primary))", "hsl(var(--destructive))"];
 
+// Helper function to convert Firestore Timestamps to Dates and vice-versa
 const productToFirestore = (product: Product): any => {
   return {
     ...product,
@@ -123,50 +123,36 @@ export default function DashboardPage() {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const { toast } = useToast();
 
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const { currentUser } = useAuth(); // Get currentUser from AuthContext
   const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
   const [isSavingFirestore, setIsSavingFirestore] = useState(false);
   const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
 
   const [selectedCollection, setSelectedCollection] = useState<string>(ALL_COLLECTIONS_VALUE);
-  const [vtexIdStatusFilterDashboard, setVtexIdStatusFilterDashboard] = useState<string>(ALL_ID_STATUS_VALUE);
 
 
   useEffect(() => {
-    const unsubscribe = clientAuth.onAuthStateChanged((user) => {
-      setCurrentUser(user);
-      if (!user) {
-        setDashboardProducts([]);
-        setLastDataUpdateTimestamp(null);
-        setIsLoadingFirestore(false);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (currentUser && dashboardProducts.length === 0 && !isSavingFirestore) {
-      console.log(`DashboardPage: Attempting to fetch products for user UID: ${currentUser.uid} because dashboardProducts is empty.`);
+    if (currentUser && dashboardProducts.length === 0 && !isSavingFirestore && !isLoadingFirestore) {
+      console.log(`DashboardPage: Attempting to fetch products for user email: ${currentUser.email} because dashboardProducts is empty.`);
       setIsLoadingFirestore(true);
       const fetchProducts = async () => {
         try {
-          const productsColPath = `users/${currentUser.uid}/products`;
+          // Path using user's email as the document ID in 'user_products'
+          const productsColPath = `user_products/${currentUser.email}/uploaded_products`;
           console.log(`DashboardPage: Firestore products collection path: ${productsColPath}`);
           const productsCol = collection(firestore, productsColPath);
           const snapshot = await getDocs(query(productsCol));
-          const productsFromDb: Product[] = [];
-          snapshot.docs.forEach(doc => {
-            if (doc.id !== '_metadata') {
-              productsFromDb.push(productFromFirestore(doc.data()));
-            }
-          });
+          const productsFromDb: Product[] = snapshot.docs.map(doc => productFromFirestore(doc.data()));
+          
           setDashboardProducts(productsFromDb);
           console.log(`DashboardPage: Fetched ${productsFromDb.length} products from Firestore.`);
 
-          const metadataDocPath = `users/${currentUser.uid}/products/_metadata`;
+          // Fetch metadata from a path tied to the user's email
+          const metadataDocPath = `user_products/${currentUser.email}/_metadata`;
           console.log(`DashboardPage: Firestore metadata document path: ${metadataDocPath}`);
           const metadataDocRef = doc(firestore, metadataDocPath);
           const metadataDocSnap = await getDoc(metadataDocRef);
+
           if (metadataDocSnap.exists()) {
             const data = metadataDocSnap.data();
             if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
@@ -175,7 +161,7 @@ export default function DashboardPage() {
             }
           } else {
             setLastDataUpdateTimestamp(null);
-            console.log(`DashboardPage: No _metadata document found for user ${currentUser.uid}.`);
+            console.log(`DashboardPage: No _metadata document found for user ${currentUser.email}.`);
           }
 
           if (productsFromDb.length > 0) {
@@ -189,49 +175,52 @@ export default function DashboardPage() {
         }
       };
       fetchProducts();
-    } else if (currentUser && dashboardProducts.length > 0) {
-      console.log(`DashboardPage: Products already loaded for user UID: ${currentUser.uid}. Skipping fetch.`);
-      setIsLoadingFirestore(false);
-      if (!lastDataUpdateTimestamp) {
-        const fetchTimestamp = async () => {
-          try {
-            const metadataDocPath = `users/${currentUser.uid}/products/_metadata`;
-            console.log(`DashboardPage: (Subsequent load) Firestore metadata document path: ${metadataDocPath}`);
-            const metadataDocRef = doc(firestore, metadataDocPath);
-            const metadataDocSnap = await getDoc(metadataDocRef);
-            if (metadataDocSnap.exists()) {
-              const data = metadataDocSnap.data();
-              if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
-                setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
-                console.log(`DashboardPage: (Subsequent load) Fetched last update timestamp: ${data.lastUpdatedAt.toDate()}`);
-              }
+    } else if (currentUser && dashboardProducts.length > 0 && !lastDataUpdateTimestamp) {
+        // If products are loaded (e.g. from a previous action in same session) but timestamp is missing
+        const fetchTimestampOnly = async () => {
+            try {
+                const metadataDocPath = `user_products/${currentUser.email}/_metadata`;
+                const metadataDocRef = doc(firestore, metadataDocPath);
+                const metadataDocSnap = await getDoc(metadataDocRef);
+                if (metadataDocSnap.exists()) {
+                    const data = metadataDocSnap.data();
+                    if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
+                        setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
+                    }
+                }
+            } catch (error) {
+                console.warn("DashboardPage: Could not fetch timestamp on subsequent check:", error);
             }
-          } catch (tsError) {
-            console.warn("DashboardPage: Could not fetch last update timestamp on subsequent load:", tsError);
-          }
         };
-        fetchTimestamp();
-      }
+        fetchTimestampOnly();
     } else if (!currentUser) {
-      setIsLoadingFirestore(false);
+      setIsLoadingFirestore(false); // Not logged in, not loading
+      setDashboardProducts([]); // Clear products if user logs out
+      setLastDataUpdateTimestamp(null);
+    } else if (isLoadingFirestore && !currentUser) {
+        // If it's set to loading but there's no current user, stop loading.
+        setIsLoadingFirestore(false);
     }
-  }, [currentUser, dashboardProducts.length, isSavingFirestore, toast, lastDataUpdateTimestamp]);
+  }, [currentUser, dashboardProducts.length, isSavingFirestore, toast, lastDataUpdateTimestamp, isLoadingFirestore]);
 
 
   const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
-    if (!currentUser) {
+    if (!currentUser || !currentUser.email) {
       toast({ title: "Usuário não autenticado", description: "Faça login para salvar os dados.", variant: "destructive" });
       return;
     }
-    console.log(`DashboardPage: Attempting to save products for user UID: ${currentUser.uid}`);
+    console.log(`DashboardPage: Attempting to save products for user email: ${currentUser.email}`);
     setIsSavingFirestore(true);
     let totalDeleted = 0;
     let totalAdded = 0;
 
     try {
-      const productsColPath = `users/${currentUser.uid}/products`;
+      // Path using user's email
+      const productsColPath = `user_products/${currentUser.email}/uploaded_products`;
       console.log(`DashboardPage: Firestore products collection path for saving: ${productsColPath}`);
       const productsColRef = collection(firestore, productsColPath);
+      
+      // Delete existing products in batches
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
 
@@ -241,30 +230,23 @@ export default function DashboardPage() {
           const batch = writeBatch(firestore);
           const chunk = existingDocsSnapshot.docs.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(docSnapshot => {
-            if (docSnapshot.id !== '_metadata') {
-              console.log(`DashboardPage: Adding delete operation for doc ID: ${docSnapshot.id} to batch.`);
-              batch.delete(docSnapshot.ref);
-              totalDeleted++;
-            }
+            batch.delete(docSnapshot.ref);
+            totalDeleted++;
           });
-          if (chunk.filter(d => d.id !== '_metadata').length > 0) {
-            await batch.commit();
-            console.log(`DashboardPage: Committed a batch of ${chunk.filter(d => d.id !== '_metadata').length} deletions.`);
-          }
+          await batch.commit();
+          console.log(`DashboardPage: Committed a batch of ${chunk.length} deletions.`);
         }
         console.log(`DashboardPage: Successfully deleted ${totalDeleted} existing products.`);
-      } else {
-        console.log(`DashboardPage: No existing products to delete for user ${currentUser.uid}.`);
       }
 
+      // Add new products in batches
       if (productsToSave.length > 0) {
         console.log(`DashboardPage: Adding ${productsToSave.length} new products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
           const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(product => {
-            const newDocRef = doc(productsColRef); 
-            console.log(`DashboardPage: Adding set operation for new doc ID: ${newDocRef.id} to batch.`);
+            const newDocRef = doc(productsColRef); // Auto-generate ID
             batch.set(newDocRef, productToFirestore(product));
             totalAdded++;
           });
@@ -274,27 +256,20 @@ export default function DashboardPage() {
         console.log(`DashboardPage: Successfully added ${totalAdded} new products.`);
       }
 
-      const metadataDocPath = `users/${currentUser.uid}/products/_metadata`;
-      console.log(`DashboardPage: Firestore metadata document path for update: ${metadataDocPath}`);
+      // Update metadata document
+      const metadataDocPath = `user_products/${currentUser.email}/_metadata`;
       const metadataDocRef = doc(firestore, metadataDocPath);
       const newTimestamp = serverTimestamp();
-      await setDoc(metadataDocRef, { lastUpdatedAt: newTimestamp });
+      await setDoc(metadataDocRef, { lastUpdatedAt: newTimestamp }, { merge: true }); // Use merge:true to create if not exists
       setLastDataUpdateTimestamp(new Date()); // Optimistic update for UI
       console.log(`DashboardPage: Successfully updated _metadata document.`);
 
-
-      setDashboardProducts(productsToSave);
-      toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
+      setDashboardProducts(productsToSave); // Update local state
+      toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos no seu perfil. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
 
     } catch (error) {
       console.error("DashboardPage: Error saving products to Firestore:", error);
-      if ((error as any).code === 'failed-precondition' && (error as any).message.includes('too big')) {
-         toast({ title: "Erro ao Salvar", description: `Muitos produtos para processar de uma vez. Tente com um arquivo menor. (Erro: Transação muito grande)`, variant: "destructive" });
-      } else if ((error as any).code === 'permission-denied' || (error as any).code === 'unavailable') {
-        toast({ title: "Erro de Permissão ou Conexão", description: `Não foi possível salvar os dados no banco de dados. Verifique suas permissões ou conexão com a internet. Detalhe: ${(error as Error).message}`, variant: "destructive" });
-      } else {
-        toast({ title: "Erro ao Salvar", description: `Não foi possível salvar: ${(error as Error).message}`, variant: "destructive" });
-      }
+      toast({ title: "Erro ao Salvar", description: `Não foi possível salvar: ${(error as Error).message}`, variant: "destructive" });
     } finally {
       setIsSavingFirestore(false);
     }
@@ -318,14 +293,8 @@ export default function DashboardPage() {
     if (selectedCollection !== ALL_COLLECTIONS_VALUE) {
       products = products.filter(p => p.collection === selectedCollection);
     }
-
-    if (vtexIdStatusFilterDashboard === "withVtexId") {
-        products = products.filter(p => typeof p.vtexId === 'number' && !isNaN(p.vtexId));
-    } else if (vtexIdStatusFilterDashboard === "withoutVtexId") {
-        products = products.filter(p => !(typeof p.vtexId === 'number' && !isNaN(p.vtexId)));
-    }
     return products;
-  }, [dashboardProducts, selectedCollection, vtexIdStatusFilterDashboard]);
+  }, [dashboardProducts, selectedCollection]);
 
   const aggregatedData = useMemo(() => {
     if (filteredProductsForDashboard.length === 0) {
@@ -508,26 +477,13 @@ export default function DashboardPage() {
       const contentWidth = pageWidth - 2 * margin;
 
       let reportTitle = "Relatório do Dashboard de Performance";
-      let appliedFiltersText = [];
       if(selectedCollection !== ALL_COLLECTIONS_VALUE) {
-        appliedFiltersText.push(`Coleção: ${selectedCollection}`);
+        reportTitle += ` - Coleção: ${selectedCollection}`;
       }
-       if (vtexIdStatusFilterDashboard === "withVtexId") {
-        appliedFiltersText.push("Status: Com ID VTEX");
-      } else if (vtexIdStatusFilterDashboard === "withoutVtexId") {
-        appliedFiltersText.push("Status: Sem ID VTEX");
-      }
-
 
       doc.setFontSize(18);
       doc.text(reportTitle, pageWidth / 2, yPos, { align: "center" });
       yPos += 10;
-
-      if (appliedFiltersText.length > 0) {
-        doc.setFontSize(10);
-        doc.text("Filtros Aplicados: " + appliedFiltersText.join(' | '), pageWidth / 2, yPos, { align: "center" });
-        yPos += 7;
-      }
 
       doc.setFontSize(10);
       doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`, pageWidth / 2, yPos, { align: "center" });
@@ -566,17 +522,17 @@ export default function DashboardPage() {
 
       const addChartToPdf = async (elementId: string, chartTitle: string) => {
         const chartElement = document.getElementById(elementId);
-        if (!chartElement || chartElement.offsetParent === null) {
+        if (!chartElement || chartElement.offsetParent === null) { // Check if element is visible
           console.warn(`Elemento do gráfico ${elementId} não encontrado ou não visível. Pulando no PDF.`);
-          doc.setTextColor(150, 150, 150);
+          doc.setTextColor(150, 150, 150); // Gray color for notice
           doc.setFontSize(10);
           doc.text(`Gráfico "${chartTitle}" não disponível ou sem dados.`, margin, yPos);
-          doc.setTextColor(0);
+          doc.setTextColor(0); // Reset to black
           yPos += 8;
           return;
         }
 
-        if (yPos + 10 > pageHeight - margin) {
+        if (yPos + 10 > pageHeight - margin) { // Check if there's enough space, roughly 1cm
              doc.addPage();
              yPos = margin;
         }
@@ -589,26 +545,28 @@ export default function DashboardPage() {
 
         try {
           const canvas = await html2canvas(chartElement, {
-            scale: 1.5,
+            scale: 1.5, // Increase scale for better resolution
             useCORS: true,
-            logging: false,
-            backgroundColor: '#ffffff'
+            logging: false, // Disable html2canvas logging for cleaner console
+            backgroundColor: '#ffffff' // Explicitly set background to white
           });
-          const imgData = canvas.toDataURL('image/png', 0.95);
+          const imgData = canvas.toDataURL('image/png', 0.95); // Use higher quality PNG
 
           const imgProps = doc.getImageProperties(imgData);
           let imgHeight = (imgProps.height * contentWidth) / imgProps.width;
           let imgWidth = contentWidth;
 
-          const maxChartHeight = pageHeight * 0.45;
+          // Limit chart height to prevent overly tall charts, adjust as needed
+          const maxChartHeight = pageHeight * 0.45; // Max 45% of page height for a chart
           if (imgHeight > maxChartHeight) {
               imgHeight = maxChartHeight;
-              imgWidth = (imgProps.width * imgHeight) / imgProps.height;
+              imgWidth = (imgProps.width * imgHeight) / imgProps.height; // Recalculate width to maintain aspect ratio
           }
 
-          if (yPos + imgHeight > pageHeight - margin) {
+          if (yPos + imgHeight > pageHeight - margin) { // Check again after calculating image height
             doc.addPage();
             yPos = margin;
+            // Re-add title if new page
             doc.setFontSize(13);
             doc.setFont('helvetica', 'bold');
             doc.text(chartTitle, margin, yPos);
@@ -616,13 +574,13 @@ export default function DashboardPage() {
             yPos += 8;
           }
           doc.addImage(imgData, 'PNG', margin, yPos, imgWidth, imgHeight);
-          yPos += imgHeight + 10;
+          yPos += imgHeight + 10; // Add some padding after the chart
         } catch (error) {
           console.error(`Erro ao capturar gráfico ${elementId}:`, error);
-          doc.setTextColor(255,0,0);
+          doc.setTextColor(255,0,0); // Red color for error
           doc.setFontSize(10);
           doc.text(`Erro ao renderizar o gráfico: ${chartTitle}. Verifique o console.`, margin, yPos);
-          doc.setTextColor(0);
+          doc.setTextColor(0); // Reset to black
           yPos += 8;
         }
       };
@@ -638,12 +596,13 @@ export default function DashboardPage() {
       ];
 
       for (const chartInfo of chartSections) {
-         if (chartInfo.data && chartInfo.data.length > 0) {
+         if (chartInfo.data && chartInfo.data.length > 0) { // Only add chart if it has data
             await addChartToPdf(chartInfo.id, chartInfo.title);
          } else {
+            // Optionally, note in PDF that a chart was skipped due to no data for current filters
             if (yPos + 10 > pageHeight - margin) { doc.addPage(); yPos = margin; }
             doc.setFontSize(11);
-            doc.setTextColor(100);
+            doc.setTextColor(100); // Muted color
             doc.text(`Gráfico "${chartInfo.title}" não possui dados para exibir com os filtros atuais.`, margin, yPos);
             doc.setTextColor(0);
             yPos += 10;
@@ -652,12 +611,7 @@ export default function DashboardPage() {
 
       let pdfFileName = `Relatorio_Dashboard_${new Date().toISOString().split('T')[0]}`;
       if (selectedCollection !== ALL_COLLECTIONS_VALUE) {
-        pdfFileName += `_${selectedCollection.replace(/[^a-zA-Z0-9]/g, '_')}`;
-      }
-       if (vtexIdStatusFilterDashboard === "withVtexId") {
-        pdfFileName += "_ComIDVTEX";
-      } else if (vtexIdStatusFilterDashboard === "withoutVtexId") {
-        pdfFileName += "_SemIDVTEX";
+        pdfFileName += `_${selectedCollection.replace(/[^a-zA-Z0-9]/g, '_')}`; // Sanitize collection name for filename
       }
       pdfFileName += '.pdf';
 
@@ -678,7 +632,7 @@ export default function DashboardPage() {
     const y = cy + radius * Math.sin(-midAngle * RADIAN);
     const percentage = (percent * 100).toFixed(0);
 
-    if (percentage === "0") return null;
+    if (percentage === "0") return null; // Do not render label for 0%
 
     return (
       <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize="12px" fontWeight="bold">
@@ -735,23 +689,6 @@ export default function DashboardPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div>
-                <Label htmlFor="vtexIdStatusFilterDashboard">Filtrar por Status ID VTEX</Label>
-                <Select
-                    value={vtexIdStatusFilterDashboard}
-                    onValueChange={setVtexIdStatusFilterDashboard}
-                    disabled={isLoadingFirestore || isSavingFirestore || isGeneratingPdf}
-                >
-                    <SelectTrigger id="vtexIdStatusFilterDashboard" aria-label="Filtrar por Status ID VTEX">
-                    <SelectValue placeholder="Status ID VTEX" />
-                    </SelectTrigger>
-                    <SelectContent>
-                    <SelectItem value={ALL_ID_STATUS_VALUE}>Todos</SelectItem>
-                    <SelectItem value="withVtexId">Com ID VTEX (Número)</SelectItem>
-                    <SelectItem value="withoutVtexId">Sem ID VTEX (Texto/#N/D)</SelectItem>
-                    </SelectContent>
-                </Select>
-            </div>
           </CardContent>
         </Card>
       )}
@@ -795,18 +732,13 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {!isLoadingFirestore && !isSavingFirestore && dashboardProducts.length > 0 && filteredProductsForDashboard.length === 0 && (selectedCollection !== ALL_COLLECTIONS_VALUE || vtexIdStatusFilterDashboard !== ALL_ID_STATUS_VALUE) && (
+      {!isLoadingFirestore && !isSavingFirestore && dashboardProducts.length > 0 && filteredProductsForDashboard.length === 0 && selectedCollection !== ALL_COLLECTIONS_VALUE && (
          <Card className="shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center"><Filter className="mr-2 h-6 w-6 text-primary" />Nenhum produto encontrado</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-muted-foreground">Nenhum produto encontrado para os filtros selecionados.
-               {selectedCollection !== ALL_COLLECTIONS_VALUE && ` Coleção: ${selectedCollection}.`}
-               {vtexIdStatusFilterDashboard === "withVtexId" && " Status ID VTEX: Com ID."}
-               {vtexIdStatusFilterDashboard === "withoutVtexId" && " Status ID VTEX: Sem ID."}
-              <br />Por favor, ajuste os filtros ou selecione "Todas as Coleções" / "Todos" para Status ID.
-            </p>
+            <p className="text-muted-foreground">Nenhum produto encontrado para a coleção "{selectedCollection}".</p>
           </CardContent>
         </Card>
       )}
@@ -906,7 +838,7 @@ export default function DashboardPage() {
             {aggregatedData.skuStockStatus.length > 0 && aggregatedData.totalSkus > 0 && (
               <Card id="chart-sku-stock-status" className="shadow-lg hover:shadow-xl transition-shadow">
                 <CardHeader>
-                  <CardTitle className="flex items-center"><PieChartIcon className="mr-2 h-5 w-5 text-primary" />Distribuição de SKUs (Estoque vs. Zerado)</CardTitle>
+                  <CardTitle className="flex items-center"><PieChartLucide className="mr-2 h-5 w-5 text-primary" />Distribuição de SKUs (Estoque vs. Zerado)</CardTitle>
                   <CardDescription>Proporção de SKUs com estoque e SKUs com estoque zerado.</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[400px]">
@@ -952,12 +884,12 @@ export default function DashboardPage() {
                             <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/>
                             <YAxis
                               tickFormatter={(value) => `${value}%`}
-                              domain={[0, 'dataMax + 5']}
+                              domain={[0, 'dataMax + 5']} // Ensure y-axis shows full percentage range
                               allowDecimals={false}
                             />
                             <Tooltip
                               content={<ChartTooltipContent />}
-                              formatter={(value: number) => `${value.toFixed(2)}%`}
+                              formatter={(value: number) => `${value.toFixed(2)}%`} // Format tooltip
                             />
                             <Legend />
                             <Bar dataKey="rupturePercentage" name="Ruptura (%)" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} />
@@ -1070,4 +1002,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-

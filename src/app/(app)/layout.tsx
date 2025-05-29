@@ -4,15 +4,12 @@
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { onAuthStateChanged, signOut, type User as FirebaseUser } from 'firebase/auth';
-import { clientAuth, firestore } from '@/lib/firebase/config';
-import { doc, getDoc } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, LogOut, LayoutDashboard, UserCircle, ShieldCheck, Store, Building, TrendingUp, BarChart, BedDouble, Lock } from 'lucide-react';
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
-import type { UserProfile } from '@/types';
+import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
 import {
   Accordion,
   AccordionContent,
@@ -25,139 +22,60 @@ interface AppLayoutProps {
   children: ReactNode;
 }
 
-const ADMIN_PRIMARY_EMAIL = "gustavo.cordeiro@altenburg.com.br"; 
+const ADMIN_PRIMARY_EMAIL_CLIENT = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br";
 
 export default function AppLayout({ children }: AppLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { toast } = useToast();
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [approvalStatusLoading, setApprovalStatusLoading] = useState(false);
-  const [isApproved, setIsApproved] = useState(false);
+  const { currentUser, logout, isLoading: authContextLoading } = useAuth(); // Use AuthContext
   const [activeAccordionItem, setActiveAccordionItem] = useState<string | undefined>(undefined);
 
-  // Use NEXT_PUBLIC_ADMIN_EMAIL from .env for client-side checks if available, otherwise fallback
-  const effectiveAdminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL || ADMIN_PRIMARY_EMAIL;
-  // isUserAdmin now directly uses firebaseUser.email for quicker UI updates on admin status
-  const isUserAdmin = firebaseUser?.email === effectiveAdminEmail;
+  const isUserAdmin = currentUser?.isAdmin === true;
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(clientAuth, async (fbUser) => {
-      setFirebaseUser(fbUser);
-      if (fbUser) {
-        // Admin user bypasses Firestore approval check for layout purposes.
-        // Their access to admin page itself will be re-verified on that page.
-        if (fbUser.email === effectiveAdminEmail) {
-          setUserProfile({ uid: fbUser.uid, email: fbUser.email, isApproved: true, name: fbUser.displayName || "Admin", pendingApproval: false });
-          setIsApproved(true);
-          setApprovalStatusLoading(false);
-          setAuthLoading(false);
-          return; 
-        }
-
-        setApprovalStatusLoading(true);
-        try {
-          const userDocRef = doc(firestore, 'users', fbUser.uid);
-          const userDocSnap = await getDoc(userDocRef);
-          if (userDocSnap.exists()) {
-            const profileData = userDocSnap.data() as UserProfile;
-            setUserProfile(profileData);
-            if (profileData.isApproved) {
-              setIsApproved(true);
-            } else {
-              setIsApproved(false);
-            }
-          } else {
-            setUserProfile({ uid: fbUser.uid, email: fbUser.email, isApproved: false, pendingApproval: true, name: fbUser.displayName || fbUser.email || 'Usuário' });
-            setIsApproved(false);
-          }
-        } catch (error) {
-          console.error("Error fetching user profile:", error);
-          toast({ title: "Erro de Perfil", description: "Não foi possível carregar seu perfil.", variant: "destructive" });
-          setIsApproved(false); 
-          setUserProfile({ uid: fbUser.uid, email: fbUser.email, name: fbUser.displayName || fbUser.email || 'Usuário' });
-        } finally {
-          setApprovalStatusLoading(false);
-        }
-      } else {
-        setUserProfile(null);
-        setIsApproved(false);
-        router.replace('/login');
-      }
-      setAuthLoading(false);
-    });
-    return () => unsubscribe();
-  }, [router, toast, effectiveAdminEmail]);
+    if (!authContextLoading && !currentUser) {
+      router.replace('/login');
+    }
+  }, [authContextLoading, currentUser, router]);
 
   useEffect(() => {
+    // Determine active accordion based on pathname
     if (pathname?.startsWith('/admin')) {
       setActiveAccordionItem("admin-category");
     } else if (pathname?.startsWith('/dashboard') || pathname?.startsWith('/restock-opportunities') || pathname?.startsWith('/pillow-stock') || pathname?.startsWith('/abc-analysis')) {
       setActiveAccordionItem("ecommerce-category");
-    } else if (pathname?.startsWith('/retail')) { // Example for retail if you add routes
-        setActiveAccordionItem("retail-category");
+    } else if (pathname?.startsWith('/retail')) {
+      setActiveAccordionItem("retail-category");
     }
   }, [pathname]);
 
-  const handleSignOut = async () => {
-    try {
-      await signOut(clientAuth);
-      toast({ title: 'Logout', description: 'Você foi desconectado.' });
-      router.push('/login');
-    } catch (error) {
-      console.error('Error signing out:', error);
-      toast({ title: 'Erro de Logout', description: 'Não foi possível desconectar.', variant: 'destructive' });
-    }
+  const handleSignOut = () => {
+    logout(); // Use logout from AuthContext
+    toast({ title: 'Logout', description: 'Você foi desconectado.' });
   };
 
-  if (authLoading || (firebaseUser && approvalStatusLoading && firebaseUser.email !== effectiveAdminEmail)) {
+  if (authContextLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="ml-4 text-lg text-foreground">
-          {authLoading ? "Verificando autenticação..." : "Verificando status da conta..."}
-        </p>
+        <p className="ml-4 text-lg text-foreground">Carregando sessão...</p>
       </div>
     );
   }
 
-  if (!firebaseUser) { 
+  if (!currentUser) {
+    // This case should ideally be caught by the useEffect above,
+    // but as a fallback or for initial render before effect runs.
     return (
-       <div className="flex items-center justify-center min-h-screen bg-background">
+      <div className="flex items-center justify-center min-h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
         <p className="ml-4 text-lg text-foreground">Redirecionando para o login...</p>
       </div>
     );
   }
-  
-  const AuthenticatedHeader = () => (
-    <header className="bg-card border-b border-border shadow-sm sticky top-0 z-50">
-      <div className="container mx-auto px-4 md:px-6 lg:px-8 py-3 flex items-center justify-between">
-        <Link href="/dashboard" className="flex items-center gap-2">
-            <LayoutDashboard className="h-7 w-7 text-primary" />
-            <h1 className="text-xl font-semibold text-foreground hidden sm:block">
-            Painel Altenburg
-            </h1>
-        </Link>
-        <div className="flex items-center gap-3">
-          {userProfile && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <UserCircle className="h-5 w-5" />
-              <span>{userProfile.email}</span>
-            </div>
-          )}
-          <Button variant="outline" size="sm" onClick={handleSignOut}>
-            <LogOut className="mr-2 h-4 w-4" />
-            Sair
-          </Button>
-        </div>
-      </div>
-    </header>
-  );
 
-  if (!isApproved && userProfile?.pendingApproval) {
+  if (!currentUser.isApproved && currentUser.pendingApproval) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6">
         <Card className="w-full max-w-md text-center shadow-lg">
@@ -166,7 +84,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
           </CardHeader>
           <CardContent>
             <p className="text-muted-foreground mb-4">
-              Obrigado por se registrar, {userProfile.name || userProfile.email}! Sua conta está aguardando aprovação do administrador.
+              Obrigado por se registrar, {currentUser.name || currentUser.email}! Sua conta está aguardando aprovação do administrador.
             </p>
             <p className="text-sm text-muted-foreground">Você será notificado ou poderá tentar fazer login novamente mais tarde.</p>
           </CardContent>
@@ -179,8 +97,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
       </div>
     );
   }
-  
-  if (!isApproved && userProfile && !userProfile.pendingApproval) {
+
+  if (!currentUser.isApproved && !currentUser.pendingApproval) {
+     // This case implies the user was rejected or some other state.
       return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6">
         <Card className="w-full max-w-md text-center shadow-lg">
@@ -203,6 +122,31 @@ export default function AppLayout({ children }: AppLayoutProps) {
     );
   }
 
+  // If user is approved, render the main app layout
+  const AuthenticatedHeader = () => (
+    <header className="bg-card border-b border-border shadow-sm sticky top-0 z-50">
+      <div className="container mx-auto px-4 md:px-6 lg:px-8 py-3 flex items-center justify-between">
+        <Link href="/dashboard" className="flex items-center gap-2">
+            <LayoutDashboard className="h-7 w-7 text-primary" />
+            <h1 className="text-xl font-semibold text-foreground hidden sm:block">
+            Painel Altenburg
+            </h1>
+        </Link>
+        <div className="flex items-center gap-3">
+          {currentUser && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <UserCircle className="h-5 w-5" />
+              <span>{currentUser.email}</span>
+            </div>
+          )}
+          <Button variant="outline" size="sm" onClick={handleSignOut}>
+            <LogOut className="mr-2 h-4 w-4" />
+            Sair
+          </Button>
+        </div>
+      </div>
+    </header>
+  );
 
   return (
     <div className="flex min-h-screen">
@@ -210,26 +154,26 @@ export default function AppLayout({ children }: AppLayoutProps) {
         <Accordion type="single" collapsible className="w-full" value={activeAccordionItem} onValueChange={setActiveAccordionItem}>
           
           <AccordionItem value="admin-category" className="border-b-0">
-            <AccordionTrigger 
+            <AccordionTrigger
               className={cn(
                 "p-3 rounded-md hover:bg-muted hover:text-primary transition-colors text-foreground font-medium text-sm no-underline",
-                !isUserAdmin && "cursor-not-allowed opacity-70 hover:text-foreground hover:no-underline", // Keep text color on hover for disabled
+                !isUserAdmin && "cursor-not-allowed opacity-70 hover:text-foreground hover:no-underline",
                 "data-[state=open]:text-primary [&[data-state=open]>svg:not(.lucide-lock)]:text-primary"
               )}
               disabled={!isUserAdmin}
-              onClick={(e) => { if (!isUserAdmin) e.preventDefault(); }} // Prevent click action if not admin
+              onClick={(e) => { if (!isUserAdmin) e.preventDefault(); }}
             >
-              <div className="flex items-center gap-3 w-full"> {/* Added w-full for proper alignment of lock */}
+              <div className="flex items-center gap-3 w-full">
                 <ShieldCheck className={cn("h-5 w-5", isUserAdmin ? "text-primary" : "text-muted-foreground")} />
                 <span>Admin</span>
                 {!isUserAdmin && <Lock className="h-4 w-4 ml-auto text-muted-foreground" />}
               </div>
             </AccordionTrigger>
-            {isUserAdmin && ( // Conditionally render content only if admin
+            {isUserAdmin && (
               <AccordionContent className="pt-1 pb-0 pl-4 space-y-1">
-                <Link href="/admin" 
+                <Link href="/admin"
                   className={cn(
-                    "flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors pl-5", 
+                    "flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors pl-5",
                     pathname === "/admin" && "bg-muted text-primary font-semibold"
                   )}
                 >
@@ -283,7 +227,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
       <div className="flex-1 flex flex-col bg-background">
         <AuthenticatedHeader />
         <main className="flex-grow p-4 md:p-6 lg:p-8">
-          {isApproved ? children : null}
+          {currentUser.isApproved ? children : null}
         </main>
       </div>
     </div>

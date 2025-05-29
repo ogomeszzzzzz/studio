@@ -7,8 +7,7 @@ import type { Product } from '@/types';
 import { BedDouble, Loader2, Database, Filter as FilterIcon, AlertTriangle, ShoppingBag, TrendingDown, PackageX, BarChart3, ListFilter, SortAsc, SortDesc, Clock, Zap } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { clientAuth, firestore } from '@/lib/firebase/config';
-import type { User } from 'firebase/auth';
+import { firestore } from '@/lib/firebase/config'; // No clientAuth needed
 import { collection, getDocs, doc, Timestamp, query, getDoc } from 'firebase/firestore';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,16 +15,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Button } from '@/components/ui/button';
 import { format as formatDateFns } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
 
 
 const PILLOW_PRODUCT_TYPE_EXCEL = "TRAVESSEIRO";
 const PILLOW_NAME_PREFIX = "Travesseiro";
 const PILLOW_BRAND_NAME = "Altenburg";
 const MAX_STOCK_PER_PILLOW_COLUMN = 75;
-const LOW_STOCK_THRESHOLD_PERCENTAGE = 0.25; // 25% of max stock
-const GOOD_STOCK_THRESHOLD_PERCENTAGE = 0.75; // 75% of max stock
-const HIGH_SALES_THRESHOLD = 10; // Example: more than 10 sales in 30d is considered high for urgency
-const LOW_DAYS_OF_STOCK_THRESHOLD = 7; // Example: less than 7 days of stock is urgent
+const LOW_STOCK_THRESHOLD_PERCENTAGE = 0.25;
+const GOOD_STOCK_THRESHOLD_PERCENTAGE = 0.75;
+const HIGH_SALES_THRESHOLD = 10;
+const LOW_DAYS_OF_STOCK_THRESHOLD = 7;
 
 
 type SortCriteria = 'name' | 'stock' | 'fillPercentage' | 'sales30d';
@@ -65,14 +65,12 @@ function derivePillowDisplayName(productNameInput: string | undefined): string {
       }
     }
     const words = name.split(/\s+/).filter(word => word.length > 0);
-    if (words.length === 0) return productName; // Fallback if stripping leaves nothing
+    if (words.length === 0) return productName; 
     
-    // Take up to first two words, unless it's a single word name like "Gellou"
     if (words[0]?.toLowerCase() === 'gellou' && words.length === 1) return words[0];
     if (words.length === 1) return words[0];
     return `${words[0]} ${words[1] || ''}`.trim();
   }
-  // If not starting with "Travesseiro", return a shorter version or original
   const words = productName.split(/\s+/).filter(word => word.length > 0);
   if (words.length <= 2) return productName;
   return `${words[0]} ${words[1]}`;
@@ -83,7 +81,7 @@ export default function PillowStockPage() {
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [aggregatedPillowStockState, setAggregatedPillowStockState] = useState<AggregatedPillow[]>([]);
   const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const { currentUser } = useAuth(); // Get currentUser from AuthContext
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
@@ -92,44 +90,28 @@ export default function PillowStockPage() {
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [stockStatusFilter, setStockStatusFilter] = useState<StockStatusFilter>('all');
 
-  useEffect(() => {
-    const unsubscribe = clientAuth.onAuthStateChanged((user) => {
-      setCurrentUser(user);
-      if (!user) {
-        setAllProducts([]);
-        setAggregatedPillowStockState([]);
-        setLastDataUpdateTimestamp(null);
-        setIsLoadingFirestore(false);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
 
   useEffect(() => {
-    if (currentUser && allProducts.length === 0 ) {
-      console.log(`PillowStockPage: Fetching products for user UID: ${currentUser.uid} because allProducts is empty.`);
+    if (currentUser && allProducts.length === 0 && !isLoadingFirestore ) {
+      console.log(`PillowStockPage: Fetching products for user email: ${currentUser.email} because allProducts is empty.`);
       setIsLoadingFirestore(true);
       const fetchProducts = async () => {
         try {
-          const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
+          // Path using user's email
+          const productsColPath = `user_products/${currentUser.email}/uploaded_products`;
+          const productsCol = collection(firestore, productsColPath);
           const snapshot = await getDocs(query(productsCol));
-          const productsFromDb: Product[] = [];
-           snapshot.docs.forEach(docSnap => {
-            if (docSnap.id !== '_metadata') {
-              productsFromDb.push(productFromFirestore(docSnap.data()));
-            }
-          });
+          const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
           setAllProducts(productsFromDb);
 
-          const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
+          const metadataDocPath = `user_products/${currentUser.email}/_metadata`;
+          const metadataDocRef = doc(firestore, metadataDocPath);
           const metadataDocSnap = await getDoc(metadataDocRef);
           if (metadataDocSnap.exists()) {
             const data = metadataDocSnap.data();
             if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
               setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
             }
-          } else {
-             setLastDataUpdateTimestamp(null);
           }
 
         } catch (error) {
@@ -140,30 +122,15 @@ export default function PillowStockPage() {
         }
       };
       fetchProducts();
-    } else if (currentUser && allProducts.length > 0) {
-      console.log(`PillowStockPage: Products already loaded for user UID: ${currentUser.uid}. Skipping fetch.`);
-      setIsLoadingFirestore(false);
-      if (!lastDataUpdateTimestamp) {
-        const fetchTimestamp = async () => {
-          try {
-            const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
-            const metadataDocSnap = await getDoc(metadataDocRef);
-            if (metadataDocSnap.exists()) {
-              const data = metadataDocSnap.data();
-              if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
-                setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
-              }
-            }
-          } catch (tsError) {
-            console.warn("Could not fetch last update timestamp on subsequent load (Pillow):", tsError);
-          }
-        };
-        fetchTimestamp();
-      }
     } else if (!currentUser) {
       setIsLoadingFirestore(false);
+      setAllProducts([]);
+      setAggregatedPillowStockState([]);
+      setLastDataUpdateTimestamp(null);
+    } else if (isLoadingFirestore && !currentUser) {
+        setIsLoadingFirestore(false);
     }
-  }, [currentUser, toast, allProducts.length, lastDataUpdateTimestamp]);
+  }, [currentUser, toast, allProducts.length, isLoadingFirestore]);
 
   const pillowProducts = useMemo(() => {
     return allProducts.filter(p => p.productType?.toUpperCase() === PILLOW_PRODUCT_TYPE_EXCEL.toUpperCase());
@@ -182,7 +149,7 @@ export default function PillowStockPage() {
         currentPillowData.stock += pillow.stock;
         currentPillowData.sales30d += (pillow.sales30d || 0);
 
-        if (!pillowStockMap.has(displayName)) { // Set derivation and vtexId from the first product encountered for this display name
+        if (!pillowStockMap.has(displayName)) { 
             currentPillowData.derivation = pillow.productDerivation || String(pillow.productId || pillow.vtexId || '');
             currentPillowData.vtexId = pillow.vtexId;
         }
@@ -251,14 +218,14 @@ export default function PillowStockPage() {
   const pillowKPIs = useMemo(() => {
     if (pillowProducts.length === 0) return { totalPillowSKUs: 0, totalPillowUnits: 0, lowStockPillowTypes: 0, zeroStockPillowTypes: 0, averageStockPerType: 0, criticalPillowsCount: 0 };
 
-    const uniquePillowDisplays = aggregatedPillowStockState; // Use already filtered/sorted state for consistency with display
+    const uniquePillowDisplays = aggregatedPillowStockState; 
 
     const totalPillowSKUs = uniquePillowDisplays.length;
     const totalPillowUnits = uniquePillowDisplays.reduce((sum, p) => sum + p.stock, 0);
     
     const lowStockThresholdValue = MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE;
-    const lowStockPillowTypes = uniquePillowDisplays.filter(p => p.stock > 0 && p.stock < lowStockThresholdValue && !p.isCritical && !p.isUrgent).length; // Exclude critical/urgent
-    const zeroStockPillowTypes = uniquePillowDisplays.filter(p => p.stock === 0 && !p.isCritical).length; // Exclude those already counted as critical rupture
+    const lowStockPillowTypes = uniquePillowDisplays.filter(p => p.stock > 0 && p.stock < lowStockThresholdValue && !p.isCritical && !p.isUrgent).length;
+    const zeroStockPillowTypes = uniquePillowDisplays.filter(p => p.stock === 0 && !p.isCritical).length; 
     const averageStockPerType = totalPillowSKUs > 0 ? parseFloat((totalPillowUnits / totalPillowSKUs).toFixed(1)) : 0;
     const criticalPillowsCount = uniquePillowDisplays.filter(p => p.isCritical || p.isUrgent).length;
     
@@ -270,7 +237,7 @@ export default function PillowStockPage() {
   }, [allProducts, pillowProducts]);
 
 
-  const isAnyDataLoading = isLoadingFirestore;
+  const isAnyDataLoading = isLoadingFirestore && allProducts.length === 0;
   const lowStockFilterThreshold = (MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE).toFixed(0);
   const goodStockFilterThreshold = (MAX_STOCK_PER_PILLOW_COLUMN * GOOD_STOCK_THRESHOLD_PERCENTAGE).toFixed(0);
 
@@ -321,9 +288,9 @@ export default function PillowStockPage() {
                         <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Modelos de Travesseiros</CardTitle><BedDouble className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{pillowKPIs.totalPillowSKUs}</div><p className="text-xs text-muted-foreground">Modelos únicos</p></CardContent></Card>
                         <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Total em Estoque</CardTitle><ShoppingBag className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{pillowKPIs.totalPillowUnits.toLocaleString()}</div><p className="text-xs text-muted-foreground">Unidades totais</p></CardContent></Card>
                         <Card className="shadow-sm hover:shadow-md transition-shadow bg-destructive/10 border-destructive"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium text-destructive">Travesseiros Críticos</CardTitle><Zap className="h-4 w-4 text-destructive" /></CardHeader><CardContent><div className="text-2xl font-bold text-destructive">{pillowKPIs.criticalPillowsCount}</div><p className="text-xs text-destructive/80">Ruptura ou Urgência!</p></CardContent></Card>
-                        <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Estoque Baixo (Não Crítico)</CardTitle><TrendingDown className="h-4 w-4 text-amber-600" /></CardHeader><CardContent><div className="text-2xl font-bold text-amber-700">{pillowKPIs.lowStockPillowTypes}</div><p className="text-xs text-muted-foreground">&lt; {lowStockFilterThreshold} unid.</p></CardContent></Card>
-                        <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Estoque Zerado (Sem Venda)</CardTitle><PackageX className="h-4 w-4 text-red-700" /></CardHeader><CardContent><div className="text-2xl font-bold text-red-700">{pillowKPIs.zeroStockPillowTypes}</div><p className="text-xs text-muted-foreground">Modelos sem unid. (e sem vendas)</p></CardContent></Card>
-                        <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Média Estoque/Modelo</CardTitle><BarChart3 className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{pillowKPIs.averageStockPerType.toLocaleString()}</div><p className="text-xs text-muted-foreground">Unid. médias por modelo</p></CardContent></Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Travesseiros com Estoque Baixo</CardTitle><TrendingDown className="h-4 w-4 text-amber-600" /></CardHeader><CardContent><div className="text-2xl font-bold text-amber-700">{pillowKPIs.lowStockPillowTypes}</div><p className="text-xs text-muted-foreground">&lt; {lowStockFilterThreshold} unid. (não críticos)</p></CardContent></Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Travesseiros com Estoque Zerado</CardTitle><PackageX className="h-4 w-4 text-red-700" /></CardHeader><CardContent><div className="text-2xl font-bold text-red-700">{pillowKPIs.zeroStockPillowTypes}</div><p className="text-xs text-muted-foreground">Modelos sem unid. (e sem vendas)</p></CardContent></Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Média Estoque/Modelo</CardTitle><BarChart3 className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{pillowKPIs.averageStockPerType.toLocaleString()}</div><p className="text-xs text-muted-foreground">Unid. médias por modelo de travesseiro.</p></CardContent></Card>
                     </div>
                 )}
             </CardContent>
@@ -418,4 +385,3 @@ export default function PillowStockPage() {
     </div>
   );
 }
-

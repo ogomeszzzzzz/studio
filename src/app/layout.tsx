@@ -3,6 +3,7 @@ import type {Metadata} from 'next';
 import {Geist, Geist_Mono} from 'next/font/google';
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
+import { AuthProvider } from '@/contexts/AuthContext'; // Import AuthProvider
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -16,7 +17,8 @@ const geistMono = Geist_Mono({
 
 const APP_NAME = "Painel Altenburg";
 const APP_DESCRIPTION = "Análise de estoque, dashboards de performance e oportunidades de reabastecimento.";
-const APP_URL = process.env.NEXT_PUBLIC_APP_BASE_URL || "https://altenburg.example.com"; // Fallback URL
+const APP_BASE_URL = process.env.NEXT_PUBLIC_APP_BASE_URL || "http://localhost:9002";
+
 
 export const metadata: Metadata = {
   applicationName: APP_NAME,
@@ -25,12 +27,11 @@ export const metadata: Metadata = {
     template: `%s - ${APP_NAME}`,
   },
   description: APP_DESCRIPTION,
-  manifest: "/manifest.json", // Você pode querer adicionar um manifest.json no futuro
+  manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
     title: APP_NAME,
-    // startupImage: [], // Para splash screens em iOS
   },
   formatDetection: {
     telephone: false,
@@ -43,15 +44,13 @@ export const metadata: Metadata = {
       template: `%s - ${APP_NAME}`,
     },
     description: APP_DESCRIPTION,
-    url: APP_URL,
+    url: APP_BASE_URL,
     images: [
       {
-        url: "https://placehold.co/1200x630.png?text=Painel+Altenburg", // Substitua pela URL da sua imagem
+        url: `${APP_BASE_URL}/og-image.png`, // Example: /og-image.png in your public folder
         width: 1200,
         height: 630,
         alt: `Preview do ${APP_NAME}`,
-        // Adicione um data-ai-hint aqui se você quiser que eu gere uma imagem depois
-        // Ex: Adicionar o atributo data-ai-hint="business dashboard analytics" ao elemento img correspondente se for renderizar uma tag <img/>
       },
     ],
   },
@@ -62,9 +61,7 @@ export const metadata: Metadata = {
       template: `%s - ${APP_NAME}`,
     },
     description: APP_DESCRIPTION,
-    // site: "@SeuTwitterHandle", // Se você tiver um
-    // creator: "@CriadorTwitterHandle", // Se aplicável
-    images: ["https://placehold.co/1200x630.png?text=Painel+Altenburg"], // Substitua pela URL da sua imagem
+    images: [`${APP_BASE_URL}/twitter-image.png`], // Example: /twitter-image.png
   },
 };
 
@@ -76,7 +73,9 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased font-sans bg-background text-foreground`}>
-        {children}
+        <AuthProvider> {/* Wrap children with AuthProvider */}
+          {children}
+        </AuthProvider>
         <Toaster />
       </body>
     </html>
