@@ -37,7 +37,7 @@ if (!getApps().length) {
     console.error('[Firebase Client Config] Error initializing Firebase app:', error);
     console.error('[Firebase Client Config] Ensure all NEXT_PUBLIC_FIREBASE_... variables in your .env file are correct and the server was restarted after changes.');
     // Rethrow or handle as appropriate for your app's error strategy
-    throw error; 
+    throw error;
   }
 } else {
   clientApp = getApp();
@@ -45,8 +45,9 @@ if (!getApps().length) {
 }
 
 const clientAuth = getAuth(clientApp);
-const firestore = getFirestore(clientApp);
+// Explicitly connect to the 'ecom' database
+const firestore = getFirestore(clientApp, "ecom");
+console.log('[Firebase Client Config] Attempting to connect to Firestore database ID: ecom');
 
-// Server-side admin SDK initialization is now in adminConfig.ts
 
 export { clientApp, clientAuth, firestore };
