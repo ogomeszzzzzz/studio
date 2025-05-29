@@ -122,7 +122,7 @@ export default function LoginPage() {
             <LogIn size={32} />
           </div>
           <CardTitle className="text-3xl font-bold">Bem-vindo!</CardTitle>
-          <CardDescription>Faça login para acessar o Collection Gap Analyzer.</CardDescription>
+          <CardDescription>Faça login para acessar o Painel de Controle de Estoque e Ruptura do E-commerce.</CardDescription>
         </CardHeader>
         <CardContent>
           {/* formAction removido do form, onSubmit é suficiente para client-side auth */}
@@ -135,7 +135,6 @@ export default function LoginPage() {
                 type="email" 
                 placeholder="seu@email.com" 
                 required 
-                // defaultValue removido
                 className="text-base py-3 px-4"/>
             </div>
             <div className="space-y-2">
@@ -146,7 +145,6 @@ export default function LoginPage() {
                 type="password" 
                 placeholder="••••••••"
                 required 
-                // defaultValue removido
                 className="text-base py-3 px-4"/>
             </div>
             <Button type="submit" className="w-full text-lg py-6" disabled={isLoading}>
@@ -155,11 +153,13 @@ export default function LoginPage() {
             </Button>
           </form>
         </CardContent>
-        <CardFooter className="flex flex-col items-center space-y-2">
+        <CardFooter className="flex flex-col items-center space-y-2 pt-4">
            {/* formMessage removido, toasts são usados para feedback */}
+           <p className="text-xs text-muted-foreground">
+             Todos os direitos reservados ao E-Commerce Altenburg
+           </p>
         </CardFooter>
       </Card>
     </div>
   );
 }
-
