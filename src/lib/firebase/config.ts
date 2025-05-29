@@ -5,6 +5,17 @@ import { getFirestore } from 'firebase/firestore';
 
 // CRITICAL: Ensure all these NEXT_PUBLIC_ environment variables are correctly set in your .env file
 // The error "auth/api-key-not-valid" specifically points to an issue with NEXT_PUBLIC_FIREBASE_API_KEY.
+
+console.log('[Firebase Client Config] Reading environment variables:');
+console.log('NEXT_PUBLIC_FIREBASE_API_KEY:', process.env.NEXT_PUBLIC_FIREBASE_API_KEY);
+console.log('NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:', process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN);
+console.log('NEXT_PUBLIC_FIREBASE_PROJECT_ID:', process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID);
+console.log('NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET:', process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET);
+console.log('NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID:', process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID);
+console.log('NEXT_PUBLIC_FIREBASE_APP_ID:', process.env.NEXT_PUBLIC_FIREBASE_APP_ID);
+console.log('NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID:', process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID);
+
+
 const firebaseConfig: FirebaseOptions = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -18,9 +29,19 @@ const firebaseConfig: FirebaseOptions = {
 // Initialize Firebase for client-side
 let clientApp;
 if (!getApps().length) {
-  clientApp = initializeApp(firebaseConfig);
+  console.log('[Firebase Client Config] Initializing Firebase app...');
+  try {
+    clientApp = initializeApp(firebaseConfig);
+    console.log('[Firebase Client Config] Firebase app initialized successfully.');
+  } catch (error) {
+    console.error('[Firebase Client Config] Error initializing Firebase app:', error);
+    console.error('[Firebase Client Config] Ensure all NEXT_PUBLIC_FIREBASE_... variables in your .env file are correct and the server was restarted after changes.');
+    // Rethrow or handle as appropriate for your app's error strategy
+    throw error; 
+  }
 } else {
   clientApp = getApp();
+  console.log('[Firebase Client Config] Firebase app already initialized, getting existing app.');
 }
 
 const clientAuth = getAuth(clientApp);
