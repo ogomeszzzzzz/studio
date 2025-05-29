@@ -7,10 +7,17 @@ import { useRouter } from 'next/navigation';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { clientAuth } from '@/lib/firebase/config';
 import { Button } from '@/components/ui/button';
-import { Loader2, LogOut, LayoutDashboard, UserCircle, PackageSearch, BedDouble } from 'lucide-react';
+import { Loader2, LogOut, LayoutDashboard, UserCircle, PackageSearch, BedDouble, Store, Building, ChevronDown } from 'lucide-react';
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 import type { UserProfile } from '@/types';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { cn } from '@/lib/utils';
 
 
 interface AppLayoutProps {
@@ -22,6 +29,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const { toast } = useToast();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeAccordionItem, setActiveAccordionItem] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(clientAuth, async (firebaseUser) => {
@@ -35,6 +43,17 @@ export default function AppLayout({ children }: AppLayoutProps) {
     });
     return () => unsubscribe();
   }, [router]);
+
+  useEffect(() => {
+    // Automatically open the "E-Commerce" accordion if a sub-link is active
+    // This is a simple check, can be made more robust if needed
+    if (router.pathname?.startsWith('/dashboard') || router.pathname?.startsWith('/restock-opportunities') || router.pathname?.startsWith('/pillow-stock')) {
+      setActiveAccordionItem("ecommerce-category");
+    } else {
+      // Optionally close or set to another default if Varejo items are added
+      // setActiveAccordionItem(undefined); 
+    }
+  }, [router.pathname]);
 
   const handleSignOut = async () => {
     try {
@@ -93,19 +112,43 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <div className="flex min-h-screen">
-      <nav className="w-64 bg-card border-r border-border p-4 space-y-2 hidden md:flex flex-col shadow-md">
-        <Link href="/dashboard" className="flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors">
-            <LayoutDashboard className="h-5 w-5" />
-            <span className="font-medium text-sm">Dashboard</span>
-        </Link>
-        <Link href="/restock-opportunities" className="flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors">
-            <PackageSearch className="h-5 w-5" />
-            <span className="font-medium text-sm">Oportunidades Reabast.</span>
-        </Link>
-        <Link href="/pillow-stock" className="flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors">
-            <BedDouble className="h-5 w-5" /> {/* Using BedDouble for pillows, adjust if a better icon is found */}
-            <span className="font-medium text-sm">Estoque Travesseiros</span>
-        </Link>
+      <nav className="w-64 bg-card border-r border-border p-4 space-y-1 hidden md:flex flex-col shadow-md">
+        <Accordion type="single" collapsible className="w-full" value={activeAccordionItem} onValueChange={setActiveAccordionItem}>
+          <AccordionItem value="ecommerce-category" className="border-b-0">
+            <AccordionTrigger className="p-3 rounded-md hover:bg-muted hover:text-primary transition-colors text-foreground font-medium text-sm no-underline [&[data-state=open]>svg]:text-primary">
+              <div className="flex items-center gap-3">
+                <Store className="h-5 w-5" />
+                <span>E-Commerce</span>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="pt-1 pb-0 pl-4 space-y-1">
+              <Link href="/dashboard" className={cn("flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors pl-5", router.pathname === "/dashboard" && "bg-muted text-primary font-semibold")}>
+                  <LayoutDashboard className="h-5 w-5" />
+                  <span className="font-medium text-sm">Dashboard</span>
+              </Link>
+              <Link href="/restock-opportunities" className={cn("flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors pl-5", router.pathname === "/restock-opportunities" && "bg-muted text-primary font-semibold")}>
+                  <PackageSearch className="h-5 w-5" />
+                  <span className="font-medium text-sm">Oportunidades Reabast.</span>
+              </Link>
+              <Link href="/pillow-stock" className={cn("flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors pl-5", router.pathname === "/pillow-stock" && "bg-muted text-primary font-semibold")}>
+                  <BedDouble className="h-5 w-5" />
+                  <span className="font-medium text-sm">Estoque Travesseiros</span>
+              </Link>
+            </AccordionContent>
+          </AccordionItem>
+
+          <AccordionItem value="retail-category" className="border-b-0">
+            <AccordionTrigger className="p-3 rounded-md hover:bg-muted hover:text-primary transition-colors text-foreground font-medium text-sm no-underline [&[data-state=open]>svg]:text-primary">
+                <div className="flex items-center gap-3">
+                    <Building className="h-5 w-5" />
+                    <span>Varejo</span>
+                </div>
+            </AccordionTrigger>
+            <AccordionContent className="pt-1 pb-0 pl-4">
+              <p className="p-3 text-xs text-muted-foreground pl-5">Nenhuma opção disponível.</p>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
       </nav>
       <div className="flex-1 flex flex-col bg-background">
         <AuthenticatedHeader />
