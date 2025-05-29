@@ -51,26 +51,32 @@ function derivePillowDisplayName(productNameInput: string | undefined): string {
 
   let name = productName.trim();
 
+  // Case-insensitive check for "Travesseiro" prefix
   if (name.toLowerCase().startsWith(PILLOW_NAME_PREFIX.toLowerCase())) {
     name = name.substring(PILLOW_NAME_PREFIX.length).trim();
 
+    // Case-insensitive check for "Altenburg" prefix
     if (name.toLowerCase().startsWith(PILLOW_BRAND_NAME.toLowerCase())) {
       const brandNameLength = PILLOW_BRAND_NAME.length;
+      // Ensure "Altenburg" is a whole word or followed by a space
       if (name.length === brandNameLength || (name.length > brandNameLength && name[brandNameLength] === ' ')) {
          name = name.substring(brandNameLength).trim();
       }
     }
-
-    const words = name.split(/\s+/).filter(word => word.length > 0);
+    
+    // Split into words and take the first two (if they exist)
+    const words = name.split(/\s+/).filter(word => word.length > 0); // Filter out empty strings from multiple spaces
 
     if (words.length === 0) {
-        return productName; 
+        // If only "Travesseiro" or "Travesseiro Altenburg" was present
+        return productName; // Fallback to original full name
     } else if (words.length === 1) {
-      return words[0]; 
+      return words[0]; // e.g., "Gellou"
     } else { 
-      return `${words[0]} ${words[1]}`; 
+      return `${words[0]} ${words[1]}`; // e.g., "Plumi Gold"
     }
   }
+  // If it doesn't start with "Travesseiro", return the original name
   return productName;
 }
 
@@ -138,20 +144,26 @@ export default function PillowStockPage() {
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
       if (!existingDocsSnapshot.empty) {
+        console.log(`PillowStockPage: Deleting ${existingDocsSnapshot.docs.length} existing documents in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < existingDocsSnapshot.docs.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
           const chunk = existingDocsSnapshot.docs.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(docSnapshot => { batch.delete(docSnapshot.ref); totalDeleted++; });
           await batch.commit();
+          console.log(`PillowStockPage: Committed a batch of ${chunk.length} deletions.`);
         }
+        console.log(`PillowStockPage: Successfully deleted ${totalDeleted} existing products.`);
       }
       if (productsToSave.length > 0) {
+        console.log(`PillowStockPage: Adding ${productsToSave.length} new products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
           const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(product => { const newDocRef = doc(productsColRef); batch.set(newDocRef, productToFirestore(product)); totalAdded++; });
           await batch.commit();
+          console.log(`PillowStockPage: Committed a batch of ${chunk.length} additions.`);
         }
+        console.log(`PillowStockPage: Successfully added ${totalAdded} new products.`);
       }
       setAllProducts(productsToSave);
       toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
@@ -179,14 +191,17 @@ export default function PillowStockPage() {
   const aggregatedPillowStock = useMemo(() => {
     const pillowStockMap = new Map<string, number>();
     pillowProducts.forEach(pillow => {
+        // Use the derived display name for aggregation
         const displayName = derivePillowDisplayName(pillow.name);
         pillowStockMap.set(displayName, (pillowStockMap.get(displayName) || 0) + pillow.stock);
       });
     
+    // Sort alphabetically by the derived display name
     const sortedPillows: AggregatedPillow[] = Array.from(pillowStockMap.entries())
       .map(([name, stock]) => ({ name, stock }))
       .sort((a, b) => a.name.localeCompare(b.name)); 
 
+    // Apply search term if present
     if (searchTerm) {
       return sortedPillows.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()));
     }
@@ -233,6 +248,7 @@ export default function PillowStockPage() {
   }, [pillowProducts]);
 
   const noPillowsFoundInExcel = useMemo(() => {
+    // This means data was loaded (allProducts > 0) but no pillows were found (pillowProducts === 0)
     return allProducts.length > 0 && pillowProducts.length === 0;
   }, [allProducts, pillowProducts]);
 
@@ -256,7 +272,7 @@ export default function PillowStockPage() {
         onDataParsed={handleExcelDataProcessed}
         onProcessingStart={handleProcessingStart}
         onProcessingEnd={handleProcessingEnd}
-        collectionColumnKey="Descrição Linha Comercial" 
+        collectionColumnKey="Descrição Linha Comercial" // Not directly used for pillow page logic but required by component
         cardTitle="1. Carregar/Atualizar Dados da Planilha"
         cardDescription={`Faça o upload da planilha de produtos. Os dados substituirão os existentes. Os travesseiros serão filtrados pela coluna 'Tipo. Produto' (esperado: "${PILLOW_PRODUCT_TYPE_EXCEL}").`}
         isProcessingParent={isSavingFirestore || isProcessingExcel}
@@ -315,6 +331,7 @@ export default function PillowStockPage() {
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-bold">{pillowKPIs.totalPillowSKUs}</div>
+                                <p className="text-xs text-muted-foreground">Modelos únicos identificados</p>
                             </CardContent>
                         </Card>
                         <Card className="shadow-sm hover:shadow-md transition-shadow">
@@ -324,25 +341,27 @@ export default function PillowStockPage() {
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-bold">{pillowKPIs.totalPillowUnits.toLocaleString()}</div>
+                                <p className="text-xs text-muted-foreground">Unidades totais de travesseiros</p>
                             </CardContent>
                         </Card>
                         <Card className="shadow-sm hover:shadow-md transition-shadow">
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-medium">Tipos Estoque Baixo</CardTitle>
+                                <CardTitle className="text-sm font-medium">Travesseiros Estoque Baixo</CardTitle>
                                 <TrendingDown className="h-4 w-4 text-destructive" />
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-bold text-destructive">{pillowKPIs.lowStockPillowTypes}</div>
-                                <p className="text-xs text-muted-foreground">&lt; {LOW_STOCK_THRESHOLD_PERCENTAGE*100}% do máx.</p>
+                                <p className="text-xs text-muted-foreground">Modelos com &lt; {MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE} unid.</p>
                             </CardContent>
                         </Card>
                         <Card className="shadow-sm hover:shadow-md transition-shadow">
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-medium">Tipos Estoque Zerado</CardTitle>
+                                <CardTitle className="text-sm font-medium">Travesseiros Estoque Zerado</CardTitle>
                                 <PackageX className="h-4 w-4 text-red-700" />
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-bold text-red-700">{pillowKPIs.zeroStockPillowTypes}</div>
+                                <p className="text-xs text-muted-foreground">Modelos sem nenhuma unidade</p>
                             </CardContent>
                         </Card>
                         <Card className="shadow-sm hover:shadow-md transition-shadow">
@@ -352,6 +371,7 @@ export default function PillowStockPage() {
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-bold">{pillowKPIs.averageStockPerType.toLocaleString()}</div>
+                                <p className="text-xs text-muted-foreground">Unidades médias por modelo único</p>
                             </CardContent>
                         </Card>
                     </div>
@@ -429,7 +449,7 @@ export default function PillowStockPage() {
                         key={pillow.name} 
                         pillowName={pillow.name}
                         currentStock={pillow.stock}
-                        maxStock={MAX_STOCK_PER_PILLOW_COLUMN} 
+                        maxStock={MAX_STOCK_PER_PILLOW_COLUMN} // Passa o máximo para o componente
                         />
                     ))}
                     </div>
