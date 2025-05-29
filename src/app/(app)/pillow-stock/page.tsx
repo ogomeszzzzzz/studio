@@ -5,7 +5,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import { PillowStackColumn } from '@/components/domain/PillowStackColumn';
 import type { Product } from '@/types';
-import { BedDouble, Loader2, Database, Filter as FilterIcon, AlertTriangle, ShoppingBag, TrendingDown, PackageX, BarChart3, ListFilter, SortAsc, SortDesc, RefreshCw } from 'lucide-react';
+import { BedDouble, Loader2, Database, Filter as FilterIcon, AlertTriangle, ShoppingBag, TrendingDown, PackageX, BarChart3, ListFilter, SortAsc, SortDesc } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { clientAuth, firestore } from '@/lib/firebase/config';
@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { fetchPillowStockFromVtex, type UpdatedPillowStockInfo } from '@/app/actions/vtex';
+// Removed: import { fetchPillowStockFromVtex, type UpdatedPillowStockInfo } from '@/app/actions/vtex';
 
 
 const FIRESTORE_BATCH_LIMIT = 450;
@@ -83,7 +83,7 @@ export default function PillowStockPage() {
   const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
   const [isSavingFirestore, setIsSavingFirestore] = useState(false);
   const [isProcessingExcel, setIsProcessingExcel] = useState(false);
-  const [isUpdatingVtexStock, setIsUpdatingVtexStock] = useState(false);
+  // Removed: const [isUpdatingVtexStock, setIsUpdatingVtexStock] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
@@ -255,7 +255,7 @@ export default function PillowStockPage() {
     if (pillowProducts.length === 0) return { totalPillowSKUs: 0, totalPillowUnits: 0, lowStockPillowTypes: 0, zeroStockPillowTypes: 0, averageStockPerType: 0 };
     
     // Use aggregatedPillowStockState for KPIs if it's already computed based on display names
-    const uniquePillowDisplays = aggregatedPillowStockState; // Or re-aggregate from pillowProducts if more accurate for KPIs
+    const uniquePillowDisplays = aggregatedPillowStockState; 
 
     const totalPillowSKUs = uniquePillowDisplays.length;
     const totalPillowUnits = uniquePillowDisplays.reduce((sum, p) => sum + p.stock, 0);
@@ -264,83 +264,13 @@ export default function PillowStockPage() {
     const zeroStockPillowTypes = uniquePillowDisplays.filter(p => p.stock === 0).length;
     const averageStockPerType = totalPillowSKUs > 0 ? parseFloat((totalPillowUnits / totalPillowSKUs).toFixed(1)) : 0;
     return { totalPillowSKUs, totalPillowUnits, lowStockPillowTypes, zeroStockPillowTypes, averageStockPerType };
-  }, [pillowProducts, aggregatedPillowStockState]); // Added aggregatedPillowStockState
+  }, [pillowProducts, aggregatedPillowStockState]); 
 
   const noPillowsFoundInExcel = useMemo(() => {
     return allProducts.length > 0 && pillowProducts.length === 0;
   }, [allProducts, pillowProducts]);
 
-
-  const handleUpdateVtexStock = async () => {
-    if (!currentUser) {
-      toast({ title: "Usuário não autenticado", description: "Faça login para atualizar o estoque.", variant: "destructive" });
-      return;
-    }
-    if (aggregatedPillowStockState.length === 0) {
-      toast({ title: "Sem Travesseiros", description: "Nenhum travesseiro para atualizar.", variant: "default" });
-      return;
-    }
-
-    setIsUpdatingVtexStock(true);
-    toast({ title: "Atualizando Estoque VTEX...", description: "Buscando dados da VTEX. Isso pode levar alguns instantes." });
-
-    const pillowsToUpdate: UpdatePillowStockInputEntry[] = aggregatedPillowStockState
-        .filter(p => p.derivation) // Only include pillows with a derivation ID
-        .map(p => ({
-            derivation: p.derivation!,
-            displayName: p.name,
-        }));
-    
-    if (pillowsToUpdate.length === 0) {
-        toast({ title: "Sem Identificadores", description: "Nenhum travesseiro com ID de derivação encontrado para atualização.", variant: "destructive" });
-        setIsUpdatingVtexStock(false);
-        return;
-    }
-
-    try {
-        const updatedStockInfo = await fetchPillowStockFromVtex(pillowsToUpdate);
-        
-        let successfulUpdates = 0;
-        let failedUpdates = 0;
-
-        setAggregatedPillowStockState(prevPillows => {
-            return prevPillows.map(pillow => {
-                const updateInfo = updatedStockInfo.find(u => u.derivation === pillow.derivation);
-                if (updateInfo && typeof updateInfo.newStock === 'number') {
-                    successfulUpdates++;
-                    return {
-                        ...pillow,
-                        stock: updateInfo.newStock,
-                        fillPercentage: (updateInfo.newStock / MAX_STOCK_PER_PILLOW_COLUMN) * 100,
-                    };
-                } else if (updateInfo && updateInfo.error) {
-                    failedUpdates++;
-                    toast({
-                        title: `Erro ao atualizar ${pillow.name}`,
-                        description: updateInfo.error,
-                        variant: "destructive",
-                        duration: 5000,
-                    });
-                }
-                return pillow;
-            });
-        });
-        
-        if (successfulUpdates > 0) {
-            toast({ title: "Estoque Atualizado!", description: `${successfulUpdates} travesseiro(s) atualizado(s) com dados da VTEX.` });
-        }
-        if (failedUpdates === 0 && successfulUpdates === 0) {
-             toast({ title: "Nenhuma Atualização", description: "Não foi possível obter novos dados de estoque da VTEX ou não houve mudanças.", variant: "default" });
-        }
-
-    } catch (error) {
-        console.error("Error calling fetchPillowStockFromVtex action:", error);
-        toast({ title: "Erro na Atualização", description: `Falha ao buscar dados da VTEX: ${(error as Error).message}`, variant: "destructive" });
-    } finally {
-        setIsUpdatingVtexStock(false);
-    }
-  };
-
+  // Removed handleUpdateVtexStock function
 
   const isAnyDataLoading = isLoadingFirestore || isSavingFirestore || isProcessingExcel;
   const lowStockFilterThreshold = (MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE).toFixed(0);
@@ -359,18 +289,7 @@ export default function PillowStockPage() {
             Visualize o estoque de travesseiros em colunas de empilhamento e analise os principais indicadores.
           </p>
         </div>
-        <Button 
-            onClick={handleUpdateVtexStock} 
-            disabled={isAnyDataLoading || isUpdatingVtexStock || aggregatedPillowStockState.length === 0}
-            variant="outline"
-        >
-            {isUpdatingVtexStock ? (
-                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-            ) : (
-                <RefreshCw className="mr-2 h-5 w-5" />
-            )}
-            Atualizar Estoque da VTEX
-        </Button>
+        {/* Removed VTEX Update Button */}
       </div>
 
       <ExcelUploadSection
@@ -383,21 +302,21 @@ export default function PillowStockPage() {
         isProcessingParent={isSavingFirestore}
       />
 
-      {(isAnyDataLoading || isUpdatingVtexStock) && (
+      {isAnyDataLoading && (
         <Card className="shadow-lg"><CardHeader><CardTitle className="flex items-center">
               <Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" />
-              {isSavingFirestore ? "Salvando..." : (isProcessingExcel ? "Processando..." : (isUpdatingVtexStock ? "Atualizando da VTEX..." : "Carregando..."))}
+              {isSavingFirestore ? "Salvando..." : (isProcessingExcel ? "Processando..." : "Carregando...")}
             </CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Aguarde.</p></CardContent></Card>
       )}
 
-      {!isAnyDataLoading && !isUpdatingVtexStock && allProducts.length === 0 && (
+      {!isAnyDataLoading && allProducts.length === 0 && (
         <Card className="shadow-lg text-center py-10"><CardHeader><CardTitle className="flex items-center justify-center text-xl">
               <Database className="mr-2 h-7 w-7 text-primary" /> Comece Carregando os Dados
             </CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Carregue um arquivo Excel para visualizar o estoque de travesseiros.</p>
             <p className="text-sm text-muted-foreground mt-2">Os dados da planilha serão salvos em seu perfil.</p></CardContent></Card>
       )}
 
-      {!isAnyDataLoading && !isUpdatingVtexStock && allProducts.length > 0 && (
+      {!isAnyDataLoading && allProducts.length > 0 && (
         <>
           <Card className="shadow-md border-primary/30 border-l-4">
             <CardHeader><CardTitle className="flex items-center"><BarChart3 className="mr-2 h-5 w-5 text-primary" />Indicadores Chave de Travesseiros</CardTitle></CardHeader>
@@ -500,3 +419,5 @@ export default function PillowStockPage() {
     </div>
   );
 }
+
+    
