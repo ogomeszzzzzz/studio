@@ -137,8 +137,8 @@ export default function PillowStockPage() {
     allProducts
       .filter(p => p.productType?.toUpperCase() === PILLOW_PRODUCT_TYPE)
       .forEach(pillow => {
-        // Using productDerivation for more specific pillow types if available, otherwise name
-        const pillowKey = pillow.productDerivation || pillow.name || "Travesseiro Desconhecido";
+        // Using product name as the primary key; falls back to derivation if name is not available.
+        const pillowKey = pillow.name || pillow.productDerivation || "Travesseiro Desconhecido";
         pillowStockMap.set(pillowKey, (pillowStockMap.get(pillowKey) || 0) + pillow.stock);
       });
     
