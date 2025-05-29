@@ -20,9 +20,9 @@ const FIRESTORE_BATCH_LIMIT = 450;
 const PILLOW_PRODUCT_TYPE_EXCEL = "TRAVESSEIRO";
 const PILLOW_NAME_PREFIX = "Travesseiro";
 const PILLOW_BRAND_NAME = "Altenburg";
-const MAX_STOCK_PER_PILLOW_COLUMN = 100;
-const LOW_STOCK_THRESHOLD_PERCENTAGE = 0.25; // stock > 0 AND stock < MAX_STOCK * 0.25
-const GOOD_STOCK_THRESHOLD_PERCENTAGE = 0.75; // stock >= MAX_STOCK * 0.75 AND stock <= MAX_STOCK
+const MAX_STOCK_PER_PILLOW_COLUMN = 75; // Updated from 100
+const LOW_STOCK_THRESHOLD_PERCENTAGE = 0.25; 
+const GOOD_STOCK_THRESHOLD_PERCENTAGE = 0.75; 
 
 type SortCriteria = 'name' | 'stock' | 'fillPercentage';
 type SortOrder = 'asc' | 'desc';
@@ -32,7 +32,7 @@ type StockStatusFilter = 'all' | 'empty' | 'low' | 'medium' | 'good' | 'overstoc
 interface AggregatedPillow {
   name: string;
   stock: number;
-  fillPercentage: number; // For sorting
+  fillPercentage: number; 
 }
 
 const productToFirestore = (product: Product): any => {
@@ -64,11 +64,11 @@ function derivePillowDisplayName(productNameInput: string | undefined): string {
       }
     }
     const words = name.split(/\s+/).filter(word => word.length > 0);
-    if (words.length === 0) return productName;
+    if (words.length === 0) return productName; // Fallback if stripping leaves nothing
     else if (words.length === 1) return words[0];
     else return `${words[0]} ${words[1]}`;
   }
-  return productName;
+  return productName; // Return original if it doesn't start with "Travesseiro"
 }
 
 
@@ -97,7 +97,7 @@ export default function PillowStockPage() {
   }, []);
 
   useEffect(() => {
-    if (currentUser && allProducts.length === 0 && !isSavingFirestore && !isLoadingFirestore) {
+    if (currentUser && allProducts.length === 0 && !isSavingFirestore && !isProcessingExcel) { // Added !isProcessingExcel
       console.log(`PillowStockPage: Fetching products for user UID: ${currentUser.uid} because allProducts is empty.`);
       setIsLoadingFirestore(true);
       const fetchProducts = async () => {
@@ -107,7 +107,8 @@ export default function PillowStockPage() {
           const productsFromDb = snapshot.docs.map(doc => productFromFirestore(doc.data()));
           setAllProducts(productsFromDb);
           if (productsFromDb.length > 0) {
-            toast({ title: "Dados Carregados", description: "Dados de produtos carregados do banco de dados." });
+            // Toast might be too noisy if data always loads from DB
+            // toast({ title: "Dados Carregados", description: "Dados de produtos carregados do banco de dados." });
           }
         } catch (error) {
           console.error("Error fetching products from Firestore (Pillow Stock):", error);
@@ -123,7 +124,7 @@ export default function PillowStockPage() {
     } else if (!currentUser) {
       setIsLoadingFirestore(false);
     }
-  }, [currentUser, toast, allProducts.length, isSavingFirestore, isLoadingFirestore]);
+  }, [currentUser, toast, allProducts.length, isSavingFirestore, isProcessingExcel]); // Added isProcessingExcel to dependencies
 
   const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
     if (!currentUser) {
@@ -162,9 +163,10 @@ export default function PillowStockPage() {
   }, [currentUser, toast]);
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
-    setIsProcessingExcel(true);
+    setIsProcessingExcel(true); // Set processing excel true
     await saveProductsToFirestore(parsedProducts);
-    setIsProcessingExcel(false);
+    // setAllProducts(parsedProducts); // Update local state immediately, then save to FS
+    setIsProcessingExcel(false); // Set processing excel false
   }, [saveProductsToFirestore]);
 
   const pillowProducts = useMemo(() => {
@@ -248,6 +250,9 @@ export default function PillowStockPage() {
   }, [allProducts, pillowProducts]);
 
   const isAnyDataLoading = isLoadingFirestore || isSavingFirestore || isProcessingExcel;
+  const lowStockFilterThreshold = (MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE).toFixed(0);
+  const goodStockFilterThreshold = (MAX_STOCK_PER_PILLOW_COLUMN * GOOD_STOCK_THRESHOLD_PERCENTAGE).toFixed(0);
+
 
   return (
     <div className="space-y-6">
@@ -267,10 +272,10 @@ export default function PillowStockPage() {
         onDataParsed={handleExcelDataProcessed}
         onProcessingStart={() => setIsProcessingExcel(true)}
         onProcessingEnd={() => setIsProcessingExcel(false)}
-        collectionColumnKey="Descrição Linha Comercial"
+        collectionColumnKey="Descrição Linha Comercial" // This prop isn't strictly used for filtering here, but parser needs it
         cardTitle="1. Carregar/Atualizar Dados da Planilha"
         cardDescription={`Faça o upload da planilha. Os travesseiros serão filtrados pela coluna 'Tipo. Produto' (esperado: "${PILLOW_PRODUCT_TYPE_EXCEL}").`}
-        isProcessingParent={isSavingFirestore || isProcessingExcel}
+        isProcessingParent={isSavingFirestore} // isProcessingExcel is handled internally by this component mostly
       />
 
       {isAnyDataLoading && (
@@ -283,8 +288,8 @@ export default function PillowStockPage() {
       {!isAnyDataLoading && allProducts.length === 0 && (
         <Card className="shadow-lg text-center py-10"><CardHeader><CardTitle className="flex items-center justify-center text-xl">
               <Database className="mr-2 h-7 w-7 text-primary" /> Comece Carregando os Dados
-            </CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Carregue um arquivo Excel para visualizar.</p>
-            <p className="text-sm text-muted-foreground mt-2">Os dados serão salvos em seu perfil.</p></CardContent></Card>
+            </CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Carregue um arquivo Excel para visualizar o estoque de travesseiros.</p>
+            <p className="text-sm text-muted-foreground mt-2">Os dados da planilha serão salvos em seu perfil.</p></CardContent></Card>
       )}
 
       {!isAnyDataLoading && allProducts.length > 0 && (
@@ -292,13 +297,13 @@ export default function PillowStockPage() {
           <Card className="shadow-md border-primary/30 border-l-4">
             <CardHeader><CardTitle className="flex items-center"><BarChart3 className="mr-2 h-5 w-5 text-primary" />Indicadores Chave de Travesseiros</CardTitle></CardHeader>
             <CardContent>
-                {pillowProducts.length === 0 && !noPillowsFoundInExcel && (<p className="text-muted-foreground">Nenhum travesseiro encontrado para exibir indicadores.</p>)}
-                {noPillowsFoundInExcel && (<p className="text-muted-foreground">Nenhum produto com "Tipo. Produto" igual a "{PILLOW_PRODUCT_TYPE_EXCEL}" foi encontrado.</p>)}
+                {pillowProducts.length === 0 && !noPillowsFoundInExcel && (<p className="text-muted-foreground">Nenhum travesseiro encontrado (coluna "Tipo. Produto" diferente de "{PILLOW_PRODUCT_TYPE_EXCEL}").</p>)}
+                {noPillowsFoundInExcel && (<p className="text-muted-foreground">Nenhum produto com "Tipo. Produto" igual a "{PILLOW_PRODUCT_TYPE_EXCEL}" foi encontrado na planilha carregada.</p>)}
                 {pillowProducts.length > 0 && (
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
                         <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Modelos de Travesseiros</CardTitle><BedDouble className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{pillowKPIs.totalPillowSKUs}</div><p className="text-xs text-muted-foreground">Modelos únicos</p></CardContent></Card>
                         <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Total em Estoque</CardTitle><ShoppingBag className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{pillowKPIs.totalPillowUnits.toLocaleString()}</div><p className="text-xs text-muted-foreground">Unidades totais</p></CardContent></Card>
-                        <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Travesseiros Estoque Baixo</CardTitle><TrendingDown className="h-4 w-4 text-destructive" /></CardHeader><CardContent><div className="text-2xl font-bold text-destructive">{pillowKPIs.lowStockPillowTypes}</div><p className="text-xs text-muted-foreground">Modelos &lt; {MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE} unid.</p></CardContent></Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Travesseiros Estoque Baixo</CardTitle><TrendingDown className="h-4 w-4 text-destructive" /></CardHeader><CardContent><div className="text-2xl font-bold text-destructive">{pillowKPIs.lowStockPillowTypes}</div><p className="text-xs text-muted-foreground">Modelos &lt; {lowStockFilterThreshold} unid.</p></CardContent></Card>
                         <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Travesseiros Estoque Zerado</CardTitle><PackageX className="h-4 w-4 text-red-700" /></CardHeader><CardContent><div className="text-2xl font-bold text-red-700">{pillowKPIs.zeroStockPillowTypes}</div><p className="text-xs text-muted-foreground">Modelos sem unidades</p></CardContent></Card>
                         <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Média Estoque/Modelo</CardTitle><BarChart3 className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl font-bold">{pillowKPIs.averageStockPerType.toLocaleString()}</div><p className="text-xs text-muted-foreground">Unid. médias por modelo</p></CardContent></Card>
                     </div>
@@ -324,9 +329,9 @@ export default function PillowStockPage() {
                     <SelectContent>
                       <SelectItem value="all">Todos</SelectItem>
                       <SelectItem value="empty">Vazio (0 unidades)</SelectItem>
-                      <SelectItem value="low">Estoque Baixo (&lt; {(MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE).toFixed(0)} unidades)</SelectItem>
-                      <SelectItem value="medium">Estoque Médio ({(MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE).toFixed(0)}-{(MAX_STOCK_PER_PILLOW_COLUMN * GOOD_STOCK_THRESHOLD_PERCENTAGE).toFixed(0)-1} unidades)</SelectItem>
-                      <SelectItem value="good">Estoque Bom (&ge; {(MAX_STOCK_PER_PILLOW_COLUMN * GOOD_STOCK_THRESHOLD_PERCENTAGE).toFixed(0)} unidades)</SelectItem>
+                      <SelectItem value="low">Estoque Baixo (&lt; {lowStockFilterThreshold} unidades)</SelectItem>
+                      <SelectItem value="medium">Estoque Médio ({lowStockFilterThreshold}-{(Number(goodStockFilterThreshold)-1).toFixed(0)} unidades)</SelectItem>
+                      <SelectItem value="good">Estoque Bom (&ge; {goodStockFilterThreshold} unidades)</SelectItem>
                       <SelectItem value="overstocked">Superestocado (&gt; {MAX_STOCK_PER_PILLOW_COLUMN} unidades)</SelectItem>
                     </SelectContent>
                   </Select>
@@ -355,7 +360,7 @@ export default function PillowStockPage() {
 
           {noPillowsFoundInExcel && (
             <Card className="shadow-md my-6 border-blue-500/50 border-l-4"><CardHeader><CardTitle className="flex items-center text-blue-700">
-                  <AlertTriangle className="mr-2 h-5 w-5" />Nenhum Travesseiro na Planilha</CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Nenhum produto com "Tipo. Produto" igual a "{PILLOW_PRODUCT_TYPE_EXCEL}" foi encontrado.</p>
+                  <AlertTriangle className="mr-2 h-5 w-5" />Nenhum Travesseiro na Planilha</CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Nenhum produto com "Tipo. Produto" igual a "{PILLOW_PRODUCT_TYPE_EXCEL}" foi encontrado na planilha carregada.</p>
                 <p className="text-muted-foreground mt-2">Verifique sua planilha ou carregue uma nova.</p></CardContent></Card>
           )}
 

@@ -9,8 +9,8 @@ interface PillowStackColumnProps {
   maxStock?: number;
 }
 
-const DEFAULT_MAX_STOCK = 100;
-const LOW_STOCK_WARNING_THRESHOLD_PERCENTAGE = 0.25; // 25% of maxStock for warning
+const DEFAULT_MAX_STOCK = 75; // Updated from 100
+const LOW_STOCK_WARNING_THRESHOLD_PERCENTAGE = 0.25; 
 
 export function PillowStackColumn({
   pillowName,
@@ -19,21 +19,21 @@ export function PillowStackColumn({
 }: PillowStackColumnProps) {
   const stockPercentage = Math.min(Math.max((currentStock / maxStock) * 100, 0), 100);
   const isEmpty = currentStock <= 0;
-  const isFull = currentStock >= maxStock && currentStock > 0; // Only full if it has stock and meets/exceeds max
+  const isFull = currentStock >= maxStock && currentStock > 0; 
   const isOverStocked = currentStock > maxStock;
   const lowStockThresholdValue = maxStock * LOW_STOCK_WARNING_THRESHOLD_PERCENTAGE;
   const isLowStock = currentStock > 0 && currentStock < lowStockThresholdValue;
 
 
-  let fillColor = 'bg-primary'; // Default fill color (can be changed to a neutral if preferred for >75%)
+  let fillColor = 'bg-primary'; 
   if (isEmpty) {
-    fillColor = 'bg-muted'; // Empty
+    fillColor = 'bg-muted'; 
   } else if (isLowStock) {
-    fillColor = 'bg-destructive'; // Low stock (e.g., < 25%)
-  } else if (stockPercentage < 75) {
-    fillColor = 'bg-yellow-500'; // Medium stock (e.g., 25% - 74%)
+    fillColor = 'bg-destructive'; 
+  } else if (stockPercentage < 75) { // 75% of maxStock
+    fillColor = 'bg-yellow-500'; 
   } else {
-    fillColor = 'bg-green-500'; // Good stock (e.g., >= 75%)
+    fillColor = 'bg-green-500'; 
   }
 
 
@@ -75,6 +75,9 @@ export function PillowStackColumn({
             )}
             </p>
             {isLowStock && <p className="text-xs font-semibold text-destructive mt-1">Baixo Estoque!</p>}
+            <p className="text-xs font-medium text-foreground mt-1">
+              Preenchimento: {stockPercentage.toFixed(0)}%
+            </p>
         </div>
       </CardContent>
     </Card>
