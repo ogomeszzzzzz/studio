@@ -58,7 +58,7 @@ interface SkuStockStatusData {
 }
 
 const ALL_COLLECTIONS_VALUE = "_ALL_DASHBOARD_COLLECTIONS_";
-const FIRESTORE_BATCH_LIMIT = 450;
+const FIRESTORE_BATCH_LIMIT = 450; // Max operations in a single batch (deletes + adds)
 
 const chartConfigBase = {
   stock: {
@@ -85,7 +85,7 @@ const chartConfigBase = {
 } satisfies ChartConfig;
 
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
-const PIE_COLORS = ["hsl(var(--primary))", "hsl(var(--destructive))"]; 
+const PIE_COLORS = ["hsl(var(--primary))", "hsl(var(--destructive))"];
 
 const productToFirestore = (product: Product): any => {
   return {
@@ -115,28 +115,27 @@ export default function DashboardPage() {
   const [isSavingFirestore, setIsSavingFirestore] = useState(false);
 
   const [selectedCollection, setSelectedCollection] = useState<string>(ALL_COLLECTIONS_VALUE);
-  // Removed vtexIdStatusFilterDashboard state
 
 
   useEffect(() => {
     const unsubscribe = clientAuth.onAuthStateChanged((user) => {
       setCurrentUser(user);
       if (!user) {
-        setDashboardProducts([]); 
-        setIsLoadingFirestore(false); 
+        setDashboardProducts([]);
+        setIsLoadingFirestore(false);
       }
     });
     return () => unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (currentUser && dashboardProducts.length === 0 && !isSavingFirestore) { 
+    if (currentUser && dashboardProducts.length === 0 && !isSavingFirestore) {
       console.log(`DashboardPage: Fetching products for user UID: ${currentUser.uid} because dashboardProducts is empty.`);
       setIsLoadingFirestore(true);
       const fetchProducts = async () => {
         try {
           const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
-          const snapshot = await getDocs(query(productsCol)); 
+          const snapshot = await getDocs(query(productsCol));
           const productsFromDb = snapshot.docs.map(doc => productFromFirestore(doc.data()));
           setDashboardProducts(productsFromDb);
           if (productsFromDb.length > 0) {
@@ -152,7 +151,7 @@ export default function DashboardPage() {
       fetchProducts();
     } else if (currentUser && dashboardProducts.length > 0) {
       console.log(`DashboardPage: Products already loaded for user UID: ${currentUser.uid}. Skipping fetch.`);
-      setIsLoadingFirestore(false); 
+      setIsLoadingFirestore(false);
     } else if (!currentUser) {
       setIsLoadingFirestore(false);
     }
@@ -171,10 +170,11 @@ export default function DashboardPage() {
 
     try {
       const productsColRef = collection(firestore, 'users', currentUser.uid, 'products');
-      
+
+      // Delete existing products in chunks
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
-      
+
       if (!existingDocsSnapshot.empty) {
         console.log(`DashboardPage: Deleting ${existingDocsSnapshot.docs.length} existing documents in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < existingDocsSnapshot.docs.length; i += FIRESTORE_BATCH_LIMIT) {
@@ -190,13 +190,14 @@ export default function DashboardPage() {
         console.log(`DashboardPage: Successfully deleted ${totalDeleted} existing products.`);
       }
 
+      // Add new products in chunks
       if (productsToSave.length > 0) {
         console.log(`DashboardPage: Adding ${productsToSave.length} new products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
           const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(product => {
-            const newDocRef = doc(productsColRef); 
+            const newDocRef = doc(productsColRef); // Auto-generate ID
             batch.set(newDocRef, productToFirestore(product));
             totalAdded++;
           });
@@ -205,13 +206,17 @@ export default function DashboardPage() {
         }
         console.log(`DashboardPage: Successfully added ${totalAdded} new products.`);
       }
-      
-      setDashboardProducts(productsToSave); 
+
+      setDashboardProducts(productsToSave);
       toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
 
     } catch (error) {
       console.error("Error saving products to Firestore (Dashboard):", error);
-      toast({ title: "Erro ao Salvar", description: `Não foi possível salvar: ${(error as Error).message}`, variant: "destructive" });
+      if ((error as any).code === 'failed-precondition' && (error as any).message.includes('too big')) {
+         toast({ title: "Erro ao Salvar", description: `Muitos produtos para processar de uma vez. Tente com um arquivo menor. (Erro: Transação muito grande)`, variant: "destructive" });
+      } else {
+        toast({ title: "Erro ao Salvar", description: `Não foi possível salvar: ${(error as Error).message}`, variant: "destructive" });
+      }
     } finally {
       setIsSavingFirestore(false);
     }
@@ -219,7 +224,7 @@ export default function DashboardPage() {
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
     await saveProductsToFirestore(parsedProducts);
-  }, [saveProductsToFirestore]); 
+  }, [saveProductsToFirestore]);
 
 
   const handleProcessingStart = () => setIsProcessingExcel(true);
@@ -235,7 +240,6 @@ export default function DashboardPage() {
     if (selectedCollection !== ALL_COLLECTIONS_VALUE) {
       products = products.filter(p => p.collection === selectedCollection);
     }
-    // Removed vtexIdStatusFilterDashboard logic
     return products;
   }, [dashboardProducts, selectedCollection]);
 
@@ -254,7 +258,7 @@ export default function DashboardPage() {
         totalZeroStockSkus: 0,
         totalReadyToShipStock: 0,
         totalRegulatorStock: 0,
-        totalOpenOrders: 0, 
+        totalOpenOrders: 0,
       };
     }
 
@@ -269,19 +273,19 @@ export default function DashboardPage() {
     let totalZeroStockSkus = 0;
     let totalReadyToShipStock = 0;
     let totalRegulatorStock = 0;
-    let totalOpenOrders = 0; 
+    let totalOpenOrders = 0;
 
     filteredProductsForDashboard.forEach(product => {
       const collectionKey = product.collection || 'Não Especificada';
       const typeKey = product.productType || 'Não Especificado';
       const sizeKey = product.size || 'Não Especificado';
-      const printKey = product.description || 'Não Especificada'; 
+      const printKey = product.description || 'Não Especificada';
 
       const currentCol = stockByCollectionMap.get(collectionKey) || { stock: 0, skus: 0 };
       currentCol.stock += product.stock;
       currentCol.skus += 1;
       stockByCollectionMap.set(collectionKey, currentCol);
-      
+
       const currentType = skusByProductTypeMap.get(typeKey) || { totalSkus: 0, skusWithStock: 0, skusWithoutStock: 0 };
       currentType.totalSkus += 1;
       if (product.stock > 0) currentType.skusWithStock += 1;
@@ -307,9 +311,9 @@ export default function DashboardPage() {
       totalStock += product.stock;
       totalReadyToShipStock += product.readyToShip;
       totalRegulatorStock += product.regulatorStock;
-      totalOpenOrders += product.openOrders; 
+      totalOpenOrders += product.openOrders;
     });
-    
+
     const collectionRupturePercentageData: CollectionRuptureData[] = Array.from(stockByCollectionMap.entries()).map(([name, collData]) => {
       const zeroStockData = zeroStockSkusByCollectionMap.get(name);
       const zeroStockCount = zeroStockData ? zeroStockData.count : 0;
@@ -340,14 +344,14 @@ export default function DashboardPage() {
       totalZeroStockSkus,
       totalReadyToShipStock,
       totalRegulatorStock,
-      totalOpenOrders, 
+      totalOpenOrders,
     };
   }, [filteredProductsForDashboard]);
 
   const createChartConfig = (data: {name: string}[], useBaseColors: boolean = false) => {
-    const config: ChartConfig = {...chartConfigBase}; 
+    const config: ChartConfig = {...chartConfigBase};
     data.forEach((item, index) => {
-      if (!config[item.name] && useBaseColors) { 
+      if (!config[item.name] && useBaseColors) {
         config[item.name] = {
           label: item.name,
           color: COLORS[index % COLORS.length],
@@ -364,7 +368,7 @@ export default function DashboardPage() {
   const skusBySizeChartConfig = useMemo(() => createChartConfig(aggregatedData.skusBySize), [aggregatedData.skusBySize]);
   const stockByPrintChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByPrint, true), [aggregatedData.stockByPrint]);
   const zeroStockSkusChartConfig = useMemo(() => createChartConfig(aggregatedData.zeroStockSkusByCollection, true), [aggregatedData.zeroStockSkusByCollection]);
-  
+
   const collectionRuptureChartConfig = useMemo(() => {
     const config: ChartConfig = {
         rupturePercentage: {
@@ -373,8 +377,8 @@ export default function DashboardPage() {
         },
     };
     aggregatedData.collectionRupturePercentage.forEach((item) => {
-        if (!config[item.name]) { 
-          config[item.name] = { 
+        if (!config[item.name]) {
+          config[item.name] = {
               label: item.name,
           };
         }
@@ -416,8 +420,7 @@ export default function DashboardPage() {
       if(selectedCollection !== ALL_COLLECTIONS_VALUE) {
         appliedFiltersText.push(`Coleção: ${selectedCollection}`);
       }
-      // Removed vtexIdStatusFilter from PDF title
-      
+
       doc.setFontSize(18);
       doc.text(reportTitle, pageWidth / 2, yPos, { align: "center" });
       yPos += 10;
@@ -440,7 +443,7 @@ export default function DashboardPage() {
         ["Estoque Total", aggregatedData.totalStock.toLocaleString()],
         ["Pronta Entrega", aggregatedData.totalReadyToShipStock.toLocaleString()],
         ["Regulador", aggregatedData.totalRegulatorStock.toLocaleString()],
-        ["Pedidos em Aberto", aggregatedData.totalOpenOrders.toLocaleString()], 
+        ["Pedidos em Aberto", aggregatedData.totalOpenOrders.toLocaleString()],
         ["Total SKUs", aggregatedData.totalSkus.toLocaleString()],
         ["Total SKUs Zerados", aggregatedData.totalZeroStockSkus.toLocaleString()],
       ];
@@ -468,8 +471,8 @@ export default function DashboardPage() {
           yPos += 8;
           return;
         }
-        
-        if (yPos + 10 > pageHeight - margin) { 
+
+        if (yPos + 10 > pageHeight - margin) {
              doc.addPage();
              yPos = margin;
         }
@@ -481,19 +484,19 @@ export default function DashboardPage() {
 
 
         try {
-          const canvas = await html2canvas(chartElement, { 
-            scale: 1.5, 
-            useCORS: true, 
+          const canvas = await html2canvas(chartElement, {
+            scale: 1.5,
+            useCORS: true,
             logging: false,
-            backgroundColor: '#ffffff' 
+            backgroundColor: '#ffffff'
           });
-          const imgData = canvas.toDataURL('image/png', 0.95); 
-          
+          const imgData = canvas.toDataURL('image/png', 0.95);
+
           const imgProps = doc.getImageProperties(imgData);
           let imgHeight = (imgProps.height * contentWidth) / imgProps.width;
           let imgWidth = contentWidth;
 
-          const maxChartHeight = pageHeight * 0.45; 
+          const maxChartHeight = pageHeight * 0.45;
           if (imgHeight > maxChartHeight) {
               imgHeight = maxChartHeight;
               imgWidth = (imgProps.width * imgHeight) / imgProps.height;
@@ -509,7 +512,7 @@ export default function DashboardPage() {
             yPos += 8;
           }
           doc.addImage(imgData, 'PNG', margin, yPos, imgWidth, imgHeight);
-          yPos += imgHeight + 10; 
+          yPos += imgHeight + 10;
         } catch (error) {
           console.error(`Erro ao capturar gráfico ${elementId}:`, error);
           doc.setTextColor(255,0,0);
@@ -531,7 +534,7 @@ export default function DashboardPage() {
       ];
 
       for (const chartInfo of chartSections) {
-         if (chartInfo.data && chartInfo.data.length > 0) { 
+         if (chartInfo.data && chartInfo.data.length > 0) {
             await addChartToPdf(chartInfo.id, chartInfo.title);
          } else {
             if (yPos + 10 > pageHeight - margin) { doc.addPage(); yPos = margin; }
@@ -542,12 +545,11 @@ export default function DashboardPage() {
             yPos += 10;
          }
       }
-      
+
       let pdfFileName = `Relatorio_Dashboard_${new Date().toISOString().split('T')[0]}`;
       if (selectedCollection !== ALL_COLLECTIONS_VALUE) {
         pdfFileName += `_${selectedCollection.replace(/[^a-zA-Z0-9]/g, '_')}`;
       }
-      // Removed vtexIdStatusFilter from PDF file name
       pdfFileName += '.pdf';
 
       doc.save(pdfFileName);
@@ -567,7 +569,7 @@ export default function DashboardPage() {
     const y = cy + radius * Math.sin(-midAngle * RADIAN);
     const percentage = (percent * 100).toFixed(0);
 
-    if (percentage === "0") return null; 
+    if (percentage === "0") return null;
 
     return (
       <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize="12px" fontWeight="bold">
@@ -599,7 +601,7 @@ export default function DashboardPage() {
           <CardHeader>
             <CardTitle className="flex items-center"><ListFilter className="mr-2 h-5 w-5 text-primary" />Filtros do Dashboard</CardTitle>
           </CardHeader>
-          <CardContent className="grid grid-cols-1 md:grid-cols-1 gap-4"> {/* Changed to md:grid-cols-1 */}
+          <CardContent className="grid grid-cols-1 md:grid-cols-1 gap-4">
             <div>
               <Label htmlFor="collectionFilterDashboard">Filtrar por Coleção (Desc. Linha Comercial)</Label>
               <Select
@@ -618,7 +620,6 @@ export default function DashboardPage() {
                 </SelectContent>
               </Select>
             </div>
-            {/* Removed vtexIdStatusFilterDashboard Select */}
           </CardContent>
         </Card>
       )}
@@ -632,13 +633,15 @@ export default function DashboardPage() {
         cardTitle="Upload de Dados para Dashboard"
         cardDescription="Carregue o arquivo Excel. Os dados serão salvos no seu perfil e usados para os gráficos abaixo."
         isProcessingParent={isSavingFirestore}
+        passwordProtected={true}
+        unlockPassword="exceladmin159"
       />
 
       {(isLoadingFirestore || isSavingFirestore) && (
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center">
-              <Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" /> 
+              <Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" />
               {isSavingFirestore ? "Salvando dados..." : "Carregando dados..."}
             </CardTitle>
           </CardHeader>
@@ -659,7 +662,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       )}
-      
+
       {!isLoadingFirestore && !isSavingFirestore && dashboardProducts.length > 0 && filteredProductsForDashboard.length === 0 && selectedCollection !== ALL_COLLECTIONS_VALUE && (
          <Card className="shadow-lg">
           <CardHeader>
@@ -676,7 +679,7 @@ export default function DashboardPage() {
 
       {!isLoadingFirestore && !isSavingFirestore && filteredProductsForDashboard.length > 0 && (
         <>
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6"> 
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <Card className="shadow-lg hover:shadow-xl transition-shadow">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Estoque Total</CardTitle>
@@ -707,7 +710,7 @@ export default function DashboardPage() {
                 <p className="text-xs text-muted-foreground">unidades no depósito Regulador</p>
               </CardContent>
             </Card>
-            <Card className="shadow-lg hover:shadow-xl transition-shadow"> 
+            <Card className="shadow-lg hover:shadow-xl transition-shadow">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Pedidos em Aberto</CardTitle>
                 <ClipboardList className="h-5 w-5 text-blue-500" />
@@ -812,12 +815,12 @@ export default function DashboardPage() {
                         <BarChart data={aggregatedData.collectionRupturePercentage} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} />
                             <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/>
-                            <YAxis 
-                              tickFormatter={(value) => `${value}%`} 
-                              domain={[0, 'dataMax + 5']} 
+                            <YAxis
+                              tickFormatter={(value) => `${value}%`}
+                              domain={[0, 'dataMax + 5']}
                               allowDecimals={false}
                             />
-                            <Tooltip 
+                            <Tooltip
                               content={<ChartTooltipContent />}
                               formatter={(value: number) => `${value.toFixed(2)}%`}
                             />
