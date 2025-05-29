@@ -9,7 +9,7 @@ import { clientAuth, firestore } from '@/lib/firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, LogOut, LayoutDashboard, UserCircle, ShieldCheck, Store, Building, TrendingUp, BarChart, BedDouble } from 'lucide-react'; // Removed PackageSearch, BedDouble, Store, Building, TrendingUp, BarChart
+import { Loader2, LogOut, LayoutDashboard, UserCircle, ShieldCheck, Store, Building, TrendingUp, BarChart, BedDouble, Lock } from 'lucide-react';
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 import type { UserProfile } from '@/types';
@@ -25,7 +25,7 @@ interface AppLayoutProps {
   children: ReactNode;
 }
 
-const ADMIN_PRIMARY_EMAIL = "gustavo.cordeiro@altenburg.com.br"; // For direct comparison
+const ADMIN_PRIMARY_EMAIL = "gustavo.cordeiro@altenburg.com.br"; 
 
 export default function AppLayout({ children }: AppLayoutProps) {
   const router = useRouter();
@@ -40,19 +40,21 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   // Use NEXT_PUBLIC_ADMIN_EMAIL from .env for client-side checks if available, otherwise fallback
   const effectiveAdminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL || ADMIN_PRIMARY_EMAIL;
-  const isAdmin = userProfile?.email === effectiveAdminEmail;
+  // isUserAdmin now directly uses firebaseUser.email for quicker UI updates on admin status
+  const isUserAdmin = firebaseUser?.email === effectiveAdminEmail;
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(clientAuth, async (fbUser) => {
       setFirebaseUser(fbUser);
       if (fbUser) {
-        // Directly approve if it's the primary admin email
-        if (fbUser.email === ADMIN_PRIMARY_EMAIL) {
-          setUserProfile({ uid: fbUser.uid, email: fbUser.email, isApproved: true, name: "Admin", pendingApproval: false });
+        // Admin user bypasses Firestore approval check for layout purposes.
+        // Their access to admin page itself will be re-verified on that page.
+        if (fbUser.email === effectiveAdminEmail) {
+          setUserProfile({ uid: fbUser.uid, email: fbUser.email, isApproved: true, name: fbUser.displayName || "Admin", pendingApproval: false });
           setIsApproved(true);
           setApprovalStatusLoading(false);
           setAuthLoading(false);
-          return; // Skip Firestore check for the primary admin
+          return; 
         }
 
         setApprovalStatusLoading(true);
@@ -66,13 +68,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
               setIsApproved(true);
             } else {
               setIsApproved(false);
-              // User exists but is not approved
             }
           } else {
-            // User exists in Auth but not in Firestore
             setUserProfile({ uid: fbUser.uid, email: fbUser.email, isApproved: false, pendingApproval: true, name: fbUser.displayName || fbUser.email || 'Usuário' });
             setIsApproved(false);
-            // No toast here, let the UI show pending/denied message
           }
         } catch (error) {
           console.error("Error fetching user profile:", error);
@@ -90,13 +89,15 @@ export default function AppLayout({ children }: AppLayoutProps) {
       setAuthLoading(false);
     });
     return () => unsubscribe();
-  }, [router, toast]);
+  }, [router, toast, effectiveAdminEmail]);
 
   useEffect(() => {
-    if (pathname?.startsWith('/dashboard') || pathname?.startsWith('/restock-opportunities') || pathname?.startsWith('/pillow-stock') || pathname?.startsWith('/abc-analysis')) {
-      setActiveAccordionItem("ecommerce-category");
-    } else if (pathname?.startsWith('/admin')) {
+    if (pathname?.startsWith('/admin')) {
       setActiveAccordionItem("admin-category");
+    } else if (pathname?.startsWith('/dashboard') || pathname?.startsWith('/restock-opportunities') || pathname?.startsWith('/pillow-stock') || pathname?.startsWith('/abc-analysis')) {
+      setActiveAccordionItem("ecommerce-category");
+    } else if (pathname?.startsWith('/retail')) { // Example for retail if you add routes
+        setActiveAccordionItem("retail-category");
     }
   }, [pathname]);
 
@@ -111,7 +112,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     }
   };
 
-  if (authLoading || (firebaseUser && approvalStatusLoading && firebaseUser.email !== ADMIN_PRIMARY_EMAIL)) {
+  if (authLoading || (firebaseUser && approvalStatusLoading && firebaseUser.email !== effectiveAdminEmail)) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -156,7 +157,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     </header>
   );
 
-  if (!isApproved && userProfile?.pendingApproval) { // Check if userProfile exists before checking pendingApproval
+  if (!isApproved && userProfile?.pendingApproval) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6">
         <Card className="w-full max-w-md text-center shadow-lg">
@@ -207,22 +208,38 @@ export default function AppLayout({ children }: AppLayoutProps) {
     <div className="flex min-h-screen">
       <nav className="w-64 bg-card border-r border-border p-4 space-y-1 hidden md:flex flex-col shadow-md">
         <Accordion type="single" collapsible className="w-full" value={activeAccordionItem} onValueChange={setActiveAccordionItem}>
-          {isAdmin && (
-            <AccordionItem value="admin-category" className="border-b-0">
-              <AccordionTrigger className="p-3 rounded-md hover:bg-muted hover:text-primary transition-colors text-foreground font-medium text-sm no-underline [&[data-state=open]>svg]:text-primary">
-                <div className="flex items-center gap-3">
-                  <ShieldCheck className="h-5 w-5" />
-                  <span>Admin</span>
-                </div>
-              </AccordionTrigger>
+          
+          <AccordionItem value="admin-category" className="border-b-0">
+            <AccordionTrigger 
+              className={cn(
+                "p-3 rounded-md hover:bg-muted hover:text-primary transition-colors text-foreground font-medium text-sm no-underline",
+                !isUserAdmin && "cursor-not-allowed opacity-70 hover:text-foreground hover:no-underline", // Keep text color on hover for disabled
+                "data-[state=open]:text-primary [&[data-state=open]>svg:not(.lucide-lock)]:text-primary"
+              )}
+              disabled={!isUserAdmin}
+              onClick={(e) => { if (!isUserAdmin) e.preventDefault(); }} // Prevent click action if not admin
+            >
+              <div className="flex items-center gap-3 w-full"> {/* Added w-full for proper alignment of lock */}
+                <ShieldCheck className={cn("h-5 w-5", isUserAdmin ? "text-primary" : "text-muted-foreground")} />
+                <span>Admin</span>
+                {!isUserAdmin && <Lock className="h-4 w-4 ml-auto text-muted-foreground" />}
+              </div>
+            </AccordionTrigger>
+            {isUserAdmin && ( // Conditionally render content only if admin
               <AccordionContent className="pt-1 pb-0 pl-4 space-y-1">
-                <Link href="/admin" className={cn("flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors pl-5", pathname === "/admin" && "bg-muted text-primary font-semibold")}>
+                <Link href="/admin" 
+                  className={cn(
+                    "flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors pl-5", 
+                    pathname === "/admin" && "bg-muted text-primary font-semibold"
+                  )}
+                >
                     <ShieldCheck className="h-5 w-5" />
                     <span className="font-medium text-sm">Aprovações</span>
                 </Link>
               </AccordionContent>
-            </AccordionItem>
-          )}
+            )}
+          </AccordionItem>
+          
           <AccordionItem value="ecommerce-category" className="border-b-0">
             <AccordionTrigger className="p-3 rounded-md hover:bg-muted hover:text-primary transition-colors text-foreground font-medium text-sm no-underline [&[data-state=open]>svg]:text-primary">
               <div className="flex items-center gap-3">

@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useState, useTransition, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { clientAuth } from '@/lib/firebase/config';
 import type { UserProfile } from '@/types';
@@ -18,40 +18,26 @@ export default function AdminPage() {
   const { toast } = useToast();
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
+  const [isDefinitelyAdmin, setIsDefinitelyAdmin] = useState(false);
   const [pendingUsers, setPendingUsers] = useState<UserProfile[]>([]);
   const [isLoadingPendingUsers, setIsLoadingPendingUsers] = useState(false);
   const [isApproving, startApproveTransition] = useTransition();
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(clientAuth, (user) => {
-      setCurrentUser(user);
-      setIsLoadingUser(false);
-      if (user && user.email !== process.env.NEXT_PUBLIC_ADMIN_EMAIL) {
-        // Non-admin user, redirect or show access denied immediately.
-        // Redirecting is cleaner than rendering a denied message here as layout also handles it.
-        router.replace('/dashboard'); 
-      } else if (user && user.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL) {
-        fetchPendingUsers();
-      } else if (!user) {
-        router.replace('/login');
-      }
-    });
-    return () => unsubscribe();
-  }, [router]);
-
-  const fetchPendingUsers = async () => {
+  const fetchPendingUsers = useCallback(async () => {
+    // Ensure currentUser is available and is the admin before fetching
+    if (!currentUser || currentUser.email !== process.env.NEXT_PUBLIC_ADMIN_EMAIL) {
+      console.warn("fetchPendingUsers called without admin user or currentUser not set.");
+      return;
+    }
     setIsLoadingPendingUsers(true);
     try {
-      if (!currentUser || currentUser.email !== process.env.NEXT_PUBLIC_ADMIN_EMAIL) {
-        // This check is redundant if useEffect handles redirection, but good for direct calls
-        toast({ title: "Acesso Negado", description: "Você não tem permissão para ver esta página.", variant: "destructive" });
-        setPendingUsers([]);
-        return;
-      }
       const adminIdToken = await currentUser.getIdToken(true); // Force refresh token
       const result = await getPendingUsers(adminIdToken);
       if (result.status === 'success' && result.users) {
         setPendingUsers(result.users);
+        if (result.users.length === 0 && isDefinitelyAdmin) { // Only toast if admin and list is empty
+          toast({ title: "Nenhum Usuário Pendente", description: "Não há novos usuários aguardando aprovação.", variant: "default" });
+        }
       } else {
         toast({ title: "Erro ao Buscar Usuários", description: result.message, variant: "destructive" });
         setPendingUsers([]);
@@ -63,11 +49,42 @@ export default function AdminPage() {
     } finally {
       setIsLoadingPendingUsers(false);
     }
-  };
+  }, [currentUser, toast, isDefinitelyAdmin]); // Added isDefinitelyAdmin
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(clientAuth, (user) => {
+      setCurrentUser(user);
+      setIsLoadingUser(false); // Set to false after user state is known
+      if (user) {
+        if (user.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL) {
+          setIsDefinitelyAdmin(true);
+          // fetchPendingUsers will be called by the next useEffect based on isDefinitelyAdmin
+        } else {
+          setIsDefinitelyAdmin(false);
+          // Non-admin user, redirect or show access denied immediately.
+          // The layout also handles general auth, but this is a specific page guard.
+          // Forcing a redirect here to prevent any flicker or brief access to the admin page structure.
+          router.replace('/dashboard'); 
+        }
+      } else {
+        setIsDefinitelyAdmin(false);
+        router.replace('/login');
+      }
+    });
+    return () => unsubscribe();
+  }, [router]);
+
+  // Effect to fetch users only when currentUser is confirmed and is an admin
+  useEffect(() => {
+    if (currentUser && isDefinitelyAdmin) {
+      fetchPendingUsers();
+    }
+  }, [currentUser, isDefinitelyAdmin, fetchPendingUsers]);
+
 
   const handleApproveUser = async (userIdToApprove: string) => {
     startApproveTransition(async () => {
-      if (!currentUser || !currentUser.email || currentUser.email !== process.env.NEXT_PUBLIC_ADMIN_EMAIL) {
+      if (!currentUser || !isDefinitelyAdmin) { // Re-check isDefinitelyAdmin
          toast({ title: "Ação não permitida", description: "Apenas administradores podem aprovar usuários.", variant: "destructive" });
          return;
       }
@@ -91,9 +108,9 @@ export default function AdminPage() {
     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Verificando permissões...</p></div>;
   }
 
-  if (!currentUser || currentUser.email !== process.env.NEXT_PUBLIC_ADMIN_EMAIL) {
-    // This might be momentarily visible if redirection in useEffect is slow,
-    // or if direct navigation attempt happens. Layout should also protect.
+  if (!isDefinitelyAdmin) { // This check is now more robust
+    // This state should ideally not be reached if router.replace in useEffect works as expected,
+    // but serves as a fallback UI.
     return (
       <Card className="m-auto mt-10 max-w-lg text-center shadow-xl">
         <CardHeader>
@@ -108,6 +125,7 @@ export default function AdminPage() {
     );
   }
 
+  // If execution reaches here, user is admin and not loading
   return (
     <div className="space-y-6">
       <Card className="shadow-lg">
