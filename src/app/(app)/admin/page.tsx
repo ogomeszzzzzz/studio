@@ -27,83 +27,94 @@ export default function AdminPage() {
   const [isApproving, startApproveTransition] = useTransition();
 
   const fetchPendingUsers = useCallback(async () => {
-    if (!currentUser || !isDefinitelyAdmin) { // Verificação reforçada
+    if (!currentUser || !isDefinitelyAdmin) { 
       console.warn("fetchPendingUsers chamado sem usuário admin ou currentUser/isDefinitelyAdmin não definidos.");
-      setIsLoadingPendingUsers(false); // Garante que o loading pare
+      setIsLoadingPendingUsers(false); 
       return;
     }
+    console.log("AdminPage: Fetching pending users as admin:", currentUser.email);
     setIsLoadingPendingUsers(true);
     try {
-      const adminIdToken = await currentUser.getIdToken(true);
+      const adminIdToken = await currentUser.getIdToken(true); // Force refresh token
       const result = await getPendingUsers(adminIdToken);
       if (result.status === 'success' && result.users) {
         setPendingUsers(result.users);
-        if (result.users.length === 0 && isDefinitelyAdmin) {
+        if (result.users.length === 0 && isDefinitelyAdmin) { // Check isDefinitelyAdmin again here
           toast({ title: "Nenhum Usuário Pendente", description: "Não há novos usuários aguardando aprovação.", variant: "default" });
         }
       } else {
-        toast({ title: "Erro ao Buscar Usuários", description: result.message, variant: "destructive" });
+        toast({ title: "Erro ao Buscar Usuários", description: result.message || "Falha ao buscar usuários pendentes.", variant: "destructive" });
         setPendingUsers([]);
       }
     } catch (error) {
       console.error("Error fetching pending users:", error);
-      toast({ title: "Erro Crítico", description: "Não foi possível buscar usuários pendentes.", variant: "destructive" });
+      const errorMessage = error instanceof Error ? error.message : "Erro desconhecido ao buscar usuários pendentes.";
+      toast({ title: "Erro Crítico", description: errorMessage, variant: "destructive" });
       setPendingUsers([]);
     } finally {
       setIsLoadingPendingUsers(false);
     }
-  }, [currentUser, toast, isDefinitelyAdmin]); // Adicionado isDefinitelyAdmin
+  }, [currentUser, toast, isDefinitelyAdmin]); 
 
   useEffect(() => {
-    setIsLoadingUser(true); // Inicia o carregamento
+    setIsLoadingUser(true); 
     const unsubscribe = onAuthStateChanged(clientAuth, (user) => {
       setCurrentUser(user);
       if (user) {
+        console.log("AdminPage: Auth state changed, user:", user.email);
         if (user.email === ADMIN_EMAIL_CLIENT_SIDE) {
+          console.log("AdminPage: User is admin.");
           setIsDefinitelyAdmin(true);
         } else {
+          console.log("AdminPage: User is NOT admin.");
           setIsDefinitelyAdmin(false);
-          // Não redireciona daqui, deixa o render condicional mostrar "Acesso Negado"
         }
       } else {
+        console.log("AdminPage: No user logged in.");
         setIsDefinitelyAdmin(false);
         // O layout principal (app)/layout.tsx deve lidar com o redirecionamento para /login
-        // se não houver usuário. Se o usuário chegar aqui sem estar logado,
-        // é provável que o layout falhou ou esta página foi acessada de forma inesperada.
       }
-      setIsLoadingUser(false); // Termina o carregamento APÓS definir o status do admin
+      setIsLoadingUser(false); 
     });
     return () => unsubscribe();
-  }, []); // Removido router da dependência, pois o redirecionamento foi removido daqui
+  }, []); 
 
   useEffect(() => {
-    if (isDefinitelyAdmin && currentUser) { // Apenas busca se for admin e tiver usuário
+    // Fetch pending users only if loading is complete, user exists, and is definitely admin
+    if (!isLoadingUser && currentUser && isDefinitelyAdmin) {
+      console.log("AdminPage: Conditions met to fetch pending users.");
       fetchPendingUsers();
-    } else if (!isLoadingUser && !isDefinitelyAdmin && currentUser) {
-      // Se carregou, tem usuário, mas não é admin, não faz nada aqui (render vai mostrar Acesso Negado)
-      setPendingUsers([]); // Limpa usuários pendentes se não for admin
+    } else if (!isLoadingUser && currentUser && !isDefinitelyAdmin) {
+      console.log("AdminPage: User loaded but is not admin. Clearing pending users list.");
+      setPendingUsers([]); // Clear pending users if not admin
+      // Display "Access Denied" via conditional rendering
+    } else if (!isLoadingUser && !currentUser) {
+      console.log("AdminPage: No user, not fetching pending users.");
+      setPendingUsers([]);
     }
-  }, [isDefinitelyAdmin, currentUser, fetchPendingUsers, isLoadingUser]);
+  }, [isLoadingUser, currentUser, isDefinitelyAdmin, fetchPendingUsers]);
 
 
   const handleApproveUser = async (userIdToApprove: string) => {
     startApproveTransition(async () => {
-      if (!currentUser || !isDefinitelyAdmin) {
+      if (!currentUser || !isDefinitelyAdmin) { // Double check admin status
          toast({ title: "Ação não permitida", description: "Apenas administradores podem aprovar usuários.", variant: "destructive" });
          return;
       }
+      console.log(`AdminPage: Attempting to approve user ${userIdToApprove} by admin ${currentUser.email}`);
       try {
-        const adminIdToken = await currentUser.getIdToken(true);
+        const adminIdToken = await currentUser.getIdToken(true); // Force refresh
         const result = await approveUser(adminIdToken, userIdToApprove);
         if (result.status === 'success') {
           toast({ title: "Usuário Aprovado!", description: result.message });
-          fetchPendingUsers(); // Refresh the list
+          await fetchPendingUsers(); // Refresh the list
         } else {
           toast({ title: "Erro ao Aprovar", description: result.message, variant: "destructive" });
         }
       } catch (error) {
         console.error("Error approving user:", error);
-        toast({ title: "Erro Crítico na Aprovação", description: "Não foi possível aprovar o usuário.", variant: "destructive" });
+        const errorMessage = error instanceof Error ? error.message : "Erro desconhecido ao aprovar usuário.";
+        toast({ title: "Erro Crítico na Aprovação", description: errorMessage, variant: "destructive" });
       }
     });
   };
@@ -112,8 +123,8 @@ export default function AdminPage() {
     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Verificando permissões...</p></div>;
   }
 
-  // Se não está carregando e não é admin (e há um usuário, caso contrário o layout deveria ter redirecionado)
-  if (!isDefinitelyAdmin && !isLoadingUser) {
+  // If not loading and not admin (and there is a user, otherwise the layout should have redirected)
+  if (!isDefinitelyAdmin && !isLoadingUser) { // No need to check currentUser here, layout handles if !currentUser
     return (
       <Card className="m-auto mt-10 max-w-lg text-center shadow-xl">
         <CardHeader>
@@ -128,11 +139,10 @@ export default function AdminPage() {
     );
   }
   
-  // Se chegou aqui, é admin e não está carregando.
-  // No entanto, se currentUser for null (usuário deslogou enquanto estava na página),
-  // o layout deve ter lidado com isso, mas adicionamos uma verificação para segurança.
+  // If currentUser is null but isLoadingUser is false, the main app layout should have handled redirection.
+  // This is a fallback if somehow the user gets here without being authenticated.
   if (!currentUser && !isLoadingUser) {
-     router.replace('/login'); // Segurança extra
+     router.replace('/login'); // Safety net
      return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Sessão expirada. Redirecionando...</p></div>;
   }
 
@@ -179,7 +189,9 @@ export default function AdminPage() {
                       <TableCell>
                         {user.createdAt instanceof Date 
                           ? user.createdAt.toLocaleDateString('pt-BR') 
-                          : user.createdAt ? new Date((user.createdAt as any).seconds * 1000).toLocaleDateString('pt-BR') : 'N/A'}
+                          : user.createdAt && typeof user.createdAt === 'object' && 'seconds' in user.createdAt && typeof (user.createdAt as any).seconds === 'number'
+                            ? new Date((user.createdAt as any).seconds * 1000).toLocaleDateString('pt-BR')
+                            : typeof user.createdAt === 'string' ? new Date(user.createdAt).toLocaleDateString('pt-BR') : 'N/A'}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button 
