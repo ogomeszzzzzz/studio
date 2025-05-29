@@ -20,9 +20,10 @@ const FIRESTORE_BATCH_LIMIT = 450;
 const PILLOW_PRODUCT_TYPE_EXCEL = "TRAVESSEIRO";
 const PILLOW_NAME_PREFIX = "Travesseiro";
 const PILLOW_BRAND_NAME = "Altenburg";
-const MAX_STOCK_PER_PILLOW_COLUMN = 75; // Updated from 100
-const LOW_STOCK_THRESHOLD_PERCENTAGE = 0.25; 
-const GOOD_STOCK_THRESHOLD_PERCENTAGE = 0.75; 
+const MAX_STOCK_PER_PILLOW_COLUMN = 75;
+const LOW_STOCK_THRESHOLD_PERCENTAGE = 0.25;
+const GOOD_STOCK_THRESHOLD_PERCENTAGE = 0.75;
+
 
 type SortCriteria = 'name' | 'stock' | 'fillPercentage';
 type SortOrder = 'asc' | 'desc';
@@ -32,7 +33,8 @@ type StockStatusFilter = 'all' | 'empty' | 'low' | 'medium' | 'good' | 'overstoc
 interface AggregatedPillow {
   name: string;
   stock: number;
-  fillPercentage: number; 
+  fillPercentage: number;
+  derivation?: string; // Added to store product derivation
 }
 
 const productToFirestore = (product: Product): any => {
@@ -68,7 +70,7 @@ function derivePillowDisplayName(productNameInput: string | undefined): string {
     else if (words.length === 1) return words[0];
     else return `${words[0]} ${words[1]}`;
   }
-  return productName; // Return original if it doesn't start with "Travesseiro"
+  return productName;
 }
 
 
@@ -97,7 +99,7 @@ export default function PillowStockPage() {
   }, []);
 
   useEffect(() => {
-    if (currentUser && allProducts.length === 0 && !isSavingFirestore && !isProcessingExcel) { // Added !isProcessingExcel
+    if (currentUser && allProducts.length === 0 && !isSavingFirestore && !isProcessingExcel) {
       console.log(`PillowStockPage: Fetching products for user UID: ${currentUser.uid} because allProducts is empty.`);
       setIsLoadingFirestore(true);
       const fetchProducts = async () => {
@@ -106,10 +108,6 @@ export default function PillowStockPage() {
           const snapshot = await getDocs(query(productsCol));
           const productsFromDb = snapshot.docs.map(doc => productFromFirestore(doc.data()));
           setAllProducts(productsFromDb);
-          if (productsFromDb.length > 0) {
-            // Toast might be too noisy if data always loads from DB
-            // toast({ title: "Dados Carregados", description: "Dados de produtos carregados do banco de dados." });
-          }
         } catch (error) {
           console.error("Error fetching products from Firestore (Pillow Stock):", error);
           toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${(error as Error).message}`, variant: "destructive" });
@@ -124,7 +122,7 @@ export default function PillowStockPage() {
     } else if (!currentUser) {
       setIsLoadingFirestore(false);
     }
-  }, [currentUser, toast, allProducts.length, isSavingFirestore, isProcessingExcel]); // Added isProcessingExcel to dependencies
+  }, [currentUser, toast, allProducts.length, isSavingFirestore, isProcessingExcel]);
 
   const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
     if (!currentUser) {
@@ -136,21 +134,30 @@ export default function PillowStockPage() {
     try {
       const productsColRef = collection(firestore, 'users', currentUser.uid, 'products');
       const existingDocsSnapshot = await getDocs(query(productsColRef));
-      if (!existingDocsSnapshot.empty) {
-        for (let i = 0; i < existingDocsSnapshot.docs.length; i += FIRESTORE_BATCH_LIMIT) {
-          const batch = writeBatch(firestore);
-          const chunk = existingDocsSnapshot.docs.slice(i, i + FIRESTORE_BATCH_LIMIT);
-          chunk.forEach(docSnapshot => { batch.delete(docSnapshot.ref); totalDeleted++; });
-          await batch.commit();
-        }
+      
+      console.log(`PillowStockPage: Deleting ${existingDocsSnapshot.docs.length} existing products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
+      for (let i = 0; i < existingDocsSnapshot.docs.length; i += FIRESTORE_BATCH_LIMIT) {
+        const batch = writeBatch(firestore);
+        const chunk = existingDocsSnapshot.docs.slice(i, i + FIRESTORE_BATCH_LIMIT);
+        chunk.forEach(docSnapshot => { batch.delete(docSnapshot.ref); totalDeleted++; });
+        await batch.commit();
+        console.log(`PillowStockPage: Committed a batch of ${chunk.length} deletions.`);
       }
+      
       if (productsToSave.length > 0) {
+        console.log(`PillowStockPage: Adding ${productsToSave.length} new products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
-          const batch = writeBatch(firestore);
-          const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
-          chunk.forEach(product => { const newDocRef = doc(productsColRef); batch.set(newDocRef, productToFirestore(product)); totalAdded++; });
-          await batch.commit();
+            const batch = writeBatch(firestore);
+            const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
+            chunk.forEach(product => { 
+                const newDocRef = doc(productsColRef); 
+                batch.set(newDocRef, productToFirestore(product)); 
+                totalAdded++; 
+            });
+            await batch.commit();
+            console.log(`PillowStockPage: Committed a batch of ${chunk.length} additions.`);
         }
+        console.log(`PillowStockPage: Successfully added ${totalAdded} new products.`);
       }
       setAllProducts(productsToSave);
       toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
@@ -163,10 +170,9 @@ export default function PillowStockPage() {
   }, [currentUser, toast]);
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
-    setIsProcessingExcel(true); // Set processing excel true
+    setIsProcessingExcel(true);
     await saveProductsToFirestore(parsedProducts);
-    // setAllProducts(parsedProducts); // Update local state immediately, then save to FS
-    setIsProcessingExcel(false); // Set processing excel false
+    setIsProcessingExcel(false);
   }, [saveProductsToFirestore]);
 
   const pillowProducts = useMemo(() => {
@@ -174,25 +180,29 @@ export default function PillowStockPage() {
   }, [allProducts]);
 
   const aggregatedPillowStock = useMemo(() => {
-    const pillowStockMap = new Map<string, number>();
+    const pillowStockMap = new Map<string, { stock: number; derivation?: string }>();
     pillowProducts.forEach(pillow => {
         const displayName = derivePillowDisplayName(pillow.name);
-        pillowStockMap.set(displayName, (pillowStockMap.get(displayName) || 0) + pillow.stock);
+        const currentPillowData = pillowStockMap.get(displayName) || { stock: 0, derivation: pillow.productDerivation || String(pillow.productId || '') };
+        currentPillowData.stock += pillow.stock;
+        if (!pillowStockMap.has(displayName)) { // Set derivation only for the first product encountered for this display name
+             currentPillowData.derivation = pillow.productDerivation || String(pillow.productId || '');
+        }
+        pillowStockMap.set(displayName, currentPillowData);
       });
 
     let derivedPillows: AggregatedPillow[] = Array.from(pillowStockMap.entries())
-      .map(([name, stock]) => ({ 
-        name, 
-        stock,
-        fillPercentage: (stock / MAX_STOCK_PER_PILLOW_COLUMN) * 100
+      .map(([name, data]) => ({
+        name,
+        stock: data.stock,
+        derivation: data.derivation,
+        fillPercentage: (data.stock / MAX_STOCK_PER_PILLOW_COLUMN) * 100
       }));
 
-    // Apply search term filter
     if (searchTerm) {
       derivedPillows = derivedPillows.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()));
     }
 
-    // Apply stock status filter
     if (stockStatusFilter !== 'all') {
       derivedPillows = derivedPillows.filter(p => {
         const stock = p.stock;
@@ -208,8 +218,7 @@ export default function PillowStockPage() {
         }
       });
     }
-    
-    // Apply sorting
+
     derivedPillows.sort((a, b) => {
       let comparison = 0;
       if (sortCriteria === 'name') {
@@ -227,7 +236,7 @@ export default function PillowStockPage() {
 
   const pillowKPIs = useMemo(() => {
     if (pillowProducts.length === 0) return { totalPillowSKUs: 0, totalPillowUnits: 0, lowStockPillowTypes: 0, zeroStockPillowTypes: 0, averageStockPerType: 0 };
-    
+
     const allAggregatedPillowsForKPIs = Array.from(
         pillowProducts.reduce((map, pillow) => {
             const displayName = derivePillowDisplayName(pillow.name);
@@ -272,10 +281,10 @@ export default function PillowStockPage() {
         onDataParsed={handleExcelDataProcessed}
         onProcessingStart={() => setIsProcessingExcel(true)}
         onProcessingEnd={() => setIsProcessingExcel(false)}
-        collectionColumnKey="Descrição Linha Comercial" // This prop isn't strictly used for filtering here, but parser needs it
+        collectionColumnKey="Descrição Linha Comercial"
         cardTitle="1. Carregar/Atualizar Dados da Planilha"
         cardDescription={`Faça o upload da planilha. Os travesseiros serão filtrados pela coluna 'Tipo. Produto' (esperado: "${PILLOW_PRODUCT_TYPE_EXCEL}").`}
-        isProcessingParent={isSavingFirestore} // isProcessingExcel is handled internally by this component mostly
+        isProcessingParent={isSavingFirestore}
       />
 
       {isAnyDataLoading && (
@@ -368,7 +377,7 @@ export default function PillowStockPage() {
              <Card className="shadow-md my-6"><CardHeader><CardTitle className="flex items-center">
                   <FilterIcon className="mr-2 h-5 w-5" />Nenhum Travesseiro Encontrado</CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Nenhum travesseiro corresponde aos filtros ou termo de busca atuais. Tente ajustar os filtros.</p></CardContent></Card>
           )}
-          
+
           {aggregatedPillowStock.length > 0 && (
             <Card className="shadow-lg">
                 <CardHeader>
@@ -379,8 +388,9 @@ export default function PillowStockPage() {
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 p-4 rounded-lg bg-muted/20">
                     {aggregatedPillowStock.map((pillow) => (
                         <PillowStackColumn
-                        key={pillow.name} 
+                        key={`${pillow.name}-${pillow.derivation}`}
                         pillowName={pillow.name}
+                        productDerivation={pillow.derivation}
                         currentStock={pillow.stock}
                         maxStock={MAX_STOCK_PER_PILLOW_COLUMN}
                         />
