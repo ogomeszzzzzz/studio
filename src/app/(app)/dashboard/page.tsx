@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import {
   ShoppingBag, AlertTriangle, FileSpreadsheet,
   Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler,
-  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon, ListFilter, Clock, BarChartHorizontal
+  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon, ListFilter, Clock, BarChartHorizontal, SearchIcon
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -62,7 +62,8 @@ interface CollectionSkuStatusData {
 
 
 const ALL_COLLECTIONS_VALUE = "_ALL_DASHBOARD_COLLECTIONS_";
-const FIRESTORE_BATCH_LIMIT = 450; // Firestore batch limit
+const ALL_ID_STATUS_VALUE = "_ALL_ID_STATUS_";
+const FIRESTORE_BATCH_LIMIT = 450;
 
 const chartConfigBase = {
   stock: {
@@ -128,6 +129,7 @@ export default function DashboardPage() {
   const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
 
   const [selectedCollection, setSelectedCollection] = useState<string>(ALL_COLLECTIONS_VALUE);
+  const [vtexIdStatusFilterDashboard, setVtexIdStatusFilterDashboard] = useState<string>(ALL_ID_STATUS_VALUE);
 
 
   useEffect(() => {
@@ -144,11 +146,13 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (currentUser && dashboardProducts.length === 0 && !isSavingFirestore) {
-      console.log(`DashboardPage: Fetching products for user UID: ${currentUser.uid} because dashboardProducts is empty.`);
+      console.log(`DashboardPage: Attempting to fetch products for user UID: ${currentUser.uid} because dashboardProducts is empty.`);
       setIsLoadingFirestore(true);
       const fetchProducts = async () => {
         try {
-          const productsCol = collection(firestore, 'users', currentUser.uid, 'products');
+          const productsColPath = `users/${currentUser.uid}/products`;
+          console.log(`DashboardPage: Firestore products collection path: ${productsColPath}`);
+          const productsCol = collection(firestore, productsColPath);
           const snapshot = await getDocs(query(productsCol));
           const productsFromDb: Product[] = [];
           snapshot.docs.forEach(doc => {
@@ -157,23 +161,28 @@ export default function DashboardPage() {
             }
           });
           setDashboardProducts(productsFromDb);
+          console.log(`DashboardPage: Fetched ${productsFromDb.length} products from Firestore.`);
 
-          const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
+          const metadataDocPath = `users/${currentUser.uid}/products/_metadata`;
+          console.log(`DashboardPage: Firestore metadata document path: ${metadataDocPath}`);
+          const metadataDocRef = doc(firestore, metadataDocPath);
           const metadataDocSnap = await getDoc(metadataDocRef);
           if (metadataDocSnap.exists()) {
             const data = metadataDocSnap.data();
             if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
               setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
+              console.log(`DashboardPage: Fetched last update timestamp: ${data.lastUpdatedAt.toDate()}`);
             }
           } else {
             setLastDataUpdateTimestamp(null);
+            console.log(`DashboardPage: No _metadata document found for user ${currentUser.uid}.`);
           }
 
           if (productsFromDb.length > 0) {
             toast({ title: "Dados Carregados", description: "Dados de produtos carregados do banco de dados." });
           }
         } catch (error) {
-          console.error("Error fetching products from Firestore (Dashboard):", error);
+          console.error("DashboardPage: Error fetching products from Firestore:", error);
           toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${(error as Error).message}`, variant: "destructive" });
         } finally {
           setIsLoadingFirestore(false);
@@ -186,16 +195,19 @@ export default function DashboardPage() {
       if (!lastDataUpdateTimestamp) {
         const fetchTimestamp = async () => {
           try {
-            const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
+            const metadataDocPath = `users/${currentUser.uid}/products/_metadata`;
+            console.log(`DashboardPage: (Subsequent load) Firestore metadata document path: ${metadataDocPath}`);
+            const metadataDocRef = doc(firestore, metadataDocPath);
             const metadataDocSnap = await getDoc(metadataDocRef);
             if (metadataDocSnap.exists()) {
               const data = metadataDocSnap.data();
               if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
                 setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
+                console.log(`DashboardPage: (Subsequent load) Fetched last update timestamp: ${data.lastUpdatedAt.toDate()}`);
               }
             }
           } catch (tsError) {
-            console.warn("Could not fetch last update timestamp on subsequent load:", tsError);
+            console.warn("DashboardPage: Could not fetch last update timestamp on subsequent load:", tsError);
           }
         };
         fetchTimestamp();
@@ -203,7 +215,7 @@ export default function DashboardPage() {
     } else if (!currentUser) {
       setIsLoadingFirestore(false);
     }
-  }, [currentUser, dashboardProducts.length, isSavingFirestore, toast, lastDataUpdateTimestamp]); // Added toast to dependencies
+  }, [currentUser, dashboardProducts.length, isSavingFirestore, toast, lastDataUpdateTimestamp]);
 
 
   const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
@@ -211,13 +223,15 @@ export default function DashboardPage() {
       toast({ title: "Usuário não autenticado", description: "Faça login para salvar os dados.", variant: "destructive" });
       return;
     }
-    console.log(`DashboardPage: Saving products for user UID: ${currentUser.uid}`);
+    console.log(`DashboardPage: Attempting to save products for user UID: ${currentUser.uid}`);
     setIsSavingFirestore(true);
     let totalDeleted = 0;
     let totalAdded = 0;
 
     try {
-      const productsColRef = collection(firestore, 'users', currentUser.uid, 'products');
+      const productsColPath = `users/${currentUser.uid}/products`;
+      console.log(`DashboardPage: Firestore products collection path for saving: ${productsColPath}`);
+      const productsColRef = collection(firestore, productsColPath);
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
 
@@ -228,6 +242,7 @@ export default function DashboardPage() {
           const chunk = existingDocsSnapshot.docs.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(docSnapshot => {
             if (docSnapshot.id !== '_metadata') {
+              console.log(`DashboardPage: Adding delete operation for doc ID: ${docSnapshot.id} to batch.`);
               batch.delete(docSnapshot.ref);
               totalDeleted++;
             }
@@ -238,6 +253,8 @@ export default function DashboardPage() {
           }
         }
         console.log(`DashboardPage: Successfully deleted ${totalDeleted} existing products.`);
+      } else {
+        console.log(`DashboardPage: No existing products to delete for user ${currentUser.uid}.`);
       }
 
       if (productsToSave.length > 0) {
@@ -246,7 +263,8 @@ export default function DashboardPage() {
           const batch = writeBatch(firestore);
           const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(product => {
-            const newDocRef = doc(productsColRef); // Auto-generate ID
+            const newDocRef = doc(productsColRef); 
+            console.log(`DashboardPage: Adding set operation for new doc ID: ${newDocRef.id} to batch.`);
             batch.set(newDocRef, productToFirestore(product));
             totalAdded++;
           });
@@ -256,19 +274,24 @@ export default function DashboardPage() {
         console.log(`DashboardPage: Successfully added ${totalAdded} new products.`);
       }
 
-      const metadataDocRef = doc(firestore, 'users', currentUser.uid, 'products', '_metadata');
+      const metadataDocPath = `users/${currentUser.uid}/products/_metadata`;
+      console.log(`DashboardPage: Firestore metadata document path for update: ${metadataDocPath}`);
+      const metadataDocRef = doc(firestore, metadataDocPath);
       const newTimestamp = serverTimestamp();
       await setDoc(metadataDocRef, { lastUpdatedAt: newTimestamp });
-      setLastDataUpdateTimestamp(new Date());
+      setLastDataUpdateTimestamp(new Date()); // Optimistic update for UI
+      console.log(`DashboardPage: Successfully updated _metadata document.`);
 
 
-      setDashboardProducts(productsToSave); // Update local state
+      setDashboardProducts(productsToSave);
       toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
 
     } catch (error) {
-      console.error("Error saving products to Firestore (Dashboard):", error);
+      console.error("DashboardPage: Error saving products to Firestore:", error);
       if ((error as any).code === 'failed-precondition' && (error as any).message.includes('too big')) {
          toast({ title: "Erro ao Salvar", description: `Muitos produtos para processar de uma vez. Tente com um arquivo menor. (Erro: Transação muito grande)`, variant: "destructive" });
+      } else if ((error as any).code === 'permission-denied' || (error as any).code === 'unavailable') {
+        toast({ title: "Erro de Permissão ou Conexão", description: `Não foi possível salvar os dados no banco de dados. Verifique suas permissões ou conexão com a internet. Detalhe: ${(error as Error).message}`, variant: "destructive" });
       } else {
         toast({ title: "Erro ao Salvar", description: `Não foi possível salvar: ${(error as Error).message}`, variant: "destructive" });
       }
@@ -295,8 +318,14 @@ export default function DashboardPage() {
     if (selectedCollection !== ALL_COLLECTIONS_VALUE) {
       products = products.filter(p => p.collection === selectedCollection);
     }
+
+    if (vtexIdStatusFilterDashboard === "withVtexId") {
+        products = products.filter(p => typeof p.vtexId === 'number' && !isNaN(p.vtexId));
+    } else if (vtexIdStatusFilterDashboard === "withoutVtexId") {
+        products = products.filter(p => !(typeof p.vtexId === 'number' && !isNaN(p.vtexId)));
+    }
     return products;
-  }, [dashboardProducts, selectedCollection]);
+  }, [dashboardProducts, selectedCollection, vtexIdStatusFilterDashboard]);
 
   const aggregatedData = useMemo(() => {
     if (filteredProductsForDashboard.length === 0) {
@@ -305,7 +334,7 @@ export default function DashboardPage() {
         skusByProductType: [],
         skusBySize: [],
         stockByPrint: [],
-        collectionSkuStatus: [], // Changed from zeroStockSkusByCollection
+        collectionSkuStatus: [],
         collectionRupturePercentage: [],
         skuStockStatus: [],
         totalStock: 0,
@@ -321,7 +350,7 @@ export default function DashboardPage() {
     const skusByProductTypeMap = new Map<string, { totalSkus: number; skusWithStock: number; skusWithoutStock: number }>();
     const skusBySizeMap = new Map<string, { totalSkus: number; skusWithStock: number; skusWithoutStock: number }>();
     const stockByPrintMap = new Map<string, { stock: number }>();
-    const zeroStockSkusByCollectionMap = new Map<string, number>(); // Simplified: collectionName -> zeroStockCount
+    const zeroStockSkusByCollectionMap = new Map<string, number>();
 
     let totalStock = 0;
     let totalSkus = filteredProductsForDashboard.length;
@@ -375,7 +404,7 @@ export default function DashboardPage() {
         activeSkus: activeSkusCount,
         zeroStockSkus: zeroSkusCount,
       };
-    }).sort((a,b) => (b.activeSkus + b.zeroStockSkus) - (a.activeSkus + a.zeroStockSkus)); // Sort by total SKUs
+    }).sort((a,b) => (b.activeSkus + b.zeroStockSkus) - (a.activeSkus + a.zeroStockSkus));
 
     const collectionRupturePercentageData: CollectionRuptureData[] = Array.from(stockByCollectionMap.entries()).map(([name, collData]) => {
       const zeroStockCount = zeroStockSkusByCollectionMap.get(name) || 0;
@@ -429,7 +458,6 @@ export default function DashboardPage() {
   const skusByProductTypeChartConfig = useMemo(() => createChartConfig(aggregatedData.skusByProductType), [aggregatedData.skusByProductType]);
   const skusBySizeChartConfig = useMemo(() => createChartConfig(aggregatedData.skusBySize), [aggregatedData.skusBySize]);
   const stockByPrintChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByPrint, true), [aggregatedData.stockByPrint]);
-  // zeroStockSkusChartConfig removed, replaced by collectionSkuStatusChartConfig
   const collectionSkuStatusChartConfig = useMemo(() => createChartConfig(aggregatedData.collectionSkuStatus), [aggregatedData.collectionSkuStatus]);
 
 
@@ -484,6 +512,12 @@ export default function DashboardPage() {
       if(selectedCollection !== ALL_COLLECTIONS_VALUE) {
         appliedFiltersText.push(`Coleção: ${selectedCollection}`);
       }
+       if (vtexIdStatusFilterDashboard === "withVtexId") {
+        appliedFiltersText.push("Status: Com ID VTEX");
+      } else if (vtexIdStatusFilterDashboard === "withoutVtexId") {
+        appliedFiltersText.push("Status: Sem ID VTEX");
+      }
+
 
       doc.setFontSize(18);
       doc.text(reportTitle, pageWidth / 2, yPos, { align: "center" });
@@ -620,6 +654,11 @@ export default function DashboardPage() {
       if (selectedCollection !== ALL_COLLECTIONS_VALUE) {
         pdfFileName += `_${selectedCollection.replace(/[^a-zA-Z0-9]/g, '_')}`;
       }
+       if (vtexIdStatusFilterDashboard === "withVtexId") {
+        pdfFileName += "_ComIDVTEX";
+      } else if (vtexIdStatusFilterDashboard === "withoutVtexId") {
+        pdfFileName += "_SemIDVTEX";
+      }
       pdfFileName += '.pdf';
 
       doc.save(pdfFileName);
@@ -677,7 +716,7 @@ export default function DashboardPage() {
           <CardHeader>
             <CardTitle className="flex items-center"><ListFilter className="mr-2 h-5 w-5 text-primary" />Filtros do Dashboard</CardTitle>
           </CardHeader>
-          <CardContent className="grid grid-cols-1 md:grid-cols-1 gap-4">
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <Label htmlFor="collectionFilterDashboard">Filtrar por Coleção (Desc. Linha Comercial)</Label>
               <Select
@@ -695,6 +734,23 @@ export default function DashboardPage() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div>
+                <Label htmlFor="vtexIdStatusFilterDashboard">Filtrar por Status ID VTEX</Label>
+                <Select
+                    value={vtexIdStatusFilterDashboard}
+                    onValueChange={setVtexIdStatusFilterDashboard}
+                    disabled={isLoadingFirestore || isSavingFirestore || isGeneratingPdf}
+                >
+                    <SelectTrigger id="vtexIdStatusFilterDashboard" aria-label="Filtrar por Status ID VTEX">
+                    <SelectValue placeholder="Status ID VTEX" />
+                    </SelectTrigger>
+                    <SelectContent>
+                    <SelectItem value={ALL_ID_STATUS_VALUE}>Todos</SelectItem>
+                    <SelectItem value="withVtexId">Com ID VTEX (Número)</SelectItem>
+                    <SelectItem value="withoutVtexId">Sem ID VTEX (Texto/#N/D)</SelectItem>
+                    </SelectContent>
+                </Select>
             </div>
           </CardContent>
         </Card>
@@ -739,14 +795,17 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {!isLoadingFirestore && !isSavingFirestore && dashboardProducts.length > 0 && filteredProductsForDashboard.length === 0 && selectedCollection !== ALL_COLLECTIONS_VALUE && (
+      {!isLoadingFirestore && !isSavingFirestore && dashboardProducts.length > 0 && filteredProductsForDashboard.length === 0 && (selectedCollection !== ALL_COLLECTIONS_VALUE || vtexIdStatusFilterDashboard !== ALL_ID_STATUS_VALUE) && (
          <Card className="shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center"><Filter className="mr-2 h-6 w-6 text-primary" />Nenhum produto encontrado</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-muted-foreground">Nenhum produto encontrado para a coleção selecionada: <span className="font-semibold">{selectedCollection}</span>.
-              Por favor, ajuste o filtro ou selecione "Todas as Coleções".
+            <p className="text-muted-foreground">Nenhum produto encontrado para os filtros selecionados.
+               {selectedCollection !== ALL_COLLECTIONS_VALUE && ` Coleção: ${selectedCollection}.`}
+               {vtexIdStatusFilterDashboard === "withVtexId" && " Status ID VTEX: Com ID."}
+               {vtexIdStatusFilterDashboard === "withoutVtexId" && " Status ID VTEX: Sem ID."}
+              <br />Por favor, ajuste os filtros ou selecione "Todas as Coleções" / "Todos" para Status ID.
             </p>
           </CardContent>
         </Card>

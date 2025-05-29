@@ -1,18 +1,16 @@
 rules_version = '2';
 
 service cloud.firestore {
-  // Match the specific database named "ecom"
-  match /databases/ecom/documents {
+  match /databases/ecom/documents { // Certifique-se que 'ecom' é o ID do seu banco de dados no Firebase.
 
-    // Allow authenticated users to manage their own data.
-    // This includes reading, writing (creating, updating, deleting) documents
-    // and listing collections under their own user ID path (e.g., /users/theirUID/products/productID).
-    // The {document=**} is a recursive wildcard, covering documents and subcollections.
-    match /users/{userId}/{document=**} {
+    // Permite que um usuário autenticado leia e escreva (crie, atualize, exclua)
+    // QUALQUER documento ou subcoleção sob seu próprio caminho /users/{userId}.
+    // Isso cobre /users/{userId}/products/* e /users/{userId}/products/_metadata
+    match /users/{userId}/{subpath=**} { // {subpath=**} é um curinga recursivo
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // By default, if no rule above matches, access is denied.
-    // You can add more specific rules for other top-level collections here if needed.
+    // Adicione aqui regras para outras coleções de nível raiz, se necessário.
+    // Se não houver outras regras, o acesso a outras coleções será negado por padrão.
   }
 }
