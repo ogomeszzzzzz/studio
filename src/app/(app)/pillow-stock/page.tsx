@@ -38,6 +38,45 @@ const productFromFirestore = (data: any): Product => {
   } as Product;
 };
 
+function derivePillowDisplayName(productNameInput: string | undefined): string {
+  const productName = productNameInput || "";
+
+  if (!productName.trim()) {
+    return "Sem Nome"; // Default for empty or whitespace-only names
+  }
+
+  let name = productName.trim();
+  const prefix = "Travesseiro";
+  const altenburg = "Altenburg";
+
+  if (name.toLowerCase().startsWith(prefix.toLowerCase())) {
+    // Remove "Travesseiro"
+    name = name.substring(prefix.length).trim();
+
+    // Remove "Altenburg" if it's the next word (case-insensitive)
+    if (name.toLowerCase().startsWith(altenburg.toLowerCase())) {
+      // Need to ensure "Altenburg" is a whole word, not part of another word.
+      // A simple way is to check if the character after "Altenburg" is a space or end of string.
+      if (name.length === altenburg.length || (name.length > altenburg.length && name[altenburg.length] === ' ')) {
+         name = name.substring(altenburg.length).trim();
+      }
+    }
+
+    const words = name.split(/\s+/).filter(word => word.length > 0); // Split by space and remove empty strings
+
+    if (words.length === 0) { // No words left after stripping
+        return productName; // Fallback to full original name if parsing yields nothing useful
+    } else if (words.length === 1) {
+      return words[0]; // e.g., "Gellou"
+    } else { // words.length >= 2
+      return `${words[0]} ${words[1]}`; // e.g., "Plumi Gold"
+    }
+  }
+  // If the original name doesn't start with "Travesseiro", return the original name.
+  return productName;
+}
+
+
 export default function PillowStockPage() {
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
@@ -60,6 +99,7 @@ export default function PillowStockPage() {
 
   useEffect(() => {
     if (currentUser && allProducts.length === 0 && !isSavingFirestore) {
+      console.log(`PillowStockPage: Fetching products for user UID: ${currentUser.uid} because allProducts is empty.`);
       setIsLoadingFirestore(true);
       const fetchProducts = async () => {
         try {
@@ -79,6 +119,7 @@ export default function PillowStockPage() {
       };
       fetchProducts();
     } else if (currentUser && allProducts.length > 0) {
+      console.log(`PillowStockPage: Products already loaded for user UID: ${currentUser.uid}. Skipping fetch.`);
       setIsLoadingFirestore(false);
     } else if (!currentUser) {
       setIsLoadingFirestore(false);
@@ -90,6 +131,7 @@ export default function PillowStockPage() {
       toast({ title: "Usuário não autenticado", description: "Faça login para salvar os dados.", variant: "destructive" });
       return;
     }
+    console.log(`PillowStockPage: Saving products for user UID: ${currentUser.uid}`);
     setIsSavingFirestore(true);
     let totalDeleted = 0;
     let totalAdded = 0;
@@ -98,20 +140,26 @@ export default function PillowStockPage() {
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
       if (!existingDocsSnapshot.empty) {
+        console.log(`PillowStockPage: Deleting ${existingDocsSnapshot.docs.length} existing documents in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < existingDocsSnapshot.docs.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
           const chunk = existingDocsSnapshot.docs.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(docSnapshot => { batch.delete(docSnapshot.ref); totalDeleted++; });
           await batch.commit();
+          console.log(`PillowStockPage: Committed a batch of ${chunk.length} deletions.`);
         }
+        console.log(`PillowStockPage: Successfully deleted ${totalDeleted} existing products.`);
       }
       if (productsToSave.length > 0) {
+        console.log(`PillowStockPage: Adding ${productsToSave.length} new products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
           const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(product => { const newDocRef = doc(productsColRef); batch.set(newDocRef, productToFirestore(product)); totalAdded++; });
           await batch.commit();
+          console.log(`PillowStockPage: Committed a batch of ${chunk.length} additions.`);
         }
+        console.log(`PillowStockPage: Successfully added ${totalAdded} new products.`);
       }
       setAllProducts(productsToSave);
       toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
@@ -137,9 +185,11 @@ export default function PillowStockPage() {
     allProducts
       .filter(p => p.productType?.toUpperCase() === PILLOW_PRODUCT_TYPE)
       .forEach(pillow => {
-        // Using product name as the primary key; falls back to derivation if name is not available.
-        const pillowKey = pillow.name || pillow.productDerivation || "Travesseiro Desconhecido";
-        pillowStockMap.set(pillowKey, (pillowStockMap.get(pillowKey) || 0) + pillow.stock);
+        const displayName = derivePillowDisplayName(pillow.name);
+        // Use the derived display name as the key for aggregation
+        const key = displayName; 
+
+        pillowStockMap.set(key, (pillowStockMap.get(key) || 0) + pillow.stock);
       });
     
     const sortedPillows: AggregatedPillow[] = Array.from(pillowStockMap.entries())
@@ -272,10 +322,10 @@ export default function PillowStockPage() {
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 p-4 rounded-lg">
               {aggregatedPillowStock.map((pillow) => (
                 <PillowStackColumn
-                  key={pillow.name}
+                  key={pillow.name} // The name here is now the derived display name
                   pillowName={pillow.name}
                   currentStock={pillow.stock}
-                  maxStock={100}
+                  maxStock={100} // Assuming maxStock is always 100 per your requirement
                 />
               ))}
             </div>
@@ -285,3 +335,5 @@ export default function PillowStockPage() {
     </div>
   );
 }
+
+    
