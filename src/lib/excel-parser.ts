@@ -33,13 +33,11 @@ const getRowValue = (row: any, primaryKey: string, fallbacks: string[] = [], def
   for (const tryKey of keysToTry) {
     // Try exact match first
     if (Object.prototype.hasOwnProperty.call(row, tryKey) && row[tryKey] !== null && row[tryKey] !== undefined) {
-       if (typeof row[tryKey] === 'string' && row[tryKey].trim() === '') continue; // Treat empty strings as not found for this general helper, specific logic can override
       return row[tryKey];
     }
     // Try case-insensitive match
     const actualKey = rowKeys.find(k => k.trim().toLowerCase() === tryKey.trim().toLowerCase());
     if (actualKey && row[actualKey] !== null && row[actualKey] !== undefined) {
-      if (typeof row[actualKey] === 'string' && row[actualKey].trim() === '') continue;
       return row[actualKey];
     }
   }
@@ -75,20 +73,20 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
                   processedVtexId = rawVtexId; 
               } else if (typeof rawVtexId === 'string') {
                   const trimmedVal = rawVtexId.trim();
-                  // Check if the string can be cleanly converted to a number
-                  // It should only contain digits, optionally a decimal point or a leading minus sign
                   if (/^[-+]?\d*\.?\d+$/.test(trimmedVal) && !isNaN(Number(trimmedVal))) {
                       processedVtexId = Number(trimmedVal);
                   } else {
-                      processedVtexId = trimmedVal; // Keep as string (e.g., "#N/D", "ABC")
+                      processedVtexId = trimmedVal; 
                   }
               } else {
-                  processedVtexId = String(rawVtexId); // Fallback for other types like boolean
+                  processedVtexId = String(rawVtexId); 
               }
           } else {
-             processedVtexId = ''; // If rawVtexId is null, undefined, or empty string after trim
+             processedVtexId = ''; 
           }
 
+          const priceValue = getRowValue(row, 'Preço', ['PRECO', 'PREÇO'], 0);
+          const sales30dValue = getRowValue(row, 'Venda 30d', ['VENDAS 30D', 'VENDA_30D', 'VENDAS_30D'], 0);
 
           return {
             vtexId: processedVtexId,
@@ -97,9 +95,9 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
             derivation: getRowValue(row, 'Derivação'),
             productDerivation: getRowValue(row, 'Produto-Derivação', ['Produto Derivacao']),
             stock: Number(getRowValue(row, 'Estoque', [], 0)) || 0,
-            readyToShip: Number(getRowValue(row, 'Pronta Entrega', [], 0)) || 0,
+            readyToShip: Number(getRowValue(row, 'Pronta Entrega', ['Pronta_Entrega'], 0)) || 0,
             regulatorStock: Number(getRowValue(row, 'Regulador', [], 0)) || 0,
-            openOrders: Number(getRowValue(row, 'Pedidos em Aberto', ['Pedidos Abertos', 'Open Orders'], 0)) || 0,
+            openOrders: Number(getRowValue(row, 'Pedidos em Aberto', ['Pedidos Abertos', 'Open Orders', 'PEDIDOS_EM_ABERTO'], 0)) || 0,
             description: getRowValue(row, 'Descrição'), 
             size: getRowValue(row, 'Tamanho', [], 'Não Especificado'),
             productType: getRowValue(row, 'Tipo. Produto', ['Tipo Produto'], 'Não Especificado'),
@@ -114,6 +112,8 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
             rawCollectionEndDate: String(getRowValue(row, 'Fim Coleção', ['Fim Colecao']) ?? ''),
             isExcMtVendors: toBoolean(getRowValue(row, 'Exc.MT-Vendors', ['Exc MT Vendors'])),
             isDiscontinued: toBoolean(getRowValue(row, 'Fora de linha', ['Fora de Linha'])),
+            price: typeof priceValue === 'string' ? parseFloat(priceValue.replace(',', '.')) : Number(priceValue) || 0,
+            sales30d: Number(sales30dValue) || 0,
           };
         });
         resolve(products);

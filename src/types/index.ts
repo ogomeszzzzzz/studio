@@ -23,7 +23,14 @@ export interface Product {
   isDiscontinued: boolean;
   rawCollectionStartDate?: string;
   rawCollectionEndDate?: string;
-  canRestockAmount?: number; // Novo campo para análise de reposição
+  canRestockAmount?: number; // For restock opportunities
+
+  // New fields for ABC Analysis
+  price?: number;
+  sales30d?: number;
+  revenue30d?: number;
+  abcCurve?: 'A' | 'B' | 'C' | 'N/A';
+  cumulativeRevenuePercentage?: number;
 }
 
 export interface FilterState {
