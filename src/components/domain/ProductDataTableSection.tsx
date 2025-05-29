@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { Product } from '@/types';
 import { format, isValid, addDays, isBefore, parseISO } from 'date-fns';
-import { ArrowUpDown, ListChecks, ChevronLeft, ChevronRight, TrendingUp, PackageSearch, Activity, PackageCheck, ClipboardList } from 'lucide-react';
+import { ArrowUpDown, ListChecks, ChevronLeft, ChevronRight, TrendingUp } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
@@ -48,18 +48,14 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
   let endDate: Date | null = null;
 
   if (endDateInput instanceof Date && isValid(endDateInput)) {
-    endDate = new Date(endDateInput.valueOf()); // Clone to avoid mutating original
+    endDate = new Date(endDateInput.valueOf()); 
   } else if (typeof endDateInput === 'string') {
     const parsedDate = parseISO(endDateInput);
     if (isValid(parsedDate)) {
       endDate = parsedDate;
     }
-  } else if (typeof endDateInput === 'number' && !isNaN(endDateInput)) { // Handle Excel serial dates
-      // Excel epoch starts on Dec 30, 1899 for some versions, or Jan 1, 1900
-      // Using a common approach: Date constructor with UTC to avoid timezone issues with epoch.
-      // Excel date number represents days since Dec 30, 1899 (or Jan 1, 1900 if Mac Excel)
-      // For simplicity, assuming Windows Excel epoch for now.
-      const excelBaseDate = new Date(Date.UTC(1899, 11, 30)); // December 30, 1899
+  } else if (typeof endDateInput === 'number' && !isNaN(endDateInput)) { 
+      const excelBaseDate = new Date(Date.UTC(1899, 11, 30)); 
       const d = new Date(excelBaseDate.getTime() + endDateInput * 24 * 60 * 60 * 1000);
       if (isValid(d)) endDate = d;
   }
@@ -231,8 +227,8 @@ export function ProductDataTableSection({
           <p className="text-center text-muted-foreground py-6">Nenhum produto corresponde aos critérios selecionados.</p>
         ) : (
           <>
-            <div className="rounded-md border"> {/* Removed overflow-x-auto from this div */}
-              <Table> {/* Table component from ui/table.tsx already handles its own overflow */}
+            <div className="rounded-md border">
+              <Table>
                 <TableHeader>
                   <TableRow>
                     {showVtexIdColumn && <TableHead onClick={() => handleSort('vtexId')} className="cursor-pointer hover:bg-muted/50 min-w-[100px] whitespace-nowrap px-2 py-3 text-xs sm:text-sm">ID VTEX {renderSortIcon('vtexId')}</TableHead>}
@@ -255,6 +251,7 @@ export function ProductDataTableSection({
                 <TableBody>
                   {isLoading ? <TableSkeleton /> : paginatedProducts.map((product, index) => {
                     const status = getCollectionStatus(product);
+                    // Ensure no whitespace is introduced between TableCell elements
                     return (
                       <TableRow key={`${product.vtexId}-${product.name}-${product.productDerivation}-${index}-${currentPage}`}>
                         {showVtexIdColumn && <TableCell className="whitespace-nowrap px-2 py-2 text-xs sm:text-sm">{String(product.vtexId ?? '')}</TableCell>}
@@ -321,4 +318,3 @@ export function ProductDataTableSection({
     </Card>
   );
 }
-
