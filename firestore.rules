@@ -1,24 +1,18 @@
-
 rules_version = '2';
 
 service cloud.firestore {
-  // This rule applies to a specific database ID named "ecom".
-  // If your client SDKs are configured to connect to this named database,
-  // this rule will be used. If "ecom" is the (default) database,
-  // using /databases/(default)/documents would also work.
+  // Match the specific database named "ecom"
   match /databases/ecom/documents {
 
-    // Allow authenticated users to read and write (create, update, delete)
-    // any documents or subcollections within their own user-specific path.
-    // This covers:
-    // - /users/{userId} (for potential future user profile data)
-    // - /users/{userId}/products/{productId} (for their product lists)
-    // - /users/{userId}/products/_metadata (for the lastUploadTimestamp)
+    // Allow authenticated users to manage their own data.
+    // This includes reading, writing (creating, updating, deleting) documents
+    // and listing collections under their own user ID path (e.g., /users/theirUID/products/productID).
+    // The {document=**} is a recursive wildcard, covering documents and subcollections.
     match /users/{userId}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // By default, all other paths in the "ecom" database that are not
-    // explicitly matched above will deny all access.
+    // By default, if no rule above matches, access is denied.
+    // You can add more specific rules for other top-level collections here if needed.
   }
 }
