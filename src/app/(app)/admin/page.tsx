@@ -13,6 +13,9 @@ import { Loader2, ShieldAlert, ShieldCheck, UserCheck, Users } from 'lucide-reac
 import { useToast } from '@/hooks/use-toast';
 import { onAuthStateChanged, type User as FirebaseUser } from 'firebase/auth';
 
+// Define o email do admin com fallback, caso a variável de ambiente não esteja disponível no cliente.
+const ADMIN_EMAIL_CLIENT_SIDE = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br";
+
 export default function AdminPage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -24,18 +27,18 @@ export default function AdminPage() {
   const [isApproving, startApproveTransition] = useTransition();
 
   const fetchPendingUsers = useCallback(async () => {
-    // Ensure currentUser is available and is the admin before fetching
-    if (!currentUser || currentUser.email !== process.env.NEXT_PUBLIC_ADMIN_EMAIL) {
-      console.warn("fetchPendingUsers called without admin user or currentUser not set.");
+    if (!currentUser || !isDefinitelyAdmin) { // Verificação reforçada
+      console.warn("fetchPendingUsers chamado sem usuário admin ou currentUser/isDefinitelyAdmin não definidos.");
+      setIsLoadingPendingUsers(false); // Garante que o loading pare
       return;
     }
     setIsLoadingPendingUsers(true);
     try {
-      const adminIdToken = await currentUser.getIdToken(true); // Force refresh token
+      const adminIdToken = await currentUser.getIdToken(true);
       const result = await getPendingUsers(adminIdToken);
       if (result.status === 'success' && result.users) {
         setPendingUsers(result.users);
-        if (result.users.length === 0 && isDefinitelyAdmin) { // Only toast if admin and list is empty
+        if (result.users.length === 0 && isDefinitelyAdmin) {
           toast({ title: "Nenhum Usuário Pendente", description: "Não há novos usuários aguardando aprovação.", variant: "default" });
         }
       } else {
@@ -49,42 +52,43 @@ export default function AdminPage() {
     } finally {
       setIsLoadingPendingUsers(false);
     }
-  }, [currentUser, toast, isDefinitelyAdmin]); // Added isDefinitelyAdmin
+  }, [currentUser, toast, isDefinitelyAdmin]); // Adicionado isDefinitelyAdmin
 
   useEffect(() => {
+    setIsLoadingUser(true); // Inicia o carregamento
     const unsubscribe = onAuthStateChanged(clientAuth, (user) => {
       setCurrentUser(user);
-      setIsLoadingUser(false); // Set to false after user state is known
       if (user) {
-        if (user.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL) {
+        if (user.email === ADMIN_EMAIL_CLIENT_SIDE) {
           setIsDefinitelyAdmin(true);
-          // fetchPendingUsers will be called by the next useEffect based on isDefinitelyAdmin
         } else {
           setIsDefinitelyAdmin(false);
-          // Non-admin user, redirect or show access denied immediately.
-          // The layout also handles general auth, but this is a specific page guard.
-          // Forcing a redirect here to prevent any flicker or brief access to the admin page structure.
-          router.replace('/dashboard'); 
+          // Não redireciona daqui, deixa o render condicional mostrar "Acesso Negado"
         }
       } else {
         setIsDefinitelyAdmin(false);
-        router.replace('/login');
+        // O layout principal (app)/layout.tsx deve lidar com o redirecionamento para /login
+        // se não houver usuário. Se o usuário chegar aqui sem estar logado,
+        // é provável que o layout falhou ou esta página foi acessada de forma inesperada.
       }
+      setIsLoadingUser(false); // Termina o carregamento APÓS definir o status do admin
     });
     return () => unsubscribe();
-  }, [router]);
+  }, []); // Removido router da dependência, pois o redirecionamento foi removido daqui
 
-  // Effect to fetch users only when currentUser is confirmed and is an admin
   useEffect(() => {
-    if (currentUser && isDefinitelyAdmin) {
+    if (isDefinitelyAdmin && currentUser) { // Apenas busca se for admin e tiver usuário
       fetchPendingUsers();
+    } else if (!isLoadingUser && !isDefinitelyAdmin && currentUser) {
+      // Se carregou, tem usuário, mas não é admin, não faz nada aqui (render vai mostrar Acesso Negado)
+      setPendingUsers([]); // Limpa usuários pendentes se não for admin
     }
-  }, [currentUser, isDefinitelyAdmin, fetchPendingUsers]);
+  }, [isDefinitelyAdmin, currentUser, fetchPendingUsers, isLoadingUser]);
 
 
   const handleApproveUser = async (userIdToApprove: string) => {
     startApproveTransition(async () => {
-      if (!currentUser || !isDefinitelyAdmin) { // Re-check isDefinitelyAdmin
+      if (!currentUser || !isDefinitelyAdmin) {
          toast({ title: "Ação não permitida", description: "Apenas administradores podem aprovar usuários.", variant: "destructive" });
          return;
       }
@@ -108,9 +112,8 @@ export default function AdminPage() {
     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Verificando permissões...</p></div>;
   }
 
-  if (!isDefinitelyAdmin) { // This check is now more robust
-    // This state should ideally not be reached if router.replace in useEffect works as expected,
-    // but serves as a fallback UI.
+  // Se não está carregando e não é admin (e há um usuário, caso contrário o layout deveria ter redirecionado)
+  if (!isDefinitelyAdmin && !isLoadingUser) {
     return (
       <Card className="m-auto mt-10 max-w-lg text-center shadow-xl">
         <CardHeader>
@@ -124,8 +127,16 @@ export default function AdminPage() {
       </Card>
     );
   }
+  
+  // Se chegou aqui, é admin e não está carregando.
+  // No entanto, se currentUser for null (usuário deslogou enquanto estava na página),
+  // o layout deve ter lidado com isso, mas adicionamos uma verificação para segurança.
+  if (!currentUser && !isLoadingUser) {
+     router.replace('/login'); // Segurança extra
+     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Sessão expirada. Redirecionando...</p></div>;
+  }
 
-  // If execution reaches here, user is admin and not loading
+
   return (
     <div className="space-y-6">
       <Card className="shadow-lg">
