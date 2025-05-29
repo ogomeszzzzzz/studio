@@ -18,26 +18,40 @@ const ADMIN_PRIMARY_EMAIL_SERVER = process.env.ADMIN_EMAIL || "gustavo.cordeiro@
 async function verifyAdminByEmail(callerEmail: string | undefined): Promise<boolean> {
   console.log('[Admin Verification by Email] Starting verification...');
   console.log(`[Admin Verification by Email] Expected ADMIN_EMAIL from server env: '${ADMIN_PRIMARY_EMAIL_SERVER}'`);
+  
   if (!callerEmail) {
     console.warn('[Admin Verification by Email] Failed: No caller email provided.');
     return false;
   }
-  if (callerEmail.toLowerCase() === ADMIN_PRIMARY_EMAIL_SERVER.toLowerCase()) {
-    console.log(`[Admin Verification by Email] Success: Caller email '${callerEmail}' matches admin.`);
-    return true;
+  if (!ADMIN_PRIMARY_EMAIL_SERVER) {
+    console.warn('[Admin Verification by Email] Failed: ADMIN_EMAIL environment variable is not set on the server.');
+    return false;
   }
-  console.warn(`[Admin Verification by Email] Failed: Caller email '${callerEmail}' does NOT match admin. Expected: '${ADMIN_PRIMARY_EMAIL_SERVER}', Got: '${callerEmail}'.`);
-  return false;
+
+  const isAdmin = callerEmail.toLowerCase() === ADMIN_PRIMARY_EMAIL_SERVER.toLowerCase();
+  if (isAdmin) {
+    console.log(`[Admin Verification by Email] Success: Caller email '${callerEmail}' matches admin.`);
+  } else {
+    console.warn(`[Admin Verification by Email] Failed: Caller email '${callerEmail}' does NOT match admin. Expected: '${ADMIN_PRIMARY_EMAIL_SERVER}', Got: '${callerEmail}'.`);
+  }
+  return isAdmin;
 }
 
 
 export async function getPendingUsers(adminUserEmail: string): Promise<AdminActionResult> {
   console.log(`[Get Pending Users Action] Received request from admin: ${adminUserEmail}`);
+  
   if (adminSDKInitializationError) {
+    console.error(`[Get Pending Users Action] Failing due to Admin SDK init error: ${adminSDKInitializationError}`);
     return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError}`, status: 'error' };
   }
   if (!adminFirestore) {
+    console.error("[Get Pending Users Action] Failing because Firestore Admin is not available.");
     return { message: "Erro Crítico no Servidor: Firestore Admin não está disponível.", status: 'error' };
+  }
+  if (!adminUserEmail) {
+    console.error("[Get Pending Users Action] Failing because adminUserEmail was not provided.");
+    return { message: "Email do administrador não fornecido para a ação.", status: "error" };
   }
 
   const isAdmin = await verifyAdminByEmail(adminUserEmail);
@@ -47,10 +61,14 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
 
   console.log('[Get Pending Users Action] Admin verified. Fetching pending users...');
   try {
+    // IMPORTANT: This query requires a composite index in Firestore.
+    // If you see a "FAILED_PRECONDITION" error, Firestore will provide a link
+    // in the server logs to create this index.
+    // The index will likely involve fields: `pendingApproval` (Ascending), `isApproved` (Ascending), and `createdAt` (Ascending).
     const snapshot = await adminFirestore
       .collection('auth_users')
       .where('pendingApproval', '==', true)
-      .where('isApproved', '==', false) // Ensure we only get users not yet approved
+      .where('isApproved', '==', false)
       .orderBy('createdAt', 'asc')
       .get();
 
@@ -77,9 +95,9 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
             uid: doc.id, // email is the doc.id in auth_users
             email: data.email,
             name: data.name || 'N/A',
-            isApproved: data.isApproved,
-            pendingApproval: data.pendingApproval,
-            isAdmin: data.isAdmin || false,
+            isApproved: data.isApproved === true, // Explicit boolean
+            pendingApproval: data.pendingApproval === true, // Explicit boolean
+            isAdmin: data.isAdmin === true, // Explicit boolean
             createdAt: createdAtDate,
         } as UserProfile;
     });
@@ -87,17 +105,29 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
     return { message: 'Usuários pendentes carregados.', status: 'success', users };
   } catch (error) {
     console.error('[Get Pending Users Action] Error fetching pending users from Firestore:', error);
-    return { message: `Erro ao buscar usuários pendentes no servidor: ${(error as Error).message}`, status: 'error' };
+    // Make sure to return a simple string message
+    const errorMessage = error instanceof Error ? error.message : "Erro desconhecido ao buscar usuários pendentes.";
+    return { message: `Erro ao buscar usuários pendentes no servidor: ${errorMessage.substring(0, 200)}`, status: 'error' };
   }
 }
 
 export async function approveUserInFirestore(adminUserEmail: string, userEmailToApprove: string): Promise<AdminActionResult> {
   console.log(`[Approve User Action] Received request from admin '${adminUserEmail}' to approve user email: ${userEmailToApprove}`);
   if (adminSDKInitializationError) {
+     console.error(`[Approve User Action] Failing due to Admin SDK init error: ${adminSDKInitializationError}`);
      return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError}`, status: 'error' };
   }
   if (!adminFirestore) {
+    console.error("[Approve User Action] Failing because Firestore Admin is not available.");
     return { message: "Erro Crítico no Servidor: Firestore Admin não está disponível.", status: 'error' };
+  }
+  if (!adminUserEmail) {
+    console.error("[Approve User Action] Failing because adminUserEmail was not provided.");
+    return { message: "Email do administrador não fornecido para a ação.", status: "error" };
+  }
+  if (!userEmailToApprove) {
+    console.error("[Approve User Action] Failing because userEmailToApprove was not provided.");
+    return { message: 'Email do usuário para aprovação é obrigatório.', status: 'error' };
   }
 
   const isAdmin = await verifyAdminByEmail(adminUserEmail);
@@ -105,13 +135,8 @@ export async function approveUserInFirestore(adminUserEmail: string, userEmailTo
     return { message: 'Acesso não autorizado para aprovar usuário (verificação de email falhou).', status: 'error' };
   }
 
-  if (!userEmailToApprove) {
-    return { message: 'Email do usuário para aprovação é obrigatório.', status: 'error' };
-  }
-
   console.log(`[Approve User Action] Admin verified. Approving user email: ${userEmailToApprove}`);
   try {
-    // The document ID in 'auth_users' is the user's email in lowercase.
     const userDocRef = adminFirestore.collection('auth_users').doc(userEmailToApprove.toLowerCase());
     await userDocRef.update({
       isApproved: true,
@@ -121,6 +146,7 @@ export async function approveUserInFirestore(adminUserEmail: string, userEmailTo
     return { message: 'Usuário aprovado com sucesso!', status: 'success' };
   } catch (error) {
     console.error(`[Approve User Action] Error approving user ${userEmailToApprove} in Firestore:`, error);
-    return { message: `Erro ao aprovar usuário no servidor: ${(error as Error).message}`, status: 'error' };
+    const errorMessage = error instanceof Error ? error.message : "Erro desconhecido ao aprovar usuário.";
+    return { message: `Erro ao aprovar usuário no servidor: ${errorMessage.substring(0, 200)}`, status: 'error' };
   }
 }
