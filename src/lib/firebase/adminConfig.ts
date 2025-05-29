@@ -51,6 +51,7 @@ if (!admin || !admin.credential || typeof admin.credential.cert !== 'function' |
           console.log('[Admin SDK] Attempting to create credential with admin.credential.cert()...');
 
           const credential = admin.credential.cert(serviceAccountCredentials);
+          // console.log('[Admin SDK] Credential object created by admin.credential.cert():', JSON.stringify(credential, null, 2)); // Log the credential object
 
           if (!credential) {
             adminSDKInitializationError = `admin.credential.cert(serviceAccountCredentials) returned a falsy value. This indicates a problem with the service account credentials object. Path: ${absolutePath}`;
@@ -61,16 +62,20 @@ if (!admin || !admin.credential || typeof admin.credential.cert !== 'function' |
             // Generate a unique app name to force a new instance
             const appName = `firebase-admin-app-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
             console.log(`[Admin SDK] Attempting admin.initializeApp() with unique name: ${appName}`);
+            // console.log(`[Admin SDK] Explicitly passing projectId to initializeApp: '${serviceAccountCredentials.project_id}'`); // Removed for this test
 
             try {
               adminApp = admin.initializeApp({
                 credential,
-                // Optionally, you can force the projectId here if really needed, but cert() should handle it
-                // projectId: expectedProjectId, 
+                // projectId: serviceAccountCredentials.project_id, // Relying solely on credential for projectId
               }, appName); // Use a unique name
 
               console.log(`[Admin SDK] admin.initializeApp() called for app name: ${appName}. Resulting adminApp: ${adminApp ? 'Assigned' : 'NOT Assigned'}`);
-              console.log(`[Admin SDK] Project ID from initialized app: ${adminApp?.options.projectId}`);
+              if (adminApp) {
+                console.log(`[Admin SDK] adminApp.name: ${adminApp.name}`);
+                console.log(`[Admin SDK] adminApp.options: ${JSON.stringify(adminApp.options, null, 2)}`); // Log all options
+                console.log(`[Admin SDK] Project ID from initialized app: ${adminApp.options.projectId}`);
+              }
               console.log(`[Admin SDK] Total admin apps after initialization attempt: ${admin.apps.length}`);
 
               if (adminApp && adminApp.options.projectId === expectedProjectId) {
@@ -130,4 +135,4 @@ if (adminSDKInitializationError) {
   console.error("[Admin SDK] Final State: Admin SDK not initialized, and adminApp is undefined, and no specific error string was set (this is unexpected).");
 }
 console.log('--- [ADMIN SDK INIT END V5] ---');
-    
+
