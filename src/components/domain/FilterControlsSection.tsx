@@ -2,11 +2,10 @@
 'use client';
 
 import type { ChangeEvent } from 'react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react'; // Added useEffect
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-// Popover, Calendar, CalendarIcon, format, cn from 'date-fns' and 'lucide-react' imports removed as date filters are gone
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { Product, FilterState } from '@/types';
@@ -14,21 +13,20 @@ import { FilterXIcon, SearchIcon } from 'lucide-react';
 
 
 interface FilterControlsSectionProps {
-  products: Product[]; // products prop might not be directly used here if availableCollections and availableProductTypes are passed
+  products: Product[]; 
   onFilterChange: (filters: FilterState) => void;
   availableCollections: string[];
-  availableProductTypes: string[]; // New prop
+  availableProductTypes: string[]; 
 }
 
 const ALL_COLLECTIONS_VALUE = "_ALL_COLLECTIONS_";
-const ALL_PRODUCT_TYPES_VALUE = "_ALL_PRODUCT_TYPES_"; // New constant
+const ALL_PRODUCT_TYPES_VALUE = "_ALL_PRODUCT_TYPES_"; 
 
 const initialFilterState: FilterState = {
   collection: ALL_COLLECTIONS_VALUE,
   stockMin: '',
   stockMax: '',
-  productType: ALL_PRODUCT_TYPES_VALUE, // Added productType
-  // Removed date fields
+  productType: ALL_PRODUCT_TYPES_VALUE,
 };
 
 export function FilterControlsSection({ 
@@ -38,24 +36,25 @@ export function FilterControlsSection({
 }: FilterControlsSectionProps) {
   const [filters, setFilters] = useState<FilterState>(initialFilterState);
 
+  // useEffect to call onFilterChange whenever filters change
+  useEffect(() => {
+    onFilterChange(filters);
+  }, [filters, onFilterChange]);
+
   const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFilters(prev => ({ ...prev, [name]: value }));
+    // onFilterChange will be called by useEffect
   };
 
   const handleSelectChange = (name: string, value: string) => {
     setFilters(prev => ({ ...prev, [name]: value }));
-  };
-
-  // handleDateChange removed as date filters are gone
-
-  const applyFilters = () => {
-    onFilterChange(filters);
+    // onFilterChange will be called by useEffect
   };
 
   const clearFilters = () => {
     setFilters(initialFilterState);
-    onFilterChange(initialFilterState);
+    // onFilterChange will be called by useEffect when filters reset to initialFilterState
   };
   
   return (
@@ -66,7 +65,7 @@ export function FilterControlsSection({
           Filtros Adicionais
         </CardTitle>
         <CardDescription className="text-sm">
-          Refine a lista de produtos por coleção, tipo, níveis de estoque.
+          Refine a lista de produtos por coleção, tipo, níveis de estoque. Clique em "Aplicar Critérios e Filtros" acima para ver os resultados.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 pt-0">
@@ -117,6 +116,7 @@ export function FilterControlsSection({
               onChange={handleInputChange}
               placeholder="Ex: 0"
               className="mt-1"
+              min="0"
             />
           </div>
           <div>
@@ -129,23 +129,16 @@ export function FilterControlsSection({
               onChange={handleInputChange}
               placeholder="Ex: 50"
               className="mt-1"
+              min="0"
             />
           </div>
         </div>
 
-        {/* Date filter sections removed */}
-
         <div className="flex justify-end space-x-2 pt-4">
           <Button variant="outline" onClick={clearFilters} size="sm">
             <FilterXIcon className="mr-2 h-4 w-4" />
-            Limpar Filtros
+            Limpar Filtros Adicionais
           </Button>
-          {/* The applyFilters button is now part of the parent component (RestockOpportunitiesPage)
-              to explicitly trigger filtering along with the low stock threshold.
-              If general filters should apply immediately, onFilterChange can be called
-              directly in handleInputChange/handleSelectChange or via a useEffect.
-              For now, we keep the explicit "Apply" button in the parent.
-          */}
         </div>
       </CardContent>
     </Card>

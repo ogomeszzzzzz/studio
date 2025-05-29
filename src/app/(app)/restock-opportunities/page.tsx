@@ -6,7 +6,7 @@ import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import { FilterControlsSection } from '@/components/domain/FilterControlsSection';
 import { ProductDataTableSection } from '@/components/domain/ProductDataTableSection';
 import type { Product, FilterState } from '@/types';
-import { PackageSearch, AlertTriangle, Download, TrendingUp, PackageCheck, ListFilter, HelpCircle, Loader2, Database, ClipboardList, CheckSquare, Square } from 'lucide-react';
+import { PackageSearch, AlertTriangle, Download, TrendingUp, PackageCheck, ListFilter, HelpCircle, Loader2, Database, ClipboardList, CheckSquare, Square, Filter, Activity } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,7 +19,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { clientAuth, firestore } from '@/lib/firebase/config';
 import type { User } from 'firebase/auth';
 import { collection, getDocs, writeBatch, doc, Timestamp, query } from 'firebase/firestore';
@@ -30,7 +29,6 @@ const ALL_PRODUCT_TYPES_VALUE = "_ALL_PRODUCT_TYPES_";
 const DEFAULT_LOW_STOCK_THRESHOLD = 10;
 const FIRESTORE_BATCH_LIMIT = 450; 
 
-// Removed VtexIdStatusFilter type
 
 const productToFirestore = (product: Product): any => {
   return {
@@ -56,7 +54,6 @@ export default function RestockOpportunitiesPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [lowStockThreshold, setLowStockThreshold] = useState<string>(DEFAULT_LOW_STOCK_THRESHOLD.toString());
-  // Removed vtexIdStatusFilter state
   const { toast } = useToast();
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -182,6 +179,8 @@ export default function RestockOpportunitiesPage() {
   }, [allProducts]);
 
   const applyAllFilters = useCallback(() => {
+    if (isLoadingFirestore) return; // Don't filter if still loading initial data
+
     setIsLoading(true);
     console.log("Applying filters with baseFilters:", baseFilters, "lowStockThreshold:", lowStockThreshold);
     let tempFiltered = [...allProducts];
@@ -191,9 +190,7 @@ export default function RestockOpportunitiesPage() {
     if (isNaN(effectiveThreshold) && lowStockThreshold.trim() !== '') {
         toast({ title: "Aviso", description: `Limite de baixo estoque inválido, usando padrão: ${DEFAULT_LOW_STOCK_THRESHOLD}.`, variant: "default" });
     }
-
-    // Removed vtexIdStatusFilter logic
-
+    
     if (baseFilters) {
       if (baseFilters.collection && baseFilters.collection !== ALL_COLLECTIONS_VALUE) {
         tempFiltered = tempFiltered.filter(p => p.collection === baseFilters.collection);
@@ -223,7 +220,7 @@ export default function RestockOpportunitiesPage() {
     console.log("Filtered products count:", tempFiltered.length);
     setFilteredProducts(tempFiltered);
     setIsLoading(false);
-  }, [allProducts, baseFilters, lowStockThreshold, toast]);
+  }, [allProducts, baseFilters, lowStockThreshold, toast, isLoadingFirestore]);
 
 
   const handleBaseFilterChange = useCallback((filters: FilterState) => {
@@ -231,7 +228,9 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-   if(!isLoadingFirestore && (allProducts.length > 0 || baseFilters !== null || lowStockThreshold !== DEFAULT_LOW_STOCK_THRESHOLD.toString())) {
+    // This useEffect will now react to changes in allProducts, lowStockThreshold, and baseFilters
+    // applyAllFilters will be called if not loading from Firestore and conditions are met
+   if(!isLoadingFirestore ) {
     applyAllFilters();
    } else if (!isLoadingFirestore && allProducts.length === 0) { 
     setFilteredProducts([]);
@@ -270,7 +269,7 @@ export default function RestockOpportunitiesPage() {
     toast({ title: "Exportando...", description: "Gerando arquivo Excel." });
 
     const dataToExport = filteredProducts.map(p => ({
-      "ID VTEX": p.vtexId,
+      "ID VTEX": typeof p.vtexId === 'number' ? p.vtexId : String(p.vtexId ?? ''),
       "Nome Produto": p.name,
       "Produto-Derivação": p.productDerivation,
       "Estoque Atual": p.stock,
@@ -300,6 +299,11 @@ export default function RestockOpportunitiesPage() {
     }
   };
 
+  // Handler for the main "Aplicar Critérios e Filtros" button
+  const handleApplyMainFilters = () => {
+    applyAllFilters();
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -318,7 +322,7 @@ export default function RestockOpportunitiesPage() {
         onDataParsed={handleExcelDataProcessed}
         onProcessingStart={handleProcessingStart}
         onProcessingEnd={handleProcessingEnd}
-        collectionColumnKey="Descrição Linha Comercial"
+        collectionColumnKey="Descrição Linha Comercial" // Used for product.collection field
         cardTitle="1. Carregar/Atualizar Dados do Excel"
         cardDescription="Faça o upload da planilha de produtos. Os dados substituirão os existentes em seu perfil."
         isProcessingParent={isSavingFirestore || isProcessingExcel}
@@ -362,7 +366,7 @@ export default function RestockOpportunitiesPage() {
             <CardHeader>
               <CardTitle className="flex items-center">
                 <ListFilter className="mr-2 h-5 w-5 text-primary" />
-                2. Definir Critérios e Filtros
+                2. Definir Critérios e Filtros Adicionais
               </CardTitle>
               <CardDescription>
                 Ajuste o limite de estoque para considerar um item como "baixo" e aplique filtros adicionais.
@@ -370,7 +374,7 @@ export default function RestockOpportunitiesPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end"> {/* Changed to md:grid-cols-2 */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end"> 
                     <div>
                         <Label htmlFor="lowStockThreshold" className="flex items-center font-semibold">
                             Estoque Atual Máximo
@@ -395,15 +399,16 @@ export default function RestockOpportunitiesPage() {
                         className="mt-1 text-base"
                         />
                     </div>
-                    {/* Removed vtexIdStatusFilter Select */}
-                    <Button onClick={applyAllFilters} className="w-full md:w-auto py-2.5 text-base self-end" disabled={isLoading || isSavingFirestore}>
-                        {isLoading ? (
-                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                        ) : (
-                            <ListFilter className="mr-2 h-5 w-5" />
-                        )}
-                        {isLoading ? 'Aplicando...' : 'Aplicar Critérios e Filtros'}
-                    </Button>
+                    <div className="md:col-span-2"> {/* Button spans 2 cols on md+, or takes full width if alone */}
+                        <Button onClick={handleApplyMainFilters} className="w-full py-2.5 text-base" disabled={isLoading || isSavingFirestore}>
+                            {isLoading ? (
+                                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                            ) : (
+                                <Filter className="mr-2 h-5 w-5" />
+                            )}
+                            {isLoading ? 'Aplicando...' : 'Aplicar Estoque Máximo e Filtros Adicionais'}
+                        </Button>
+                    </div>
                 </div>
                 <FilterControlsSection
                     products={allProducts} 
@@ -477,8 +482,8 @@ export default function RestockOpportunitiesPage() {
                     showReadyToShipColumn={true}
                     showRegulatorStockColumn={true}
                     showOpenOrdersColumn={true} 
-                    showCollectionColumn={true}
-                    showDescriptionColumn={true} 
+                    showCollectionColumn={true} // This will use product.collection (from "Descrição Linha Comercial")
+                    showDescriptionColumn={true} // This is product.description (from "Descrição" / Estampa)
                     showSizeColumn={true}
                     showProductTypeColumn={true}
                     showStatusColumn={true}    
@@ -496,7 +501,7 @@ export default function RestockOpportunitiesPage() {
                                 Nenhum produto com estoque atual &le; <span className="font-semibold">{parseInt(lowStockThreshold, 10) || DEFAULT_LOW_STOCK_THRESHOLD}</span> unidades, com disponibilidade em "Pronta Entrega" ou "Regulador", E sem "Pedidos em Aberto" foi encontrado com os filtros atuais.
                             </p>
                             <p className="text-muted-foreground mt-2">
-                                Tente ajustar o "Estoque Atual Máximo" ou os filtros adicionais e clique em "Aplicar Critérios e Filtros".
+                                Tente ajustar o "Estoque Atual Máximo" ou os filtros adicionais e clique em "Aplicar Estoque Máximo e Filtros Adicionais".
                             </p>
                         </CardContent>
                     </Card>
@@ -508,3 +513,4 @@ export default function RestockOpportunitiesPage() {
     </div>
   );
 }
+
