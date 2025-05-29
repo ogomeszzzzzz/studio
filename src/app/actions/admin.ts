@@ -1,7 +1,7 @@
 
 'use server';
 
-import { adminFirestore, adminSDKInitializationError } from '@/lib/firebase/adminConfig';
+import { adminFirestore, adminAuth, adminSDKInitializationError } from '@/lib/firebase/adminConfig';
 import type { UserProfile } from '@/types';
 import { Timestamp } from 'firebase-admin/firestore';
 
@@ -13,7 +13,6 @@ interface AdminActionResult {
 
 const ADMIN_PRIMARY_EMAIL_SERVER = process.env.ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br";
 
-// This function is a simple check if the provided email matches the admin email.
 async function verifyAdminByEmail(callerEmail: string | undefined): Promise<boolean> {
   console.log('[Admin Verification by Email] Starting verification...');
   console.log(`[Admin Verification by Email] Expected ADMIN_EMAIL from server env: '${ADMIN_PRIMARY_EMAIL_SERVER}'`);
@@ -58,20 +57,20 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
     return { message: 'Acesso não autorizado para buscar usuários pendentes (verificação de email falhou).', status: 'error' };
   }
 
-  console.log('[Get Pending Users Action] Admin verified. Fetching pending users...');
+  console.log('[Get Pending Users Action] Admin verified. Fetching pending users from Firestore database ID "ecom"...');
   try {
     // =====================================================================================
     // IMPORTANTE: Esta consulta requer um ÍNDICE COMPOSTO no Firestore.
-    // Se você receber um erro "FAILED_PRECONDITION", o Firestore geralmente fornecerá
-    // um link direto nos logs do servidor para criar este índice.
-    // O índice geralmente envolve os campos:
     // Coleção: `auth_users`
-    // Campos:
+    // Campos do Índice:
     //   1. `pendingApproval` (Ascendente)
     //   2. `isApproved` (Ascendente)
-    //   3. `createdAt` (Ascendente ou Descendente, dependendo da sua ordenação preferida)
+    //   3. `createdAt` (Ascendente ou Descendente)
+    // O Firestore geralmente fornecerá um link para criar este índice se ele estiver faltando.
+    // Verifique os logs do servidor para este link se o erro "FAILED_PRECONDITION" ocorrer.
+    // O link será específico para o seu projeto (ex: ecommerce-db-75f77).
     // =====================================================================================
-    const snapshot = await adminFirestore
+    const snapshot = await adminFirestore // adminFirestore já está configurado para o projeto correto
       .collection('auth_users')
       .where('pendingApproval', '==', true)
       .where('isApproved', '==', false)
@@ -93,17 +92,17 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
                  createdAtDate = new Date((data.createdAt as any).seconds * 1000);
             } else if (typeof data.createdAt === 'string' && !isNaN(new Date(data.createdAt).getTime())) {
                  createdAtDate = new Date(data.createdAt);
-            } else if (typeof data.createdAt === 'number') { // For potential milliseconds since epoch
+            } else if (typeof data.createdAt === 'number') { 
                 createdAtDate = new Date(data.createdAt);
             }
         }
         return {
-            uid: doc.id, // email is the doc.id in auth_users
+            uid: doc.id, 
             email: data.email,
             name: data.name || 'N/A',
-            isApproved: data.isApproved === true, // Explicit boolean
-            pendingApproval: data.pendingApproval === true, // Explicit boolean
-            isAdmin: data.isAdmin === true, // Explicit boolean
+            isApproved: data.isApproved === true, 
+            pendingApproval: data.pendingApproval === true, 
+            isAdmin: data.isAdmin === true, 
             createdAt: createdAtDate,
         } as UserProfile;
     });
@@ -112,10 +111,11 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
   } catch (error) {
     console.error('[Get Pending Users Action] Error fetching pending users from Firestore:', error);
     const errorMessage = error instanceof Error ? error.message : "Erro desconhecido ao buscar usuários pendentes.";
-    // Verifique se o erro é de FAILED_PRECONDITION (índice faltando) e adicione o link se for o caso.
-    if (error instanceof Error && (error as any).code === 9 && (error as any).details?.includes('create_composite=')) {
-        const firebaseErrorDetails = (error as any).details;
-        return { message: `Erro ao buscar usuários pendentes no servidor: ${errorMessage.substring(0,100)}. ${firebaseErrorDetails}`, status: 'error' };
+    
+    if (error instanceof Error && (error as any).code === 9 /* FAILED_PRECONDITION */) {
+        const firebaseErrorDetails = (error as any).details || "Índice composto necessário. Verifique os logs do servidor para o link de criação do índice.";
+        console.error(`[Get Pending Users Action] Firestore Index Required: ${firebaseErrorDetails}`);
+        return { message: `Erro ao buscar usuários: Índice do Firestore necessário. Detalhes: ${firebaseErrorDetails.substring(0,300)}`, status: 'error' };
     }
     return { message: `Erro ao buscar usuários pendentes no servidor: ${errorMessage.substring(0, 200)}`, status: 'error' };
   }
@@ -145,12 +145,13 @@ export async function approveUserInFirestore(adminUserEmail: string, userEmailTo
     return { message: 'Acesso não autorizado para aprovar usuário (verificação de email falhou).', status: 'error' };
   }
 
-  console.log(`[Approve User Action] Admin verified. Approving user email: ${userEmailToApprove}`);
+  console.log(`[Approve User Action] Admin verified. Approving user email: ${userEmailToApprove} in Firestore database ID "ecom"`);
   try {
     const userDocRef = adminFirestore.collection('auth_users').doc(userEmailToApprove.toLowerCase());
     await userDocRef.update({
       isApproved: true,
       pendingApproval: false,
+      // You might want to add an 'approvedAt: Timestamp.now()' field here too
     });
     console.log(`[Approve User Action] User ${userEmailToApprove} approved successfully in Firestore.`);
     return { message: 'Usuário aprovado com sucesso!', status: 'success' };
@@ -160,3 +161,5 @@ export async function approveUserInFirestore(adminUserEmail: string, userEmailTo
     return { message: `Erro ao aprovar usuário no servidor: ${errorMessage.substring(0, 200)}`, status: 'error' };
   }
 }
+
+    
