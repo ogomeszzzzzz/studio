@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { Product } from '@/types';
 import { format, isValid, addDays, isBefore, parseISO } from 'date-fns';
-import { ArrowUpDown, ListChecks, ChevronLeft, ChevronRight, TrendingUp } from 'lucide-react';
+import { ArrowUpDown, ListChecks, ChevronLeft, ChevronRight, TrendingUp, PackageSearch, Activity, PackageCheck, ClipboardList } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
@@ -30,14 +30,14 @@ interface ProductDataTableSectionProps {
   showSizeColumn?: boolean;
   showProductTypeColumn?: boolean;
   showProductDerivationColumn?: boolean;
-  showCanRestockAmountColumn?: boolean; // Nova prop
-  lowStockThresholdForRestock?: number; // Nova prop para cálculo
+  showCanRestockAmountColumn?: boolean;
+  lowStockThresholdForRestock?: number;
   cardTitle?: string;
   cardDescription?: string;
   cardIcon?: React.ElementType;
 }
 
-type SortKey = keyof Product | 'canRestockAmount' | ''; // Adicionado 'canRestockAmount'
+type SortKey = keyof Product | 'canRestockAmount' | '';
 type SortOrder = 'asc' | 'desc';
 
 const getCollectionStatus = (product: Product): { text: string; variant: 'default' | 'secondary' | 'destructive' | 'outline', colorClass?: string } => {
@@ -45,18 +45,22 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
   today.setHours(0,0,0,0);
 
   const endDateInput = product.collectionEndDate;
-
   let endDate: Date | null = null;
+
   if (endDateInput instanceof Date && isValid(endDateInput)) {
-    endDate = endDateInput;
+    endDate = new Date(endDateInput.valueOf()); // Clone to avoid mutating original
   } else if (typeof endDateInput === 'string') {
     const parsedDate = parseISO(endDateInput);
     if (isValid(parsedDate)) {
       endDate = parsedDate;
     }
-  } else if (typeof endDateInput === 'number') {
-      const excelEpoch = new Date(Date.UTC(1899, 11, 30));
-      const d = new Date(excelEpoch.getTime() + endDateInput * 24 * 60 * 60 * 1000);
+  } else if (typeof endDateInput === 'number' && !isNaN(endDateInput)) { // Handle Excel serial dates
+      // Excel epoch starts on Dec 30, 1899 for some versions, or Jan 1, 1900
+      // Using a common approach: Date constructor with UTC to avoid timezone issues with epoch.
+      // Excel date number represents days since Dec 30, 1899 (or Jan 1, 1900 if Mac Excel)
+      // For simplicity, assuming Windows Excel epoch for now.
+      const excelBaseDate = new Date(Date.UTC(1899, 11, 30)); // December 30, 1899
+      const d = new Date(excelBaseDate.getTime() + endDateInput * 24 * 60 * 60 * 1000);
       if (isValid(d)) endDate = d;
   }
 
@@ -101,22 +105,23 @@ export function ProductDataTableSection({
   showSizeColumn = false,
   showProductTypeColumn = false,
   showProductDerivationColumn = false,
-  showCanRestockAmountColumn = false, // Nova prop
-  lowStockThresholdForRestock = 0, // Nova prop
+  showCanRestockAmountColumn = false,
+  lowStockThresholdForRestock = 0,
   cardTitle = "Dados dos Produtos",
   cardDescription = "Lista detalhada de produtos. Clique nos cabeçalhos das colunas para ordenar.",
-  cardIcon: CardIcon = ListChecks,
+  cardIcon: CardIconPassed = ListChecks,
 }: ProductDataTableSectionProps) {
-  const [sortKey, setSortKey] = useState<SortKey>('name');
+  const [sortKey, setSortKey] = useState<SortKey>('');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [currentPage, setCurrentPage] = useState(1);
+
+  const CardIcon = CardIconPassed || ListChecks;
+
 
   const augmentedProducts = useMemo(() => {
     if (!showCanRestockAmountColumn) return products;
     return products.map(p => ({
         ...p,
-        // This calculation is now done in the parent page (RestockOpportunitiesPage)
-        // and passed via p.canRestockAmount
     }));
   }, [products, showCanRestockAmountColumn, lowStockThresholdForRestock]);
 
@@ -191,7 +196,7 @@ export function ProductDataTableSection({
     const colCount = [
         showVtexIdColumn, showNameColumn, showProductDerivationColumn, showStockColumn,
         showReadyToShipColumn, showRegulatorStockColumn, showOpenOrdersColumn,
-        showCanRestockAmountColumn, // Nova coluna
+        showCanRestockAmountColumn,
         showCollectionColumn, showDescriptionColumn,
         showSizeColumn, showProductTypeColumn, showStartDateColumn, showEndDateColumn, showStatusColumn
     ].filter(Boolean).length || 1;
@@ -226,8 +231,8 @@ export function ProductDataTableSection({
           <p className="text-center text-muted-foreground py-6">Nenhum produto corresponde aos critérios selecionados.</p>
         ) : (
           <>
-            <div className="overflow-x-auto rounded-md border">
-              <Table>
+            <div className="rounded-md border"> {/* Removed overflow-x-auto from this div */}
+              <Table> {/* Table component from ui/table.tsx already handles its own overflow */}
                 <TableHeader>
                   <TableRow>
                     {showVtexIdColumn && <TableHead onClick={() => handleSort('vtexId')} className="cursor-pointer hover:bg-muted/50 min-w-[100px] whitespace-nowrap px-2 py-3 text-xs sm:text-sm">ID VTEX {renderSortIcon('vtexId')}</TableHead>}
@@ -316,3 +321,4 @@ export function ProductDataTableSection({
     </Card>
   );
 }
+
