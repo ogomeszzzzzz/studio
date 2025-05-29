@@ -1,16 +1,38 @@
+
 rules_version = '2';
 
 service cloud.firestore {
-  match /databases/ecom/documents { // Certifique-se que 'ecom' é o ID do seu banco de dados no Firebase.
+  match /databases/ecom/documents { // Ensure 'ecom' is your correct database ID
 
-    // Permite que um usuário autenticado leia e escreva (crie, atualize, exclua)
-    // QUALQUER documento ou subcoleção sob seu próprio caminho /users/{userId}.
-    // Isso cobre /users/{userId}/products/* e /users/{userId}/products/_metadata
-    match /users/{userId}/{subpath=**} { // {subpath=**} é um curinga recursivo
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    // User documents
+    match /users/{userId} {
+      // Admin can read/write any user document for approval purposes
+      allow read, write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email == "gustavo.cordeiro@altenburg.com.br";
+
+      // Authenticated users can read their own document
+      // (to check their own isApproved status, name, etc.)
+      allow get: if request.auth != null && request.auth.uid == userId;
+
+      // Allow user creation during registration by the server action (Admin SDK)
+      // Allow update by admin for approval (covered by admin rule above)
+      // Regular users cannot update their own approval status or create other user docs.
+      allow create: if request.auth != null; // For initial creation by server with pending status
+      allow update: if request.auth != null && request.auth.uid == userId && (!('isApproved' in request.resource.data) && !('pendingApproval' in request.resource.data)); // User can update own profile, but not approval fields
     }
 
-    // Adicione aqui regras para outras coleções de nível raiz, se necessário.
-    // Se não houver outras regras, o acesso a outras coleções será negado por padrão.
+    // Products subcollection for each user
+    match /users/{userId}/products/{productId} {
+      // User can manage their own products
+      allow read, write, delete: if request.auth != null && request.auth.uid == userId;
+    }
+    match /users/{userId}/products {
+      // User can list their own products and create new ones in batch
+      allow list, create: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Metadata for products subcollection
+     match /users/{userId}/products/_metadata {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+     }
   }
 }

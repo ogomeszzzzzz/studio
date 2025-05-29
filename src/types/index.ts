@@ -1,6 +1,6 @@
 
 export interface Product {
-  vtexId: string | number;
+  vtexId: string | number; // Can be string like "#N/D" or a number
   name: string;
   productId?: string | number;
   derivation?: string | number;
@@ -25,7 +25,6 @@ export interface Product {
   rawCollectionEndDate?: string;
   canRestockAmount?: number; // For restock opportunities
 
-  // New fields for ABC Analysis
   price?: number;
   sales30d?: number;
   revenue30d?: number;
@@ -42,6 +41,9 @@ export interface FilterState {
 
 export interface UserProfile {
   uid: string;
+  name?: string; // Added for registration
   email: string | null;
-  createdAt?: Date;
+  createdAt?: Date; // Consider using Firestore Timestamp for this
+  isApproved?: boolean; // Added for approval system
+  pendingApproval?: boolean; // Added for approval system
 }
