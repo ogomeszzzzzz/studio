@@ -2,45 +2,38 @@
 rules_version = '2';
 
 service cloud.firestore {
+  // Ensure this matches your database ID (e.g., (default) or a named database like "ecom")
   match /databases/ecom/documents {
 
-    // Collection for user authentication and authorization data
+    // Rules for the custom authentication user profiles
+    // Document ID is the user's email
     match /auth_users/{userEmail} {
-      // Anyone can attempt to read for login (server action will verify password)
-      // Registration: Server action (admin context) will create the document.
-      // If client needs to check if email exists before registration, this might need to be more open,
-      // or that check also becomes a server action. For now, server actions handle create/read for auth.
-      allow read: if true; // Temporarily open for server action based login to fetch user data.
-                           // Ideally, only server actions with admin privileges should read this.
-                           // For client-side, you'd restrict this further if not using server actions for login.
+      // Client-side AppLayout needs to read its own user profile
+      // to check for isApproved and isAdmin status.
+      // Server Actions (which bypass these rules) handle all writes like registration and approval.
+      allow get: if true; // Allows fetching a specific user document by its path.
+                         // For a prototype, this assumes client only fetches its own email path.
+                         // In production, user profile reads should ideally be via Server Actions.
 
-      // User creation is done via server action.
-      // Admin can update any user's approval/admin status.
-      allow write: if get(/databases/$(database)/documents/auth_users/$(request.auth.token.email)).data.isAdmin == true;
-
-      // Allow user to create their own document during registration (if not using server action exclusively)
-      // This is less secure than having a server action create it.
-      // allow create: if request.auth == null && request.resource.data.email == userEmail;
+      // Disallow listing the whole auth_users collection from client,
+      // and disallow client-side writes.
+      allow list, create, update, delete: if false;
     }
 
-    // Collection for products uploaded by users
-    match /user_products/{userEmail}/uploaded_products/{productId} {
-      // User can read/write/delete their own products if their email matches the path.
-      // This rule is simplified assuming 'userEmail' from a client-side "session"
-      // is validated by server actions before they operate on these paths.
-      // Without Firebase Auth tokens, direct client access to these paths based on 'userEmail' in path
-      // needs careful consideration of how 'userEmail' is verified.
-      // For now, we assume server actions will enforce this.
-      allow read, write, delete: if request.auth.token.email == userEmail; // THIS WILL NOT WORK WITHOUT FIREBASE AUTH.
-                                     // Server actions will bypass this.
-                                     // For client-side direct access (which we are moving away from for products),
-                                     // you'd need a custom claim or different logic.
-                                     // Given the move to Firestore-only auth, direct client data access rules
-                                     // become complex. We will rely on server actions for data.
+    // Rules for user-specific product data
+    // Path: /user_products/{userEmail}/uploaded_products/{documentId}
+    // documentId can be a product's auto-generated ID or "_metadata"
+    match /user_products/{userEmail}/uploaded_products/{documentId} {
+      // Client-side pages (Dashboard, Restock, Pillow, ABC) fetch product lists
+      // and also perform batch writes to add/delete all products on new Excel upload.
+      // This is highly permissive for a prototype to make client-side operations work.
+      // For a production application, all product data access and modification
+      // should be routed through Server Actions which can validate user ownership.
+      allow read, write, delete: if true;
     }
 
-    // Fallback: Deny all other access by default
-    match /{document=**} {
+    // Fallback rule: Deny all access to any other paths by default
+    match /{path=**} {
       allow read, write: if false;
     }
   }
