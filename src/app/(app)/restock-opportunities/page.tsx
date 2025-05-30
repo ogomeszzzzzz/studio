@@ -15,7 +15,7 @@ import * as XLSX from 'xlsx';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
 import { collection, getDocs, doc, Timestamp, query, getDoc } from 'firebase/firestore';
-import { format as formatDateFns } from 'date-fns';
+import { format as formatDateFns, isValid as isDateValid } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -27,8 +27,8 @@ const DEFAULT_LOW_STOCK_THRESHOLD = 10;
 const productFromFirestore = (data: any): Product => {
   return {
     ...data,
-    collectionStartDate: data.collectionStartDate ? (data.collectionStartDate as Timestamp).toDate() : null,
-    collectionEndDate: data.collectionEndDate ? (data.collectionEndDate as Timestamp).toDate() : null,
+    collectionStartDate: data.collectionStartDate instanceof Timestamp ? data.collectionStartDate.toDate() : null,
+    collectionEndDate: data.collectionEndDate instanceof Timestamp ? data.collectionEndDate.toDate() : null,
   } as Product;
 };
 
@@ -72,14 +72,13 @@ export default function RestockOpportunitiesPage() {
         const fetchProducts = async () => {
           try {
             const productsColPath = `user_products/${currentUser.email}/uploaded_products`;
-            const productsCol = collection(firestore, productsColPath);
-            const snapshot = await getDocs(query(productsCol));
+            const productsQuery = query(collection(firestore, productsColPath));
+            const snapshot = await getDocs(productsQuery);
             const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
             
             setAllProducts(productsFromDb);
 
-            const metadataDocPath = `user_products/${currentUser.email}/_metadata`;
-            const metadataDocRef = doc(firestore, metadataDocPath);
+            const metadataDocRef = doc(firestore, `user_products/${currentUser.email}/uploaded_products`, '_metadata');
             const metadataDocSnap = await getDoc(metadataDocRef);
             if (metadataDocSnap.exists()) {
               const data = metadataDocSnap.data();
@@ -161,11 +160,11 @@ export default function RestockOpportunitiesPage() {
 
     tempFiltered = tempFiltered.filter(p =>
         p.stock <= currentThreshold &&
-        (p.readyToShip > 0 || p.regulatorStock > 0) &&
-        p.openOrders === 0
+        (p.readyToShip > 0 || (p.regulatorStock || 0) > 0) &&
+        (p.openOrders || 0) === 0
     ).map(p => ({
       ...p,
-      canRestockAmount: Math.min(Math.max(0, currentThreshold - p.stock), p.readyToShip + p.regulatorStock)
+      canRestockAmount: Math.min(Math.max(0, currentThreshold - p.stock), p.readyToShip + (p.regulatorStock || 0))
     }));
 
     console.log("Filtered products count:", tempFiltered.length);
@@ -189,7 +188,7 @@ export default function RestockOpportunitiesPage() {
 
   const summaryStats = useMemo(() => {
     const totalSkusToRestock = filteredProducts.length;
-    const totalUnitsInPERegForOpportunities = filteredProducts.reduce((sum, p) => sum + p.readyToShip + p.regulatorStock, 0);
+    const totalUnitsInPERegForOpportunities = filteredProducts.reduce((sum, p) => sum + p.readyToShip + (p.regulatorStock || 0), 0);
     const totalUnitsThatCanBeRestocked = filteredProducts.reduce((sum, p) => sum + (p.canRestockAmount || 0), 0);
 
     return {
@@ -217,8 +216,8 @@ export default function RestockOpportunitiesPage() {
       "Produto-Derivação": p.productDerivation,
       "Estoque Atual": p.stock,
       "Pronta Entrega": p.readyToShip,
-      "Regulador": p.regulatorStock,
-      "Pedidos em Aberto": p.openOrders,
+      "Regulador": p.regulatorStock || 0,
+      "Pedidos em Aberto": p.openOrders || 0,
       "Pode Repor (Un.)": p.canRestockAmount || 0,
       "Coleção (Desc. Linha Comercial)": p.collection,
       "Descrição (Estampa)": p.description,
@@ -459,25 +458,17 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
 
   const endDateInput = product.collectionEndDate;
   let endDate: Date | null = null;
-  // Check if endDateInput is a valid Date object
-  if (endDateInput instanceof Date && !isNaN(endDateInput.getTime())) {
+
+  if (endDateInput instanceof Date && isDateValid(endDateInput)) {
     endDate = new Date(endDateInput.valueOf()); 
-  } else if (typeof endDateInput === 'string') { // Check if it's a string
-    const parsedDate = new Date(endDateInput); // Try parsing common date string formats
-    if (!isNaN(parsedDate.getTime())) {
+  } else if (typeof endDateInput === 'string') {
+    const parsedDate = new Date(endDateInput); // Try parsing common date string formats, or ISO if excel-parser provides that
+    if (isDateValid(parsedDate)) {
       endDate = parsedDate;
     }
   }
-  // Add check for Excel date numbers (less common if cellDates:true is used in parser, but good fallback)
-  else if (typeof endDateInput === 'number' && !isNaN(endDateInput)) { 
-      // Excel date to JS Date conversion (approximate, assumes date is number of days since 1899-12-30)
-      const excelBaseDate = new Date(Date.UTC(1899, 11, 30)); // Excel's epoch
-      const d = new Date(excelBaseDate.getTime() + endDateInput * 24 * 60 * 60 * 1000);
-      if (!isNaN(d.getTime())) endDate = d;
-  }
-
-
-  if (endDate && !isNaN(endDate.getTime())) {
+  
+  if (endDate && isDateValid(endDate)) {
     endDate.setHours(0,0,0,0);
 
     if (endDate < today) {

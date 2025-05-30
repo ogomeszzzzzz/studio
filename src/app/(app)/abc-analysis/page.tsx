@@ -13,7 +13,7 @@ import { Loader2, BarChart, PieChartIcon as PieChartLucide, Filter, Download, Da
 import { ResponsiveContainer, BarChart as RechartsBarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, Legend as RechartsLegend, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart";
 import * as XLSX from 'xlsx';
-import { format as formatDateFns } from 'date-fns';
+import { format as formatDateFns, isValid as isDateValid } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -22,8 +22,8 @@ import { useAuth } from '@/contexts/AuthContext';
 const productFromFirestore = (data: any): Product => {
   return {
     ...data,
-    collectionStartDate: data.collectionStartDate ? (data.collectionStartDate as Timestamp).toDate() : null,
-    collectionEndDate: data.collectionEndDate ? (data.collectionEndDate as Timestamp).toDate() : null,
+    collectionStartDate: data.collectionStartDate instanceof Timestamp ? data.collectionStartDate.toDate() : null,
+    collectionEndDate: data.collectionEndDate instanceof Timestamp ? data.collectionEndDate.toDate() : null,
   } as Product;
 };
 
@@ -70,13 +70,12 @@ export default function AbcAnalysisPage() {
         const fetchProducts = async () => {
           try {
             const productsColPath = `user_products/${currentUser.email}/uploaded_products`;
-            const productsCol = collection(firestore, productsColPath);
-            const snapshot = await getDocs(query(productsCol));
+            const productsQuery = query(collection(firestore, productsColPath));
+            const snapshot = await getDocs(productsQuery);
             const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
             setAllProducts(productsFromDb);
 
-            const metadataDocPath = `user_products/${currentUser.email}/_metadata`;
-            const metadataDocRef = doc(firestore, metadataDocPath);
+            const metadataDocRef = doc(firestore, `user_products/${currentUser.email}/uploaded_products`, '_metadata');
             const metadataDocSnap = await getDoc(metadataDocRef);
             if (metadataDocSnap.exists()) {
               const data = metadataDocSnap.data();
