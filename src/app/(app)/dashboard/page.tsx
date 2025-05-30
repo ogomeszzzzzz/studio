@@ -51,7 +51,7 @@ interface CollectionSkuStatusData {
 }
 
 const ALL_COLLECTIONS_VALUE = "_ALL_DASHBOARD_COLLECTIONS_";
-const FIRESTORE_BATCH_LIMIT = 450;
+const FIRESTORE_BATCH_LIMIT = 450; // Firestore batch limit
 
 const chartConfigBase = {
   stock: { label: "Estoque", },
@@ -67,7 +67,7 @@ const chartConfigBase = {
 } satisfies ChartConfig;
 
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
-const PIE_COLORS = ["hsl(var(--chart-2))", "hsl(var(--destructive))"];
+const PIE_COLORS = ["hsl(var(--chart-2))", "hsl(var(--destructive))"]; // Green for with stock, Red for zero stock
 
 const productToFirestore = (product: Product): any => {
   const data: any = { ...product };
@@ -140,13 +140,13 @@ export default function DashboardPage() {
     } catch (error) {
       const fullError = error instanceof Error ? error : new Error(String(error));
       console.error("DashboardPage (fetchHistory): Error fetching stock history:", fullError);
-      toast({ title: "Erro ao Carregar Histórico", description: `Não foi possível buscar o histórico de estoque: ${fullError.message}`, variant: "destructive" });
+      toast({ title: "Erro ao Carregar Histórico", description: `Não foi possível buscar o histórico de estoque: ${fullError.message}. Detalhes: ${fullError.stack || 'Sem stack trace'}`, variant: "destructive" });
       setStockHistory([]);
     } finally {
       console.log("DashboardPage (fetchHistory): Fetch attempt finished. Setting isLoadingHistory to false.");
       setIsLoadingHistory(false);
     }
-  }, [currentUser, toast]); // Removed firestore, firestoreClientInitializationError, isSavingFirestore as they are checked before call or in parent useEffect
+  }, [currentUser, toast]); 
 
   useEffect(() => {
     console.log(`DashboardPage (Main useEffect): AuthLoading: ${isAuthLoading}, CurrentUser: ${!!currentUser}, Products loaded: ${dashboardProducts.length}, Saving: ${isSavingFirestore}, Firestore client init error: ${firestoreClientInitializationError}, Firestore instance: ${!!firestore}`);
@@ -154,7 +154,6 @@ export default function DashboardPage() {
     if (isAuthLoading) {
       console.log("DashboardPage (Main useEffect): Auth context is loading, waiting...");
       if (dashboardProducts.length === 0) setIsLoadingFirestore(true);
-      // Don't reset isLoadingHistory here if already true from initial state
       return;
     }
 
@@ -199,8 +198,10 @@ export default function DashboardPage() {
             } else {
               setLastDataUpdateTimestamp(null);
             }
-             if (productsFromDb.length === 0 && !isAdmin) {
-               toast({ title: "Sem Dados Carregados", description: "Nenhum produto encontrado. O administrador precisa carregar uma planilha.", variant: "default" });
+             if (productsFromDb.length === 0 && isAdmin) { // Only show if admin and no data
+               toast({ title: "Sem Dados Carregados", description: "Nenhum produto encontrado. Faça o upload de uma planilha para popular os dados.", variant: "default" });
+            } else if (productsFromDb.length === 0 && !isAdmin) {
+               toast({ title: "Sem Dados no Sistema", description: "Nenhum produto encontrado. O administrador precisa carregar uma planilha.", variant: "default" });
             }
           } catch (error) {
             console.error("DashboardPage (Main useEffect): Error fetching products from Firestore:", error);
@@ -225,16 +226,14 @@ export default function DashboardPage() {
            stockHistory[stockHistory.length - 1]?.date && 
            lastDataUpdateTimestamp > stockHistory[stockHistory.length - 1].date));
 
-      console.log("DashboardPage (Main useEffect for History): AuthLoading:", isAuthLoading, "CurrentUser:", !!currentUser, "Saving:", isSavingFirestore, "History length:", stockHistory.length, "lastDataUpdateTimestamp:", lastDataUpdateTimestamp, "shouldFetchHistory:", shouldFetchHistory);
+      console.log("DashboardPage (History): AuthLoading:", isAuthLoading, "CurrentUser:", !!currentUser, "Saving:", isSavingFirestore, "History length:", stockHistory.length, "lastDataUpdateTimestamp:", lastDataUpdateTimestamp, "shouldFetchHistory:", shouldFetchHistory);
       
       if (shouldFetchHistory) {
-        console.log("DashboardPage (Main useEffect for History): Fetching history because shouldFetchHistory is true.");
+        console.log("DashboardPage (History): Fetching history because shouldFetchHistory is true.");
         fetchHistory();
-      } else {
-        console.log("DashboardPage (Main useEffect for History): Not fetching history. Current isLoadingHistory:", isLoadingHistory);
-        if (isLoadingHistory && !isSavingFirestore) { // If not fetching (and not saving), ensure loading stops
+      } else if (isLoadingHistory && !isSavingFirestore && !isAuthLoading) { // If not fetching (and not saving/auth loading), ensure loading stops
+           console.log("DashboardPage (History): Not fetching history. Setting isLoadingHistory to false.");
            setIsLoadingHistory(false);
-        }
       }
 
     } else { 
@@ -268,22 +267,19 @@ export default function DashboardPage() {
       const productsColPath = "shared_products";
       const productsColRef = collection(firestore, productsColPath);
       
-      // Delete existing products in batches
-      const existingProductsQuery = query(productsColRef);
-      const existingDocsSnapshot = await getDocs(existingProductsQuery);
-      const docsToDelete = existingDocsSnapshot.docs; 
+      const existingDocsSnapshot = await getDocs(query(productsColRef));
+      const docsToDelete = existingDocsSnapshot.docs;
       console.log(`DashboardPage: Found ${docsToDelete.length} existing products to delete.`);
 
       for (let i = 0; i < docsToDelete.length; i += FIRESTORE_BATCH_LIMIT) {
         const batch = writeBatch(firestore);
         const chunk = docsToDelete.slice(i, i + FIRESTORE_BATCH_LIMIT);
-        chunk.forEach(docSnapshot => { batch.delete(docSnapshot.ref); });
+        chunk.forEach(docSnapshot => batch.delete(docSnapshot.ref));
         await batch.commit();
         totalDeleted += chunk.length;
         console.log(`DashboardPage: Batch deleted ${chunk.length} products. Total deleted so far: ${totalDeleted}`);
       }
 
-      // Add new products in batches
       if (productsToSave.length > 0) {
         console.log(`DashboardPage: Starting to add ${productsToSave.length} new products.`);
         for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
@@ -299,7 +295,6 @@ export default function DashboardPage() {
         }
       }
 
-      // Add stock history entry
       if (productsToSave.length > 0) {
         const currentTotalStockUnits = productsToSave.reduce((sum, p) => sum + (p.stock || 0), 0);
         const currentTotalSkusWithStock = productsToSave.filter(p => (p.stock || 0) > 0).length;
@@ -311,16 +306,14 @@ export default function DashboardPage() {
         console.log("DashboardPage: Stock history entry added.");
       }
 
-      // Update metadata
       const metadataDocRef = doc(firestore, "app_metadata", "products_metadata");
       await setDoc(metadataDocRef, { lastUpdatedAt: serverTimestamp() }, { merge: true });
       console.log("DashboardPage: Products metadata (lastUpdatedAt) updated.");
       
       setDashboardProducts(productsToSave);
       const newTimestamp = new Date();
-      setLastDataUpdateTimestamp(newTimestamp);
-      
-      setStockHistory([]); // Clear current history, useEffect will trigger a re-fetch
+      setLastDataUpdateTimestamp(newTimestamp); // This will trigger the history fetch via useEffect
+      setStockHistory([]); // Clear current history, useEffect will trigger a re-fetch due to lastDataUpdateTimestamp change
 
       toast({ title: "Dados Globais Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} antigos foram removidos.` : ''} Histórico de estoque atualizado.` });
 
@@ -333,7 +326,7 @@ export default function DashboardPage() {
       setIsLoadingFirestore(false);
       console.log("DashboardPage: Finished saving products, isSavingFirestore set to false.");
     }
-  }, [currentUser, isAdmin, toast]); // Removed firestore to avoid re-creating function if firestore instance changes (it shouldn't often)
+  }, [currentUser, isAdmin, toast]); 
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
     console.log("DashboardPage: Excel data processed, parsed products count:", parsedProducts.length);
@@ -399,7 +392,7 @@ export default function DashboardPage() {
       const collectionKey = product.collection || 'Não Especificada';
       const typeKey = product.productType || 'Não Especificado';
       const sizeKey = product.size || 'Não Especificado';
-      const printKey = product.description || 'Não Especificada';
+      const printKey = product.description || 'Não Especificada'; // Using 'description' for print/pattern
 
       const currentCol = stockByCollectionMap.get(collectionKey) || { stock: 0, skus: 0 };
       currentCol.stock += (product.stock || 0);
@@ -428,10 +421,10 @@ export default function DashboardPage() {
         currentCollectionSkuData.activeSkus += 1;
       } else {
         currentCollectionSkuData.zeroStockSkus += 1;
-        totalZeroStockSkus++;
       }
       collectionSkuMap.set(collectionKey, currentCollectionSkuData);
-
+      
+      if((product.stock || 0) === 0) totalZeroStockSkus++;
       totalStock += (product.stock || 0);
       totalReadyToShipStock += product.readyToShip || 0;
       totalRegulatorStock += product.regulatorStock || 0;
@@ -713,7 +706,6 @@ export default function DashboardPage() {
          <Card className="shadow-lg"><CardHeader><CardTitle className="flex items-center"><Filter className="mr-2 h-6 w-6 text-primary" />Nenhum produto encontrado</CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Nenhum produto encontrado para a coleção "{selectedCollection}" selecionada.</p></CardContent></Card>
       )}
 
-      {/* Stock History Chart */}
       {isLoadingHistory && (
         <Card className="shadow-lg"><CardHeader><CardTitle className="flex items-center"><Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" />Carregando histórico...</CardTitle></CardHeader></Card>
       )}
@@ -757,7 +749,7 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
       )}
-      {!isLoadingHistory && stockHistory.length === 0 && (
+       {!isLoadingHistory && stockHistory.length === 0 && (
           <Card className="shadow-md text-center py-6">
             <CardHeader><CardTitle className="flex items-center justify-center text-lg"><LineChart className="mr-2 h-6 w-6 text-muted-foreground" />Sem Histórico de Estoque</CardTitle></CardHeader>
             <CardContent><p className="text-muted-foreground">Nenhum histórico de estoque encontrado. Faça um upload de planilha para começar a registrar o histórico.</p></CardContent>
@@ -800,7 +792,7 @@ export default function DashboardPage() {
             {aggregatedData.skusBySize.length > 0 && (
               <Card id="chart-skus-by-size" className="shadow-lg hover:shadow-xl transition-shadow">
                 <CardHeader><CardTitle className="flex items-center"><Ruler className="mr-2 h-5 w-5 text-accent" />SKUs por Tamanho (Excel)</CardTitle><CardDescription>Distribuição de SKUs (com e sem estoque) por tamanho (coluna "Tamanho" do Excel).</CardDescription></CardHeader>
-                <CardContent className="h-[400px]"><ChartContainer config={skusBySizeChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><RechartsBarChart data={aggregatedData.skusBySize} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false}/><XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/><YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/><Tooltip content={<ChartTooltipContent />} /><RechartsLegend /><Bar dataKey="skusWithStock" name="SKUs c/ Estoque" fill="hsl(var(--chart-2))" stackId="size" radius={[0, 4, 4, 0]} /><Bar dataKey="skusWithoutStock" name="SKUs s/ Estoque" fill="hsl(var(--destructive))" stackId="size" radius={[0, 4, 4, 0]}/></RechartsBarChart></ResponsiveContainer></ChartContainer></CardContent>
+                <CardContent className="h-[400px]"><ChartContainer config={skusBySizeChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><RechartsBarChart data={aggregatedData.skusBySize} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false}/><XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/><YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}} interval={0} /><Tooltip content={<ChartTooltipContent />} /><RechartsLegend /><Bar dataKey="skusWithStock" name="SKUs c/ Estoque" fill="hsl(var(--chart-2))" stackId="size" radius={[0, 4, 4, 0]} /><Bar dataKey="skusWithoutStock" name="SKUs s/ Estoque" fill="hsl(var(--destructive))" stackId="size" radius={[0, 4, 4, 0]}/></RechartsBarChart></ResponsiveContainer></ChartContainer></CardContent>
               </Card>
             )}
           </div>
@@ -814,14 +806,14 @@ export default function DashboardPage() {
             {aggregatedData.skusByProductType.length > 0 && (
               <Card id="chart-skus-by-product-type" className="shadow-lg hover:shadow-xl transition-shadow">
                 <CardHeader><CardTitle className="flex items-center"><Box className="mr-2 h-5 w-5" style={{color: 'hsl(var(--chart-5))'}} />SKUs por Tipo de Produto (Coluna Tipo. Produto)</CardTitle><CardDescription>Distribuição de SKUs (com e sem estoque) por tipo (coluna "Tipo. Produto" do Excel).</CardDescription></CardHeader>
-                <CardContent className="h-[400px]"><ChartContainer config={skusByProductTypeChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><RechartsBarChart data={aggregatedData.skusByProductType} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false}/><XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/><YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/><Tooltip content={<ChartTooltipContent />} /><RechartsLegend /><Bar dataKey="skusWithStock" name="SKUs c/ Estoque" fill="hsl(var(--chart-2))" stackId="type" radius={[0, 4, 4, 0]} /><Bar dataKey="skusWithoutStock" name="SKUs s/ Estoque" fill="hsl(var(--destructive))" stackId="type" radius={[0, 4, 4, 0]}/></RechartsBarChart></ResponsiveContainer></ChartContainer></CardContent>
+                <CardContent className="h-[400px]"><ChartContainer config={skusByProductTypeChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><RechartsBarChart data={aggregatedData.skusByProductType} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false}/><XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/><YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}} interval={0} /><Tooltip content={<ChartTooltipContent />} /><RechartsLegend /><Bar dataKey="skusWithStock" name="SKUs c/ Estoque" fill="hsl(var(--chart-2))" stackId="type" radius={[0, 4, 4, 0]} /><Bar dataKey="skusWithoutStock" name="SKUs s/ Estoque" fill="hsl(var(--destructive))" stackId="type" radius={[0, 4, 4, 0]}/></RechartsBarChart></ResponsiveContainer></ChartContainer></CardContent>
               </Card>
             )}
           </div>
           {aggregatedData.collectionSkuStatus.length > 0 && (
             <Card id="chart-collection-sku-status" className="shadow-lg hover:shadow-xl transition-shadow">
                 <CardHeader><CardTitle className="flex items-center"><BarChartHorizontal className="mr-2 h-5 w-5 text-primary" />Status de SKUs por Descrição Linha Comercial (Ativos vs. Zerados)</CardTitle><CardDescription>Contagem de SKUs ativos (com estoque) e zerados em cada descrição linha comercial.</CardDescription></CardHeader>
-                <CardContent className="h-[400px]"><ChartContainer config={collectionSkuStatusChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><RechartsBarChart data={aggregatedData.collectionSkuStatus} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} /><XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/><YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/><Tooltip content={<ChartTooltipContent />} /><RechartsLegend /><Bar dataKey="activeSkus" name="SKUs Ativos" fill="hsl(var(--chart-1))" stackId="collection" radius={[0, 4, 4, 0]}/><Bar dataKey="zeroStockSkus" name="SKUs Zerados" fill="hsl(var(--destructive))" stackId="collection" radius={[0, 4, 4, 0]}/></RechartsBarChart></ResponsiveContainer></ChartContainer></CardContent>
+                <CardContent className="h-[400px]"><ChartContainer config={collectionSkuStatusChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><RechartsBarChart data={aggregatedData.collectionSkuStatus} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} /><XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/><YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}} interval={0} /><Tooltip content={<ChartTooltipContent />} /><RechartsLegend /><Bar dataKey="activeSkus" name="SKUs Ativos" fill="hsl(var(--chart-1))" stackId="collection" radius={[0, 4, 4, 0]}/><Bar dataKey="zeroStockSkus" name="SKUs Zerados" fill="hsl(var(--destructive))" stackId="collection" radius={[0, 4, 4, 0]}/></RechartsBarChart></ResponsiveContainer></ChartContainer></CardContent>
             </Card>
             )}
         </>
