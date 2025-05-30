@@ -13,14 +13,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import type { Product, StockHistoryEntry } from '@/types';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, PieChart, Pie, Cell, LineChart as RechartsLineChart, Line as RechartsLine } from 'recharts';
+import { ResponsiveContainer, BarChart as RechartsBarChart, Bar, XAxis, YAxis, Tooltip, Legend as RechartsLegend, CartesianGrid, PieChart, Pie, Cell, LineChart as RechartsLineChart, Line as RechartsLine } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart";
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import autoTable from 'jspdf-autotable';
 import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
-import { collection, getDocs, writeBatch, doc, Timestamp, query, setDoc, getDoc, serverTimestamp, orderBy, addDoc } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, Timestamp, query, setDoc, getDoc, serverTimestamp, orderBy, addDoc, deleteDoc } from 'firebase/firestore';
 import { format as formatDateFns, isValid as isDateValid } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '@/contexts/AuthContext';
@@ -121,7 +121,7 @@ export default function DashboardPage() {
   const isAdmin = useMemo(() => currentUser?.email.toLowerCase() === process.env.NEXT_PUBLIC_ADMIN_EMAIL?.toLowerCase() && currentUser?.isAdmin, [currentUser]);
 
  useEffect(() => {
-    console.log("DashboardPage: AuthContext loading:", isAuthLoading, " CurrentUser:", !!currentUser);
+    console.log("DashboardPage: AuthContext loading:", isAuthLoading, "CurrentUser:", !!currentUser);
     if (isAuthLoading) {
       console.log("DashboardPage: Auth context is loading, waiting...");
       if (dashboardProducts.length === 0) setIsLoadingFirestore(true);
@@ -201,8 +201,9 @@ export default function DashboardPage() {
             setStockHistory(historyFromDb);
             console.log("DashboardPage: Fetched stock history entries:", historyFromDb.length);
           } catch (error) {
-            console.error("DashboardPage: Error fetching stock history:", error);
-            toast({ title: "Erro ao Carregar Histórico", description: `Não foi possível buscar o histórico de estoque: ${(error as Error).message}`, variant: "destructive" });
+            const fullError = error instanceof Error ? error : new Error(String(error));
+            console.error("DashboardPage: Error fetching stock history:", fullError);
+            toast({ title: "Erro ao Carregar Histórico", description: `Não foi possível buscar o histórico de estoque: ${fullError.message}`, variant: "destructive" });
           } finally {
             setIsLoadingHistory(false);
             console.log("DashboardPage: Finished fetching stock history, isLoadingHistory set to false.");
@@ -248,19 +249,17 @@ export default function DashboardPage() {
       const docsToDelete = existingDocsSnapshot.docs; 
       console.log(`DashboardPage: Found ${docsToDelete.length} existing products to delete.`);
 
-      const deletePromises: Promise<void>[] = [];
       for (let i = 0; i < docsToDelete.length; i += FIRESTORE_BATCH_LIMIT) {
         const batch = writeBatch(firestore);
         const chunk = docsToDelete.slice(i, i + FIRESTORE_BATCH_LIMIT);
-        chunk.forEach(docSnapshot => { batch.delete(docSnapshot.ref); totalDeleted++; });
-        deletePromises.push(batch.commit());
-        console.log(`DashboardPage: Batching delete for ${chunk.length} products. Total deleted so far: ${totalDeleted}`);
+        chunk.forEach(docSnapshot => { batch.delete(docSnapshot.ref); });
+        await batch.commit();
+        totalDeleted += chunk.length;
+        console.log(`DashboardPage: Batch deleted ${chunk.length} products. Total deleted so far: ${totalDeleted}`);
       }
-      await Promise.all(deletePromises);
       console.log(`DashboardPage: Finished deleting ${totalDeleted} products.`);
 
       // Add new products in batches
-      const addPromises: Promise<void>[] = [];
       if (productsToSave.length > 0) {
         console.log(`DashboardPage: Starting to add ${productsToSave.length} new products.`);
         for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
@@ -269,12 +268,11 @@ export default function DashboardPage() {
           chunk.forEach(product => {
             const newDocRef = doc(productsColRef); 
             batch.set(newDocRef, productToFirestore(product));
-            totalAdded++;
           });
-          addPromises.push(batch.commit());
-          console.log(`DashboardPage: Batching add for ${chunk.length} products. Total added so far: ${totalAdded}`);
+          await batch.commit();
+          totalAdded += chunk.length;
+          console.log(`DashboardPage: Batch added ${chunk.length} products. Total added so far: ${totalAdded}`);
         }
-        await Promise.all(addPromises);
         console.log(`DashboardPage: Finished adding ${totalAdded} products.`);
       }
 
@@ -706,7 +704,7 @@ export default function DashboardPage() {
                     />}
                     
                     />
-                  <Legend />
+                  <RechartsLegend />
                   <RechartsLine yAxisId="left" type="monotone" dataKey="totalStockUnits" name="Unidades Totais" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                   <RechartsLine yAxisId="right" type="monotone" dataKey="totalSkusWithStock" name="SKUs c/ Estoque" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                 </RechartsLineChart>
@@ -737,13 +735,13 @@ export default function DashboardPage() {
             {aggregatedData.stockByCollection.length > 0 && (
               <Card id="chart-stock-by-collection" className="shadow-lg hover:shadow-xl transition-shadow">
                 <CardHeader><CardTitle className="flex items-center"><ShoppingBag className="mr-2 h-5 w-5 text-primary" />Estoque por Descrição Linha Comercial</CardTitle><CardDescription>Distribuição de estoque e SKUs pela coluna "Descrição Linha Comercial" do Excel.</CardDescription></CardHeader>
-                <CardContent className="h-[400px]"><ChartContainer config={stockByCollectionChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={aggregatedData.stockByCollection} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}><CartesianGrid strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/><YAxis yAxisId="left" orientation="left" stroke="hsl(var(--primary))" tickFormatter={(value) => value.toLocaleString()}/><YAxis yAxisId="right" orientation="right" stroke="hsl(var(--accent))" tickFormatter={(value) => value.toLocaleString()}/><Tooltip content={<ChartTooltipContent />} /><Legend /><Bar yAxisId="left" dataKey="stock" name="Estoque" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} /><Bar yAxisId="right" dataKey="skus" name="SKUs" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartContainer></CardContent>
+                <CardContent className="h-[400px]"><ChartContainer config={stockByCollectionChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><RechartsBarChart data={aggregatedData.stockByCollection} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}><CartesianGrid strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/><YAxis yAxisId="left" orientation="left" stroke="hsl(var(--primary))" tickFormatter={(value) => value.toLocaleString()}/><YAxis yAxisId="right" orientation="right" stroke="hsl(var(--accent))" tickFormatter={(value) => value.toLocaleString()}/><Tooltip content={<ChartTooltipContent />} /><RechartsLegend /><Bar yAxisId="left" dataKey="stock" name="Estoque" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} /><Bar yAxisId="right" dataKey="skus" name="SKUs" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} /></RechartsBarChart></ResponsiveContainer></ChartContainer></CardContent>
               </Card>
             )}
             {aggregatedData.skuStockStatus.length > 0 && aggregatedData.totalSkus > 0 && (
               <Card id="chart-sku-stock-status" className="shadow-lg hover:shadow-xl transition-shadow">
                 <CardHeader><CardTitle className="flex items-center"><PieChartLucide className="mr-2 h-5 w-5 text-primary" />Distribuição de SKUs (Estoque vs. Zerado)</CardTitle><CardDescription>Proporção de SKUs com estoque e SKUs com estoque zerado.</CardDescription></CardHeader>
-                <CardContent className="h-[400px]"><ChartContainer config={skuStockStatusChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><PieChart><Tooltip content={<ChartTooltipContent nameKey="name" />} /><Pie data={aggregatedData.skuStockStatus} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={120} labelLine={false} label={renderCustomizedLabel}>{aggregatedData.skuStockStatus.map((entry, index) => (<Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />))}</Pie><Legend /></PieChart></ResponsiveContainer></ChartContainer></CardContent>
+                <CardContent className="h-[400px]"><ChartContainer config={skuStockStatusChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><PieChart><Tooltip content={<ChartTooltipContent nameKey="name" />} /><Pie data={aggregatedData.skuStockStatus} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={120} labelLine={false} label={renderCustomizedLabel}>{aggregatedData.skuStockStatus.map((entry, index) => (<Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />))}</Pie><RechartsLegend /></PieChart></ResponsiveContainer></ChartContainer></CardContent>
               </Card>
             )}
           </div>
@@ -751,13 +749,13 @@ export default function DashboardPage() {
             {aggregatedData.collectionRupturePercentage.length > 0 && (
               <Card id="chart-rupture-by-collection" className="shadow-lg hover:shadow-xl transition-shadow">
                 <CardHeader><CardTitle className="flex items-center"><Percent className="mr-2 h-5 w-5 text-destructive" />Ruptura (%) por Descrição Linha Comercial</CardTitle><CardDescription>Porcentagem de SKUs com estoque zero em cada descrição linha comercial.</CardDescription></CardHeader>
-                <CardContent className="h-[400px]"><ChartContainer config={collectionRuptureChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={aggregatedData.collectionRupturePercentage} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/><YAxis tickFormatter={(value) => `${value}%`} domain={[0, 'dataMax + 5']} allowDecimals={false}/><Tooltip content={<ChartTooltipContent />} formatter={(value: number) => `${value.toFixed(2)}%`} /><Legend /><Bar dataKey="rupturePercentage" name="Ruptura (%)" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartContainer></CardContent>
+                <CardContent className="h-[400px]"><ChartContainer config={collectionRuptureChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><RechartsBarChart data={aggregatedData.collectionRupturePercentage} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/><YAxis tickFormatter={(value) => `${value}%`} domain={[0, 'dataMax + 5']} allowDecimals={false}/><Tooltip content={<ChartTooltipContent />} formatter={(value: number) => `${value.toFixed(2)}%`} /><RechartsLegend /><Bar dataKey="rupturePercentage" name="Ruptura (%)" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} /></RechartsBarChart></ResponsiveContainer></ChartContainer></CardContent>
               </Card>
             )}
             {aggregatedData.skusBySize.length > 0 && (
               <Card id="chart-skus-by-size" className="shadow-lg hover:shadow-xl transition-shadow">
                 <CardHeader><CardTitle className="flex items-center"><Ruler className="mr-2 h-5 w-5 text-accent" />SKUs por Tamanho (Excel)</CardTitle><CardDescription>Distribuição de SKUs (com e sem estoque) por tamanho (coluna "Tamanho" do Excel).</CardDescription></CardHeader>
-                <CardContent className="h-[400px]"><ChartContainer config={skusBySizeChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={aggregatedData.skusBySize} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false}/><XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/><YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/><Tooltip content={<ChartTooltipContent />} /><Legend /><Bar dataKey="skusWithStock" name="SKUs c/ Estoque" fill="hsl(var(--chart-2))" stackId="size" radius={[0, 4, 4, 0]} /><Bar dataKey="skusWithoutStock" name="SKUs s/ Estoque" fill="hsl(var(--destructive))" stackId="size" radius={[0, 4, 4, 0]}/></BarChart></ResponsiveContainer></ChartContainer></CardContent>
+                <CardContent className="h-[400px]"><ChartContainer config={skusBySizeChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><RechartsBarChart data={aggregatedData.skusBySize} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false}/><XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/><YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/><Tooltip content={<ChartTooltipContent />} /><RechartsLegend /><Bar dataKey="skusWithStock" name="SKUs c/ Estoque" fill="hsl(var(--chart-2))" stackId="size" radius={[0, 4, 4, 0]} /><Bar dataKey="skusWithoutStock" name="SKUs s/ Estoque" fill="hsl(var(--destructive))" stackId="size" radius={[0, 4, 4, 0]}/></RechartsBarChart></ResponsiveContainer></ChartContainer></CardContent>
               </Card>
             )}
           </div>
@@ -765,20 +763,20 @@ export default function DashboardPage() {
             {aggregatedData.stockByPrint.length > 0 && (
               <Card id="chart-stock-by-print" className="shadow-lg hover:shadow-xl transition-shadow">
                 <CardHeader><CardTitle className="flex items-center"><Palette className="mr-2 h-5 w-5" style={{color: 'hsl(var(--chart-4))'}} />Estoque por Estampa (Top 15 - Coluna Descrição)</CardTitle><CardDescription>Distribuição de estoque pelas principais estampas (extraído da coluna H: 'Descrição' do Excel).</CardDescription></CardHeader>
-                <CardContent className="h-[400px]"><ChartContainer config={stockByPrintChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={aggregatedData.stockByPrint} margin={{ top: 5, right: 20, left: 10, bottom: 90 }}><CartesianGrid strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" angle={-60} textAnchor="end" interval={0} height={100} tick={{fontSize: 10}}/><YAxis tickFormatter={(value) => value.toLocaleString()}/><Tooltip content={<ChartTooltipContent />} /><Legend /><Bar dataKey="stock" name="Estoque" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartContainer></CardContent>
+                <CardContent className="h-[400px]"><ChartContainer config={stockByPrintChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><RechartsBarChart data={aggregatedData.stockByPrint} margin={{ top: 5, right: 20, left: 10, bottom: 90 }}><CartesianGrid strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" angle={-60} textAnchor="end" interval={0} height={100} tick={{fontSize: 10}}/><YAxis tickFormatter={(value) => value.toLocaleString()}/><Tooltip content={<ChartTooltipContent />} /><RechartsLegend /><Bar dataKey="stock" name="Estoque" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} /></RechartsBarChart></ResponsiveContainer></ChartContainer></CardContent>
               </Card>
             )}
             {aggregatedData.skusByProductType.length > 0 && (
               <Card id="chart-skus-by-product-type" className="shadow-lg hover:shadow-xl transition-shadow">
                 <CardHeader><CardTitle className="flex items-center"><Box className="mr-2 h-5 w-5" style={{color: 'hsl(var(--chart-5))'}} />SKUs por Tipo de Produto (Coluna Tipo. Produto)</CardTitle><CardDescription>Distribuição de SKUs (com e sem estoque) por tipo (coluna "Tipo. Produto" do Excel).</CardDescription></CardHeader>
-                <CardContent className="h-[400px]"><ChartContainer config={skusByProductTypeChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={aggregatedData.skusByProductType} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false}/><XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/><YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/><Tooltip content={<ChartTooltipContent />} /><Legend /><Bar dataKey="skusWithStock" name="SKUs c/ Estoque" fill="hsl(var(--chart-2))" stackId="type" radius={[0, 4, 4, 0]} /><Bar dataKey="skusWithoutStock" name="SKUs s/ Estoque" fill="hsl(var(--destructive))" stackId="type" radius={[0, 4, 4, 0]}/></BarChart></ResponsiveContainer></ChartContainer></CardContent>
+                <CardContent className="h-[400px]"><ChartContainer config={skusByProductTypeChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><RechartsBarChart data={aggregatedData.skusByProductType} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false}/><XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/><YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/><Tooltip content={<ChartTooltipContent />} /><RechartsLegend /><Bar dataKey="skusWithStock" name="SKUs c/ Estoque" fill="hsl(var(--chart-2))" stackId="type" radius={[0, 4, 4, 0]} /><Bar dataKey="skusWithoutStock" name="SKUs s/ Estoque" fill="hsl(var(--destructive))" stackId="type" radius={[0, 4, 4, 0]}/></RechartsBarChart></ResponsiveContainer></ChartContainer></CardContent>
               </Card>
             )}
           </div>
           {aggregatedData.collectionSkuStatus.length > 0 && (
             <Card id="chart-collection-sku-status" className="shadow-lg hover:shadow-xl transition-shadow">
                 <CardHeader><CardTitle className="flex items-center"><BarChartHorizontal className="mr-2 h-5 w-5 text-primary" />Status de SKUs por Descrição Linha Comercial (Ativos vs. Zerados)</CardTitle><CardDescription>Contagem de SKUs ativos (com estoque) e zerados em cada descrição linha comercial.</CardDescription></CardHeader>
-                <CardContent className="h-[400px]"><ChartContainer config={collectionSkuStatusChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={aggregatedData.collectionSkuStatus} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} /><XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/><YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/><Tooltip content={<ChartTooltipContent />} /><Legend /><Bar dataKey="activeSkus" name="SKUs Ativos" fill="hsl(var(--chart-1))" stackId="collection" radius={[0, 4, 4, 0]}/><Bar dataKey="zeroStockSkus" name="SKUs Zerados" fill="hsl(var(--destructive))" stackId="collection" radius={[0, 4, 4, 0]}/></BarChart></ResponsiveContainer></ChartContainer></CardContent>
+                <CardContent className="h-[400px]"><ChartContainer config={collectionSkuStatusChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><RechartsBarChart data={aggregatedData.collectionSkuStatus} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} /><XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/><YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/><Tooltip content={<ChartTooltipContent />} /><RechartsLegend /><Bar dataKey="activeSkus" name="SKUs Ativos" fill="hsl(var(--chart-1))" stackId="collection" radius={[0, 4, 4, 0]}/><Bar dataKey="zeroStockSkus" name="SKUs Zerados" fill="hsl(var(--destructive))" stackId="collection" radius={[0, 4, 4, 0]}/></RechartsBarChart></ResponsiveContainer></ChartContainer></CardContent>
             </Card>
             )}
         </>
@@ -786,3 +784,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+

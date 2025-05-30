@@ -16,41 +16,40 @@ service cloud.firestore {
       allow list, create, update, delete: if false;
     }
 
-    // Coleção global de produtos compartilhados
-    // A escrita é controlada pela UI (botão de upload só para admin).
-    // Para produção, a escrita aqui DEVERIA ser via Server Action com validação de admin.
+    // Coleção global de produtos
+    // Acessível para leitura por todos os usuários.
+    // A escrita (upload) é feita pelo cliente do admin; a UI restringe o botão de upload.
     match /shared_products/{productId} {
       allow read: if true;
-      allow write: if true; // Permite que o cliente do admin escreva/delete (para protótipo)
+      allow write: if true; 
     }
     match /shared_products { // Necessário para listar a coleção (getDocs)
       allow list: if true;
     }
 
+
     // Documento de metadados globais para os produtos
-    // A escrita é controlada pela UI para o admin.
+    // Similar a shared_products: leitura para todos, escrita pelo admin via UI.
     match /app_metadata/products_metadata {
       allow read: if true;
-      allow write: if true; // Permite que o cliente do admin escreva (para protótipo)
+      allow write: if true; 
     }
 
     // Coleção de histórico de estoque
-    match /stock_history/{historyId} {
-      // Todos os usuários autenticados podem ler o histórico para ver o gráfico.
+    // Permite que o cliente leia documentos individuais.
+    match /stock_history/{docId} {
       allow read: if true;
-      // A criação de novas entradas de histórico é feita pela função saveProductsToFirestore,
-      // que é chamada pelo admin ao fazer upload. Portanto, a permissão de create
-      // aqui pode ser true, pois a lógica da aplicação já restringe quem pode disparar a escrita.
-      // Para maior segurança em produção, 'create' seria idealmente via Server Action.
-      allow create: if true; // Permite que o cliente do admin escreva (para protótipo)
-      allow update, delete, list: if false; // Não permitir update, delete ou listagem total pelo cliente por enquanto
+      // Criação é feita pela server action do admin, então o cliente não pode criar/atualizar/deletar.
+      allow create, update, delete: if false; 
     }
-     match /stock_history { 
-      allow list: if true; // Necessário para getDocs com orderBy na coleção
+    // Permite que o cliente liste/consulte a coleção 'stock_history' inteira.
+    // Isto é necessário para a query com orderBy("date").
+    match /stock_history {
+      allow list: if true;
     }
-
 
     // Regra de fallback: nega acesso a quaisquer outros caminhos não definidos acima.
+    // ESTA REGRA DEVE SER A ÚLTIMA DENTRO DE match /databases/(default)/documents { ... }
     match /{document=**} {
       allow read, write: if false;
     }
