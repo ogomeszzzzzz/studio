@@ -120,13 +120,15 @@ export default function DashboardPage() {
 
   const isAdmin = useMemo(() => currentUser?.email.toLowerCase() === process.env.NEXT_PUBLIC_ADMIN_EMAIL?.toLowerCase() && currentUser?.isAdmin, [currentUser]);
 
-  useEffect(() => {
-    console.log("DashboardPage: AuthContext loading:", isAuthLoading);
+ useEffect(() => {
+    console.log("DashboardPage: AuthContext loading:", isAuthLoading, " CurrentUser:", !!currentUser);
     if (isAuthLoading) {
+      console.log("DashboardPage: Auth context is loading, waiting...");
       if (dashboardProducts.length === 0) setIsLoadingFirestore(true);
       if (stockHistory.length === 0) setIsLoadingHistory(true);
       return;
     }
+
     if (firestoreClientInitializationError) {
       toast({ title: "Erro Crítico de Configuração Firebase", description: `Cliente Firebase não inicializado: ${firestoreClientInitializationError}. Verifique o console e as configurações .env.`, variant: "destructive", duration: Infinity });
       setIsLoadingFirestore(false);
@@ -141,17 +143,19 @@ export default function DashboardPage() {
     }
 
     if (currentUser) {
+      console.log("DashboardPage: User is available. Products loaded:", dashboardProducts.length, "Saving:", isSavingFirestore);
       // Fetch Products
       if (dashboardProducts.length === 0 && !isSavingFirestore) {
         setIsLoadingFirestore(true);
         const fetchProducts = async () => {
-          console.log("DashboardPage: Attempting to fetch products from GLOBAL collection. Firestore instance available:", !!firestore);
+          console.log("DashboardPage: Attempting to fetch products from GLOBAL collection /shared_products. Firestore instance available:", !!firestore);
           try {
             const productsColPath = "shared_products";
             const productsQuery = query(collection(firestore, productsColPath));
             const snapshot = await getDocs(productsQuery);
             const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
             setDashboardProducts(productsFromDb);
+            console.log("DashboardPage: Fetched products from Firestore:", productsFromDb.length);
             
             const metadataDocRef = doc(firestore, "app_metadata", "products_metadata");
             const metadataDocSnap = await getDoc(metadataDocRef);
@@ -159,9 +163,14 @@ export default function DashboardPage() {
               const data = metadataDocSnap.data();
               if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
                 setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
+                 console.log("DashboardPage: Fetched lastDataUpdateTimestamp:", data.lastUpdatedAt.toDate());
+              } else {
+                setLastDataUpdateTimestamp(null);
+                console.log("DashboardPage: Metadata doc exists but no valid lastUpdatedAt field.");
               }
             } else {
               setLastDataUpdateTimestamp(null);
+              console.log("DashboardPage: No metadata document found for products.");
             }
              if (productsFromDb.length === 0 && !isAdmin) {
                toast({ title: "Sem Dados Carregados", description: "Nenhum produto encontrado. O administrador precisa carregar uma planilha.", variant: "default" });
@@ -171,15 +180,17 @@ export default function DashboardPage() {
             toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${(error as Error).message}`, variant: "destructive" });
           } finally {
             setIsLoadingFirestore(false);
+            console.log("DashboardPage: Finished fetching products, isLoadingFirestore set to false.");
           }
         };
         fetchProducts();
       } else if (dashboardProducts.length > 0 && !isSavingFirestore) {
         setIsLoadingFirestore(false);
+        console.log("DashboardPage: Products already loaded or saving in progress, skipping fetch. isLoadingFirestore set to false.");
       }
 
       // Fetch Stock History
-      if (stockHistory.length === 0 || lastDataUpdateTimestamp) { // Re-fetch history if lastDataUpdateTimestamp changes
+      if (stockHistory.length === 0 || (lastDataUpdateTimestamp && stockHistory.length > 0 && stockHistory[stockHistory.length-1]?.date < lastDataUpdateTimestamp)) { 
         setIsLoadingHistory(true);
         const fetchHistory = async () => {
           console.log("DashboardPage: Fetching stock history");
@@ -188,25 +199,30 @@ export default function DashboardPage() {
             const historySnapshot = await getDocs(historyQuery);
             const historyFromDb: StockHistoryEntry[] = historySnapshot.docs.map(docSnap => stockHistoryEntryFromFirestore(docSnap.id, docSnap.data()));
             setStockHistory(historyFromDb);
+            console.log("DashboardPage: Fetched stock history entries:", historyFromDb.length);
           } catch (error) {
             console.error("DashboardPage: Error fetching stock history:", error);
             toast({ title: "Erro ao Carregar Histórico", description: `Não foi possível buscar o histórico de estoque: ${(error as Error).message}`, variant: "destructive" });
           } finally {
             setIsLoadingHistory(false);
+            console.log("DashboardPage: Finished fetching stock history, isLoadingHistory set to false.");
           }
         };
         fetchHistory();
+      } else if (stockHistory.length > 0) {
+         setIsLoadingHistory(false);
       }
 
 
     } else { // No current user
+      console.log("DashboardPage: No current user. Clearing data and setting loading to false.");
       setDashboardProducts([]);
       setLastDataUpdateTimestamp(null);
       setIsLoadingFirestore(false);
       setStockHistory([]);
       setIsLoadingHistory(false);
     }
-  }, [currentUser, isAuthLoading, dashboardProducts.length, isSavingFirestore, isAdmin, toast, lastDataUpdateTimestamp]); // lastDataUpdateTimestamp added
+  }, [currentUser, isAuthLoading, dashboardProducts.length, isSavingFirestore, isAdmin, toast, stockHistory.length, lastDataUpdateTimestamp]);
 
   const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
     if (!currentUser || !isAdmin) {
@@ -217,7 +233,7 @@ export default function DashboardPage() {
       toast({ title: "Erro de Configuração", description: "Instância do Firestore não está disponível para salvar.", variant: "destructive" });
       return;
     }
-    console.log("DashboardPage: Admin attempting to save products to GLOBAL collection.");
+    console.log("DashboardPage: Admin attempting to save products to GLOBAL /shared_products collection.");
     setIsSavingFirestore(true);
     let totalDeleted = 0;
     let totalAdded = 0;
@@ -226,9 +242,11 @@ export default function DashboardPage() {
       const productsColPath = "shared_products";
       const productsColRef = collection(firestore, productsColPath);
       
+      // Delete existing products in batches
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
       const docsToDelete = existingDocsSnapshot.docs; 
+      console.log(`DashboardPage: Found ${docsToDelete.length} existing products to delete.`);
 
       const deletePromises: Promise<void>[] = [];
       for (let i = 0; i < docsToDelete.length; i += FIRESTORE_BATCH_LIMIT) {
@@ -236,11 +254,15 @@ export default function DashboardPage() {
         const chunk = docsToDelete.slice(i, i + FIRESTORE_BATCH_LIMIT);
         chunk.forEach(docSnapshot => { batch.delete(docSnapshot.ref); totalDeleted++; });
         deletePromises.push(batch.commit());
+        console.log(`DashboardPage: Batching delete for ${chunk.length} products. Total deleted so far: ${totalDeleted}`);
       }
       await Promise.all(deletePromises);
+      console.log(`DashboardPage: Finished deleting ${totalDeleted} products.`);
 
+      // Add new products in batches
       const addPromises: Promise<void>[] = [];
       if (productsToSave.length > 0) {
+        console.log(`DashboardPage: Starting to add ${productsToSave.length} new products.`);
         for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
           const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
@@ -250,44 +272,57 @@ export default function DashboardPage() {
             totalAdded++;
           });
           addPromises.push(batch.commit());
+          console.log(`DashboardPage: Batching add for ${chunk.length} products. Total added so far: ${totalAdded}`);
         }
         await Promise.all(addPromises);
+        console.log(`DashboardPage: Finished adding ${totalAdded} products.`);
       }
 
       // Record stock history
-      const currentTotalStockUnits = productsToSave.reduce((sum, p) => sum + p.stock, 0);
-      const currentTotalSkusWithStock = productsToSave.filter(p => p.stock > 0).length;
-      await addDoc(collection(firestore, "stock_history"), {
-        date: serverTimestamp(),
-        totalStockUnits: currentTotalStockUnits,
-        totalSkusWithStock: currentTotalSkusWithStock,
-      });
-      console.log("DashboardPage: Stock history entry added.");
+      if (productsToSave.length > 0) {
+        const currentTotalStockUnits = productsToSave.reduce((sum, p) => sum + (p.stock || 0), 0);
+        const currentTotalSkusWithStock = productsToSave.filter(p => (p.stock || 0) > 0).length;
+        await addDoc(collection(firestore, "stock_history"), {
+          date: serverTimestamp(),
+          totalStockUnits: currentTotalStockUnits,
+          totalSkusWithStock: currentTotalSkusWithStock,
+        });
+        console.log("DashboardPage: Stock history entry added with units:", currentTotalStockUnits, "and SKUs with stock:", currentTotalSkusWithStock);
+      }
 
 
       const metadataDocRef = doc(firestore, "app_metadata", "products_metadata");
       const newTimestamp = serverTimestamp();
       await setDoc(metadataDocRef, { lastUpdatedAt: newTimestamp }, { merge: true });
+      console.log("DashboardPage: Products metadata (lastUpdatedAt) updated in Firestore.");
       
       setDashboardProducts(productsToSave); // Update local state
       setLastDataUpdateTimestamp(new Date()); // Trigger re-fetch of history
 
-      toast({ title: "Dados Globais Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''} Histórico atualizado.` });
+      toast({ title: "Dados Globais Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''} Histórico de estoque atualizado.` });
 
     } catch (error) {
       console.error("DashboardPage: Error saving products to Firestore:", error);
       toast({ title: "Erro ao Salvar", description: `Não foi possível salvar: ${(error as Error).message}`, variant: "destructive" });
     } finally {
       setIsSavingFirestore(false);
+      console.log("DashboardPage: Finished saving products, isSavingFirestore set to false.");
     }
   }, [currentUser, isAdmin, toast]);
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
+    console.log("DashboardPage: Excel data processed, parsed products count:", parsedProducts.length);
     await saveProductsToFirestore(parsedProducts);
   }, [saveProductsToFirestore]);
 
-  const handleProcessingStart = () => setIsProcessingExcel(true);
-  const handleProcessingEnd = () => setIsProcessingExcel(false);
+  const handleProcessingStart = () => {
+    console.log("DashboardPage: Excel processing started.");
+    setIsProcessingExcel(true);
+  };
+  const handleProcessingEnd = () => {
+    console.log("DashboardPage: Excel processing ended.");
+    setIsProcessingExcel(false);
+  };
 
   const availableDashboardCollections = useMemo(() => {
     const collections = new Set(dashboardProducts.map(p => p.collection).filter(Boolean).sort((a,b) => (a as string).localeCompare(b as string)));
@@ -341,31 +376,31 @@ export default function DashboardPage() {
       const printKey = product.description || 'Não Especificada'; // Using "Descrição" for estampa
 
       const currentCol = stockByCollectionMap.get(collectionKey) || { stock: 0, skus: 0 };
-      currentCol.stock += product.stock;
+      currentCol.stock += (product.stock || 0);
       currentCol.skus += 1;
       stockByCollectionMap.set(collectionKey, currentCol);
 
       const currentType = skusByProductTypeMap.get(typeKey) || { totalSkus: 0, skusWithStock: 0, skusWithoutStock: 0 };
       currentType.totalSkus += 1;
-      if (product.stock > 0) currentType.skusWithStock += 1;
+      if ((product.stock || 0) > 0) currentType.skusWithStock += 1;
       else currentType.skusWithoutStock += 1;
       skusByProductTypeMap.set(typeKey, currentType);
 
       const currentSize = skusBySizeMap.get(sizeKey) || { totalSkus: 0, skusWithStock: 0, skusWithoutStock: 0 };
       currentSize.totalSkus += 1;
-      if (product.stock > 0) currentSize.skusWithStock += 1;
+      if ((product.stock || 0) > 0) currentSize.skusWithStock += 1;
       else currentSize.skusWithoutStock += 1;
       skusBySizeMap.set(sizeKey, currentSize);
 
       const currentPrint = stockByPrintMap.get(printKey) || { stock: 0 };
-      currentPrint.stock += product.stock;
+      currentPrint.stock += (product.stock || 0);
       stockByPrintMap.set(printKey, currentPrint);
 
-      if (product.stock === 0) {
+      if ((product.stock || 0) === 0) {
         zeroStockSkusByCollectionMap.set(collectionKey, (zeroStockSkusByCollectionMap.get(collectionKey) || 0) + 1);
         totalZeroStockSkus++;
       }
-      totalStock += product.stock;
+      totalStock += (product.stock || 0);
       totalReadyToShipStock += product.readyToShip || 0;
       totalRegulatorStock += product.regulatorStock || 0;
       totalOpenOrders += product.openOrders || 0;
@@ -392,7 +427,7 @@ export default function DashboardPage() {
     return {
       stockByCollection: Array.from(stockByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
       skusByProductType: Array.from(skusByProductTypeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.totalSkus - a.totalSkus),
-      skusBySize: Array.from(skusBySizeMap.get(sizeKey) || { totalSkus: 0, skusWithStock: 0, skusWithoutStock: 0 }).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.totalSkus - a.totalSkus),
+      skusBySize: Array.from(skusBySizeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.totalSkus - a.totalSkus),
       stockByPrint: Array.from(stockByPrintMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock).slice(0, 15),
       collectionRupturePercentage: collectionRupturePercentageData,
       skuStockStatus: skuStockStatusData,
@@ -631,7 +666,7 @@ export default function DashboardPage() {
           unlockPassword="exceladmin159"
         />
       )}
-      {!isAdmin && dashboardProducts.length === 0 && !isLoadingFirestore && (
+      {!isAdmin && dashboardProducts.length === 0 && !isLoadingFirestore && !isAuthLoading && (
          <Card className="shadow-md text-center py-10">
             <CardHeader><CardTitle className="flex items-center justify-center text-xl"><Database className="mr-2 h-7 w-7 text-primary" />Sem Dados para Visualizar</CardTitle></CardHeader>
             <CardContent><p className="text-muted-foreground">Nenhum dado de produto foi carregado no sistema. Por favor, peça a um administrador para carregar uma planilha de dados.</p></CardContent>
