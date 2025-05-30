@@ -3,35 +3,29 @@ import * as admin from 'firebase-admin';
 import path from 'path';
 import fs from 'fs';
 
-console.log('--- [ADMIN SDK INIT - ATTEMPTING INITIALIZATION V15] ---');
+console.log('--- [ADMIN SDK INIT - ATTEMPTING INITIALIZATION V20] ---');
 console.log(`[Admin SDK] Node Env: ${process.env.NODE_ENV}`);
-console.log(`[Admin SDK] Initial admin.apps.length: ${admin.apps ? admin.apps.length : 'admin.apps is undefined'}`);
+console.log(`[Admin SDK] Initial admin.apps.length: ${admin.apps ? admin.apps.length : 'admin.apps is undefined/null'}`);
 
 let adminApp: admin.app.App | undefined;
 export let adminSDKInitializationError: string | null = null;
 
 const expectedProjectId = "ecommerce-db-75f77";
+const appName = `firebase-admin-app-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
 if (!admin || !admin.credential || typeof admin.credential.cert !== 'function' || typeof admin.initializeApp !== 'function') {
   adminSDKInitializationError = "CRITICAL: The 'firebase-admin' module is not loaded correctly or essential parts are missing.";
   console.error(`[Admin SDK Init Error] ${adminSDKInitializationError}`);
 } else {
   let serviceAccountCredentials: any;
-  const serviceAccountString = process.env.FIREBASE_ADMIN_SDK_CONFIG;
-  const serviceAccountPath = process.env.FIREBASE_ADMIN_SDK_CONFIG_PATH;
+  let loadedFrom = "";
 
-  if (serviceAccountString && serviceAccountString.trim() !== '{}' && serviceAccountString.trim() !== '') {
-    console.log('[Admin SDK] Attempting to initialize from FIREBASE_ADMIN_SDK_CONFIG (JSON string).');
-    try {
-      serviceAccountCredentials = JSON.parse(serviceAccountString);
-      console.log(`[Admin SDK] Successfully parsed JSON from FIREBASE_ADMIN_SDK_CONFIG. Project ID from parsed string: ${serviceAccountCredentials?.project_id}`);
-    } catch (e: any) {
-      adminSDKInitializationError = `Error parsing JSON from FIREBASE_ADMIN_SDK_CONFIG: ${e.message}. Ensure it's a valid single-line JSON string with escaped newlines (\\n) for the private_key.`;
-      console.error(`[Admin SDK Init Error] ${adminSDKInitializationError}`);
-    }
-  } else if (serviceAccountPath && serviceAccountPath.trim() !== '') {
-    const absolutePath = path.resolve(process.cwd(), serviceAccountPath.trim());
-    console.log(`[Admin SDK] FIREBASE_ADMIN_SDK_CONFIG is empty or not set. Attempting to initialize from FIREBASE_ADMIN_SDK_CONFIG_PATH: ${serviceAccountPath}`);
+  const serviceAccountPathEnv = process.env.FIREBASE_ADMIN_SDK_CONFIG_PATH;
+  const serviceAccountStringEnv = process.env.FIREBASE_ADMIN_SDK_CONFIG;
+
+  if (serviceAccountPathEnv && serviceAccountPathEnv.trim() !== '') {
+    const absolutePath = path.resolve(process.cwd(), serviceAccountPathEnv.trim());
+    console.log(`[Admin SDK] Attempting to initialize from FIREBASE_ADMIN_SDK_CONFIG_PATH: ${serviceAccountPathEnv}`);
     console.log(`[Admin SDK] Resolved absolute path for service account key: ${absolutePath}`);
 
     if (fs.existsSync(absolutePath)) {
@@ -40,51 +34,65 @@ if (!admin || !admin.credential || typeof admin.credential.cert !== 'function' |
         const serviceAccountFileContent = fs.readFileSync(absolutePath, 'utf8');
         console.log('[Admin SDK] Service account file content read successfully.');
         serviceAccountCredentials = JSON.parse(serviceAccountFileContent);
-        console.log(`[Admin SDK] Successfully parsed JSON from file. Project ID from file: ${serviceAccountCredentials?.project_id}`);
+        loadedFrom = "file path";
       } catch (e: any) {
         adminSDKInitializationError = `Failed to read or parse service account file at ${absolutePath}. Error: ${e.message || String(e)}.`;
         console.error(`[Admin SDK Init Error] ${adminSDKInitializationError}`);
       }
     } else {
-      adminSDKInitializationError = `Service account file NOT FOUND at: ${absolutePath}. Check FIREBASE_ADMIN_SDK_CONFIG_PATH. CWD: ${process.cwd()}`;
-      console.error(`[Admin SDK Init Error] ${adminSDKInitializationError}`);
+      adminSDKInitializationError = `Service account file NOT FOUND at: ${absolutePath}. Will try FIREBASE_ADMIN_SDK_CONFIG next.`;
+      console.warn(`[Admin SDK Init Warning] ${adminSDKInitializationError}`);
     }
-  } else {
-    adminSDKInitializationError = 'Neither FIREBASE_ADMIN_SDK_CONFIG nor FIREBASE_ADMIN_SDK_CONFIG_PATH environment variables are set or valid. Cannot initialize Admin SDK.';
-    console.log(`[Admin SDK] ${adminSDKInitializationError}`);
   }
 
+  if (!serviceAccountCredentials && serviceAccountStringEnv && serviceAccountStringEnv.trim() !== '{}' && serviceAccountStringEnv.trim() !== '') {
+    console.log('[Admin SDK] Attempting to initialize from FIREBASE_ADMIN_SDK_CONFIG (JSON string).');
+    try {
+      serviceAccountCredentials = JSON.parse(serviceAccountStringEnv);
+      loadedFrom = "env string";
+      console.log(`[Admin SDK] Successfully parsed JSON from FIREBASE_ADMIN_SDK_CONFIG. Project ID from parsed string: ${serviceAccountCredentials?.project_id}`);
+      
+      // Explicitly replace \\n with \n in the private key
+      if (serviceAccountCredentials && serviceAccountCredentials.private_key && typeof serviceAccountCredentials.private_key === 'string') {
+        const originalPk = serviceAccountCredentials.private_key;
+        serviceAccountCredentials.private_key = originalPk.replace(/\\n/g, '\n');
+        if (originalPk !== serviceAccountCredentials.private_key) {
+          console.log('[Admin SDK] Replaced "\\\\n" with "\\n" in private_key from ENV string.');
+        }
+        console.log(`[Admin SDK] Private key (after potential newline replacement) starts with: "${serviceAccountCredentials.private_key.substring(0, 30)}...", Ends with: "...${serviceAccountCredentials.private_key.substring(serviceAccountCredentials.private_key.length - 30)}"`);
+        if (!serviceAccountCredentials.private_key.startsWith("-----BEGIN PRIVATE KEY-----") || !serviceAccountCredentials.private_key.endsWith("-----END PRIVATE KEY-----\n")) {
+            console.warn("[Admin SDK Warning] Private key from ENV string (after replacements) does not seem to start/end with standard PEM headers/footers, or lacks final newline.");
+        }
+      }
+
+    } catch (e: any) {
+      adminSDKInitializationError = `Error parsing JSON from FIREBASE_ADMIN_SDK_CONFIG: ${e.message}. Ensure it's a valid single-line JSON string with escaped newlines (\\\\n) for the private_key.`;
+      console.error(`[Admin SDK Init Error] ${adminSDKInitializationError}`);
+    }
+  } else if (!serviceAccountCredentials) {
+    adminSDKInitializationError = 'Neither FIREBASE_ADMIN_SDK_CONFIG_PATH nor FIREBASE_ADMIN_SDK_CONFIG environment variables are set or provided valid credentials.';
+    console.error(`[Admin SDK Init Error] ${adminSDKInitializationError}`);
+  }
+
+
   if (serviceAccountCredentials && !adminSDKInitializationError) {
-    console.log(`[Admin SDK] Service account credentials loaded. Project ID from credentials: ${serviceAccountCredentials.project_id}, Client Email: ${serviceAccountCredentials.client_email}`);
+    console.log(`[Admin SDK] Service account credentials loaded via ${loadedFrom}. Project ID from credentials: ${serviceAccountCredentials.project_id}, Client Email: ${serviceAccountCredentials.client_email}`);
 
     const essentialFields = ['type', 'project_id', 'private_key', 'client_email'];
     const missingFields = essentialFields.filter(field => !(field in serviceAccountCredentials) || !serviceAccountCredentials[field]);
 
     if (missingFields.length > 0) {
-      adminSDKInitializationError = `Parsed service account credentials are missing or have empty essential fields: ${missingFields.join(', ')}.`;
+      adminSDKInitializationError = `Parsed service account credentials (from ${loadedFrom}) are missing or have empty essential fields: ${missingFields.join(', ')}.`;
       console.error(`[Admin SDK Init Error] ${adminSDKInitializationError}`);
     } else if (serviceAccountCredentials.project_id !== expectedProjectId) {
-      adminSDKInitializationError = `CRITICAL MISMATCH: Project ID in service account credentials ('${serviceAccountCredentials.project_id}') does NOT match the expected project ID ('${expectedProjectId}').`;
+      adminSDKInitializationError = `CRITICAL MISMATCH: Project ID in service account credentials ('${serviceAccountCredentials.project_id}') from ${loadedFrom} does NOT match the expected project ID ('${expectedProjectId}').`;
       console.error(`[Admin SDK Init Error] ${adminSDKInitializationError}`);
     } else {
-      // Diagnostic for private_key format
+      // Final check on private_key format before passing to cert()
       const pk = serviceAccountCredentials.private_key;
-      if (typeof pk === 'string') {
-        console.log(`[Admin SDK] Private key type is string. Starts with: "${pk.substring(0, 30)}...", Ends with: "...${pk.substring(pk.length - 30)}"`);
-        if (!pk.startsWith("-----BEGIN PRIVATE KEY-----") || !pk.endsWith("-----END PRIVATE KEY-----\n")) {
-            console.warn("[Admin SDK Warning] Private key does not seem to start/end with standard PEM headers/footers, or lacks final newline after parsing.");
-        }
-        if (pk.includes("\n") && !pk.includes("\\n")) {
-            console.error("[Admin SDK CRITICAL Error Hint] Private key string contains literal newline characters ('\\n') after JSON parsing. It should contain escaped newlines ('\\\\n') in the original JSON string within FIREBASE_ADMIN_SDK_CONFIG in your .env file for them to be correctly interpreted as literal newlines in the PEM key.");
-            adminSDKInitializationError = "Private key in FIREBASE_ADMIN_SDK_CONFIG is likely misformatted. Literal newlines detected. Use '\\\\n' for newlines in the .env JSON string.";
-        } else if (pk.includes("\\n")) {
-             console.log("[Admin SDK] Private key contains '\\\\n'. This is correct if it came from a JSON string in .env. admin.credential.cert should handle unescaping this to '\\n'.");
-        } else {
-            console.warn("[Admin SDK Warning] Private key does not contain '\\\\n'. If this came from an .env JSON string, newlines might be missing or were stripped.");
-        }
-      } else {
-        console.error("[Admin SDK CRITICAL Error Hint] Private key is not a string after parsing credentials.");
-        adminSDKInitializationError = "Private key is not a string in the parsed service account credentials.";
+      if (typeof pk !== 'string' || !pk.startsWith("-----BEGIN PRIVATE KEY-----") || !pk.endsWith("-----END PRIVATE KEY-----\n")) {
+        adminSDKInitializationError = `Private key from ${loadedFrom} is not a string or not correctly PEM formatted after all processing. Starts with: "${String(pk).substring(0,30)}", Ends with: "${String(pk).substring(String(pk).length - 30)}"`;
+        console.error(`[Admin SDK Init Error] ${adminSDKInitializationError}`);
       }
 
       if (!adminSDKInitializationError) {
@@ -96,11 +104,14 @@ if (!admin || !admin.credential || typeof admin.credential.cert !== 'function' |
           console.error(`[Admin SDK Init Error] ${adminSDKInitializationError}`);
         } else {
           console.log('[Admin SDK] Credential object created successfully by admin.credential.cert().');
-          
-          const appName = `firebase-admin-app-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
           console.log(`[Admin SDK] Attempting admin.initializeApp() with unique name: ${appName} and explicit projectId: '${serviceAccountCredentials.project_id}'`);
 
           try {
+            // Ensure no default app is lingering with the wrong config
+            if (admin.apps.find(app => app?.name === '[DEFAULT]' && app.options.projectId !== expectedProjectId)) {
+                 console.warn(`[Admin SDK] A [DEFAULT] app exists with a different projectId. This might cause issues if not handled.`);
+            }
+
             adminApp = admin.initializeApp({
               credential,
               projectId: serviceAccountCredentials.project_id,
@@ -108,10 +119,9 @@ if (!admin || !admin.credential || typeof admin.credential.cert !== 'function' |
             
             if (adminApp && adminApp.options.projectId === expectedProjectId) {
               adminSDKInitializationError = null; // Success!
-              console.log(`[Admin SDK] Successfully initialized a new Firebase admin app: ${appName} for project '${expectedProjectId}'.`);
+              console.log(`[Admin SDK] Successfully initialized a new Firebase admin app: ${appName} for project '${expectedProjectId}' via ${loadedFrom}.`);
               console.log(`[Admin SDK] adminApp.name: ${adminApp.name}`);
               console.log(`[Admin SDK] adminApp.options.projectId: ${adminApp.options.projectId}`);
-              // console.log(`[Admin SDK] Full adminApp.options object:`, JSON.stringify(adminApp.options, null, 2));
             } else {
               const effectiveProjectId = adminApp?.options.projectId || "unknown";
               adminSDKInitializationError = `Firebase Admin SDK initialization for app '${appName}' did not result in a retrievable app with the correct project ID. Expected '${expectedProjectId}', Got '${effectiveProjectId}'. Make sure the service account key is valid and has not been revoked.`;
@@ -123,7 +133,9 @@ if (!admin || !admin.credential || typeof admin.credential.cert !== 'function' |
             }
           } catch (initError: any) {
             console.error(`[Admin SDK Init Error] FAILED during admin.initializeApp() for app '${appName}'. Error:`, initError);
-            adminSDKInitializationError = `Failed to initialize Firebase Admin App '${appName}'. Error: ${initError.message || String(initError)}. Details: ${initError.stack}`;
+            const errorMessageDetail = initError.message ? initError.message : String(initError);
+            const errorStack = initError.stack ? `\nStack: ${initError.stack}` : '';
+            adminSDKInitializationError = `Failed to initialize Firebase Admin App '${appName}'. Error: ${errorMessageDetail}.${errorStack}`;
             adminApp = undefined;
           }
         }
@@ -138,7 +150,7 @@ if (!adminApp && !adminSDKInitializationError) {
 }
 
 export const adminAuth = adminApp ? adminApp.auth() : null;
-export const adminFirestore = adminApp ? adminApp.firestore("ecom") : null;
+export const adminFirestore = adminApp ? adminApp.firestore("ecom") : null; // Explicitly use "ecom" database
 
 if (adminSDKInitializationError) {
   console.error(`[Admin SDK] FINAL INITIALIZATION ERROR STATE: ${adminSDKInitializationError}`);
@@ -147,6 +159,4 @@ if (adminSDKInitializationError) {
 } else {
   console.error("[Admin SDK] FINAL STATE: Admin SDK not initialized, adminApp is undefined, and no specific error string was set (this is unexpected).");
 }
-console.log('--- [ADMIN SDK INIT END V15] ---');
-
-    
+console.log('--- [ADMIN SDK INIT END V20] ---');
