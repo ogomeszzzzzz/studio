@@ -10,10 +10,14 @@ service cloud.firestore {
       // para verificar isApproved e isAdmin após o login.
       allow get: if true;
 
-      // Bloqueia a listagem de todos os usuários ou a modificação direta
-      // de perfis de usuário pelo cliente. Estas operações (registro, aprovação)
+      // Permite que um usuário autenticado atualize seu próprio nome e photoURL.
+      // A escrita de outros campos (isApproved, isAdmin, password) é feita por Server Actions (Admin).
+      allow update: if request.auth == null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'photoURL']);
+
+      // Bloqueia a listagem, criação ou exclusão direta de perfis de usuário pelo cliente.
+      // Essas operações (registro, aprovação pelo admin, exclusão pelo admin)
       // são gerenciadas por Server Actions que usam o Admin SDK.
-      allow list, create, update, delete: if false;
+      allow list, create, delete: if false;
     }
 
     // Coleção global de produtos
@@ -22,17 +26,18 @@ service cloud.firestore {
     // Para produção, a escrita aqui DEVERIA ser via Server Action com validação de admin.
     match /shared_products/{productId} {
       allow read: if true;
-      allow write: if true; 
+      allow write: if true; // Permite que o cliente do admin escreva/delete (para protótipo)
     }
-    match /shared_products { 
-      allow list: if true; // Permite listar para carregar todos os produtos
+    match /shared_products { // Necessário para listar a coleção (getDocs)
+      allow list: if true;
     }
 
 
     // Documento de metadados globais para os produtos
+    // Similar a shared_products: leitura para todos, escrita pelo admin via UI.
     match /app_metadata/products_metadata {
       allow read: if true;
-      allow write: if true; 
+      allow write: if true; // Permite que o cliente do admin escreva (para protótipo)
     }
 
     // Regra de fallback: nega acesso a quaisquer outros caminhos não definidos acima.
