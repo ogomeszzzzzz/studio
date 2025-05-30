@@ -1,4 +1,3 @@
-
 rules_version = '2';
 
 service cloud.firestore {
@@ -19,11 +18,13 @@ service cloud.firestore {
     // Coleção global de produtos
     // Acessível para leitura por todos os usuários.
     // A escrita (upload) é feita pelo cliente do admin; a UI restringe o botão de upload.
+    // Para produção, a escrita aqui DEVERIA ser via Server Action com validação de admin.
     match /shared_products/{productId} {
-      allow read: if true;
-      allow write: if true; 
+      allow read: if true;  // Todos podem ler documentos individuais
+      allow write: if true; // Permite que o cliente do admin escreva/delete (para protótipo)
     }
-    match /shared_products { // Necessário para listar a coleção (getDocs)
+    // Regra para permitir a listagem da coleção shared_products
+    match /shared_products {
       allow list: if true;
     }
 
@@ -32,25 +33,25 @@ service cloud.firestore {
     // Similar a shared_products: leitura para todos, escrita pelo admin via UI.
     match /app_metadata/products_metadata {
       allow read: if true;
-      allow write: if true; 
+      allow write: if true; // Permite que o cliente do admin escreva (para protótipo)
     }
 
     // Coleção de histórico de estoque
-    // Permite que o cliente leia documentos individuais.
     match /stock_history/{docId} {
-      allow read: if true;
-      // Criação é feita pela server action do admin, então o cliente não pode criar/atualizar/deletar.
-      allow create, update, delete: if false; 
+      allow read: if true; // Permite ler documentos INDIVIDUAIS
+      // A criação é feita pelo cliente do admin via UI.
+      // Para produção, a escrita aqui DEVERIA ser via Server Action com validação de admin.
+      allow create: if true;
+      allow update, delete: if false; // Ninguém atualiza ou deleta histórico pelo cliente
     }
-    // Permite que o cliente liste/consulte a coleção 'stock_history' inteira.
-    // Isto é necessário para a query com orderBy("date").
+    // Regra para permitir a listagem (query) na coleção 'stock_history'
     match /stock_history {
       allow list: if true;
     }
 
     // Regra de fallback: nega acesso a quaisquer outros caminhos não definidos acima.
-    // ESTA REGRA DEVE SER A ÚLTIMA DENTRO DE match /databases/(default)/documents { ... }
-    match /{document=**} {
+    // Esta regra DEVE ser a última dentro de match /databases/(default)/documents.
+    match /{path=**} {
       allow read, write: if false;
     }
   }
