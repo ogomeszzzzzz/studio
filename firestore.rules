@@ -10,19 +10,14 @@ service cloud.firestore {
       // para verificar isApproved e isAdmin após o login.
       allow get: if true;
 
-      // Permite que um usuário autenticado atualize seu próprio nome e photoURL.
-      // A escrita de outros campos (isApproved, isAdmin, password) é feita por Server Actions (Admin).
-      allow update: if request.auth == null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'photoURL']);
-
-      // Bloqueia a listagem, criação ou exclusão direta de perfis de usuário pelo cliente.
-      // Essas operações (registro, aprovação pelo admin, exclusão pelo admin)
+      // Bloqueia a listagem de todos os usuários ou a modificação direta
+      // de perfis de usuário pelo cliente. Estas operações (registro, aprovação)
       // são gerenciadas por Server Actions que usam o Admin SDK.
-      allow list, create, delete: if false;
+      allow list, create, update, delete: if false;
     }
 
-    // Coleção global de produtos
-    // Acessível para leitura por todos os usuários.
-    // A escrita (upload) é feita pelo cliente do admin; a UI restringe o botão de upload.
+    // Coleção global de produtos compartilhados
+    // A escrita é controlada pela UI (botão de upload só para admin).
     // Para produção, a escrita aqui DEVERIA ser via Server Action com validação de admin.
     match /shared_products/{productId} {
       allow read: if true;
@@ -32,13 +27,28 @@ service cloud.firestore {
       allow list: if true;
     }
 
-
     // Documento de metadados globais para os produtos
-    // Similar a shared_products: leitura para todos, escrita pelo admin via UI.
+    // A escrita é controlada pela UI para o admin.
     match /app_metadata/products_metadata {
       allow read: if true;
       allow write: if true; // Permite que o cliente do admin escreva (para protótipo)
     }
+
+    // Coleção de histórico de estoque
+    match /stock_history/{historyId} {
+      // Todos os usuários autenticados podem ler o histórico para ver o gráfico.
+      allow read: if true;
+      // A criação de novas entradas de histórico é feita pela função saveProductsToFirestore,
+      // que é chamada pelo admin ao fazer upload. Portanto, a permissão de create
+      // aqui pode ser true, pois a lógica da aplicação já restringe quem pode disparar a escrita.
+      // Para maior segurança em produção, 'create' seria idealmente via Server Action.
+      allow create: if true; // Permite que o cliente do admin escreva (para protótipo)
+      allow update, delete, list: if false; // Não permitir update, delete ou listagem total pelo cliente por enquanto
+    }
+     match /stock_history { 
+      allow list: if true; // Necessário para getDocs com orderBy na coleção
+    }
+
 
     // Regra de fallback: nega acesso a quaisquer outros caminhos não definidos acima.
     match /{document=**} {

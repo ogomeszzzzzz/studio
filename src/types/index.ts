@@ -44,12 +44,12 @@ export interface UserProfile {
   uid: string; // Will be the user's email for doc ID
   email: string;
   name: string;
-  password?: string; // Only for creation, should not be stored/read from client directly after creation
+  password?: string; 
   isApproved: boolean;
   pendingApproval: boolean;
   isAdmin: boolean;
-  createdAt?: Date | any; // Firestore Timestamp stored, Date on client
-  photoURL?: string; // For profile picture
+  createdAt?: Date | any; 
+  photoURL?: string; 
 }
 
 // For Pillow Stock Page
@@ -67,3 +67,11 @@ export interface AggregatedPillow {
 export type SortCriteria = 'name' | 'stock' | 'fillPercentage' | 'sales30d';
 export type SortOrder = 'asc' | 'desc';
 export type StockStatusFilter = 'all' | 'critical' | 'empty' | 'low' | 'medium' | 'good' | 'overstocked';
+
+// For Stock History Chart
+export interface StockHistoryEntry {
+  id: string;
+  date: Date; // Will be a JS Date object on the client
+  totalStockUnits: number;
+  totalSkusWithStock: number;
+}

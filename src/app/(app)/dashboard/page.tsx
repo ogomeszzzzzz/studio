@@ -7,21 +7,20 @@ import { Button } from '@/components/ui/button';
 import {
   ShoppingBag, AlertTriangle, FileSpreadsheet,
   Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler,
-  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon as PieChartLucide, ListFilter, Clock, BarChartHorizontal, SearchIcon
+  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon as PieChartLucide, ListFilter, Clock, BarChartHorizontal, SearchIcon, LineChart
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
-import type { Product } from '@/types';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
+import type { Product, StockHistoryEntry } from '@/types';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, PieChart, Pie, Cell, LineChart as RechartsLineChart, Line as RechartsLine } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart";
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import autoTable from 'jspdf-autotable';
 import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
-import { collection, getDocs, writeBatch, doc, Timestamp, query, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
-import { Tooltip as ShadTooltip, TooltipContent as ShadTooltipContent, TooltipProvider as ShadTooltipProvider, TooltipTrigger as ShadTooltipTrigger } from "@/components/ui/tooltip";
+import { collection, getDocs, writeBatch, doc, Timestamp, query, setDoc, getDoc, serverTimestamp, orderBy, addDoc } from 'firebase/firestore';
 import { format as formatDateFns, isValid as isDateValid } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '@/contexts/AuthContext';
@@ -44,56 +43,26 @@ interface AggregatedPrintData {
   stock: number;
 }
 
-interface CollectionRuptureData {
-  name: string;
-  rupturePercentage: number;
-}
-
-interface SkuStockStatusData {
-  name: string;
-  value: number;
-}
-
 interface CollectionSkuStatusData {
   name: string;
   activeSkus: number;
   zeroStockSkus: number;
 }
 
-
 const ALL_COLLECTIONS_VALUE = "_ALL_DASHBOARD_COLLECTIONS_";
-const FIRESTORE_BATCH_LIMIT = 450; // Firestore batch limit is 500 operations
+const FIRESTORE_BATCH_LIMIT = 450; 
 
 const chartConfigBase = {
-  stock: {
-    label: "Estoque",
-  },
-  skus: {
-    label: "SKUs",
-  },
-  count: {
-    label: "Contagem",
-  },
-  rupturePercentage: {
-    label: "Ruptura (%)",
-    color: "hsl(var(--destructive))",
-  },
-  skusWithStock: {
-    label: "SKUs c/ Estoque",
-    color: "hsl(var(--chart-2))",
-  },
-  skusWithoutStock: {
-    label: "SKUs s/ Estoque",
-    color: "hsl(var(--destructive))",
-  },
-  activeSkus: {
-    label: "SKUs Ativos",
-    color: "hsl(var(--chart-1))",
-  },
-  zeroStockSkus: {
-    label: "SKUs Zerados",
-    color: "hsl(var(--destructive))",
-  }
+  stock: { label: "Estoque", },
+  skus: { label: "SKUs", },
+  count: { label: "Contagem", },
+  rupturePercentage: { label: "Ruptura (%)", color: "hsl(var(--destructive))", },
+  skusWithStock: { label: "SKUs c/ Estoque", color: "hsl(var(--chart-2))", },
+  skusWithoutStock: { label: "SKUs s/ Estoque", color: "hsl(var(--destructive))", },
+  activeSkus: { label: "SKUs Ativos", color: "hsl(var(--chart-1))", },
+  zeroStockSkus: { label: "SKUs Zerados", color: "hsl(var(--destructive))", },
+  totalStockUnits: { label: "Unidades Totais", color: "hsl(var(--chart-1))" },
+  totalSkusWithStock: { label: "SKUs c/ Estoque", color: "hsl(var(--chart-2))" },
 } satisfies ChartConfig;
 
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
@@ -122,6 +91,15 @@ const productFromFirestore = (data: any): Product => {
   } as Product;
 };
 
+const stockHistoryEntryFromFirestore = (id: string, data: any): StockHistoryEntry => {
+  return {
+    id,
+    date: data.date instanceof Timestamp ? data.date.toDate() : new Date(),
+    totalStockUnits: data.totalStockUnits || 0,
+    totalSkusWithStock: data.totalSkusWithStock || 0,
+  };
+};
+
 
 export default function DashboardPage() {
   const [dashboardProducts, setDashboardProducts] = useState<Product[]>([]);
@@ -135,70 +113,58 @@ export default function DashboardPage() {
   const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
 
   const [selectedCollection, setSelectedCollection] = useState<string>(ALL_COLLECTIONS_VALUE);
+  
+  const [stockHistory, setStockHistory] = useState<StockHistoryEntry[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
 
-  const isAdmin = useMemo(() => currentUser?.email === 'gustavo.cordeiro@altenburg.com.br' && currentUser?.isAdmin, [currentUser]);
 
+  const isAdmin = useMemo(() => currentUser?.email.toLowerCase() === process.env.NEXT_PUBLIC_ADMIN_EMAIL?.toLowerCase() && currentUser?.isAdmin, [currentUser]);
 
   useEffect(() => {
-    console.log("DashboardPage: useEffect triggered. AuthLoading:", isAuthLoading, "CurrentUser:", !!currentUser, "Products loaded:", dashboardProducts.length, "SavingFirestore:", isSavingFirestore, "Firestore client init error:", firestoreClientInitializationError);
-    
+    console.log("DashboardPage: AuthContext loading:", isAuthLoading);
     if (isAuthLoading) {
-      console.log("DashboardPage: Auth context is loading...");
       if (dashboardProducts.length === 0) setIsLoadingFirestore(true);
+      if (stockHistory.length === 0) setIsLoadingHistory(true);
       return;
     }
-
     if (firestoreClientInitializationError) {
       toast({ title: "Erro Crítico de Configuração Firebase", description: `Cliente Firebase não inicializado: ${firestoreClientInitializationError}. Verifique o console e as configurações .env.`, variant: "destructive", duration: Infinity });
       setIsLoadingFirestore(false);
+      setIsLoadingHistory(false);
       return;
     }
     if (!firestore) {
       toast({ title: "Erro Crítico de Conexão", description: "Instância do Firestore não está disponível. Verifique a conexão e configuração.", variant: "destructive", duration: Infinity });
       setIsLoadingFirestore(false);
+      setIsLoadingHistory(false);
       return;
     }
 
-    // All authenticated users fetch data
     if (currentUser) {
+      // Fetch Products
       if (dashboardProducts.length === 0 && !isSavingFirestore) {
         setIsLoadingFirestore(true);
         const fetchProducts = async () => {
           console.log("DashboardPage: Attempting to fetch products from GLOBAL collection. Firestore instance available:", !!firestore);
-          console.log("DashboardPage: Firestore client status. Error:", firestoreClientInitializationError, "Instance:", firestore ? "Available" : "Not Available");
-          if (!firestore) {
-             toast({ title: "Erro Interno", description: "Firestore não disponível para buscar dados.", variant: "destructive" });
-             setIsLoadingFirestore(false);
-             return;
-          }
           try {
-            const productsColPath = "shared_products"; // GLOBAL path
-            console.log("DashboardPage: Firestore products collection path:", productsColPath);
-            
+            const productsColPath = "shared_products";
             const productsQuery = query(collection(firestore, productsColPath));
             const snapshot = await getDocs(productsQuery);
             const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
-            
             setDashboardProducts(productsFromDb);
-            console.log(`DashboardPage: Fetched ${productsFromDb.length} products from Firestore.`);
-
-            const metadataDocRef = doc(firestore, "app_metadata", "products_metadata"); // GLOBAL path
+            
+            const metadataDocRef = doc(firestore, "app_metadata", "products_metadata");
             const metadataDocSnap = await getDoc(metadataDocRef);
-
             if (metadataDocSnap.exists()) {
               const data = metadataDocSnap.data();
               if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
                 setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
               }
             } else {
-              console.log("DashboardPage: Metadata document for last update does not exist.");
               setLastDataUpdateTimestamp(null);
             }
-
-            if (productsFromDb.length > 0) {
-              // toast({ title: "Dados Carregados", description: "Dados de produtos carregados." });
-            } else {
-              toast({ title: "Sem Dados Carregados", description: "Nenhum produto encontrado. O administrador precisa carregar uma planilha.", variant: "default" });
+             if (productsFromDb.length === 0 && !isAdmin) {
+               toast({ title: "Sem Dados Carregados", description: "Nenhum produto encontrado. O administrador precisa carregar uma planilha.", variant: "default" });
             }
           } catch (error) {
             console.error("DashboardPage: Error fetching products from Firestore:", error);
@@ -211,17 +177,39 @@ export default function DashboardPage() {
       } else if (dashboardProducts.length > 0 && !isSavingFirestore) {
         setIsLoadingFirestore(false);
       }
-    } else {
-      console.log("DashboardPage: No current user. Clearing products and stopping loading.");
+
+      // Fetch Stock History
+      if (stockHistory.length === 0 || lastDataUpdateTimestamp) { // Re-fetch history if lastDataUpdateTimestamp changes
+        setIsLoadingHistory(true);
+        const fetchHistory = async () => {
+          console.log("DashboardPage: Fetching stock history");
+          try {
+            const historyQuery = query(collection(firestore, "stock_history"), orderBy("date", "asc"));
+            const historySnapshot = await getDocs(historyQuery);
+            const historyFromDb: StockHistoryEntry[] = historySnapshot.docs.map(docSnap => stockHistoryEntryFromFirestore(docSnap.id, docSnap.data()));
+            setStockHistory(historyFromDb);
+          } catch (error) {
+            console.error("DashboardPage: Error fetching stock history:", error);
+            toast({ title: "Erro ao Carregar Histórico", description: `Não foi possível buscar o histórico de estoque: ${(error as Error).message}`, variant: "destructive" });
+          } finally {
+            setIsLoadingHistory(false);
+          }
+        };
+        fetchHistory();
+      }
+
+
+    } else { // No current user
       setDashboardProducts([]);
       setLastDataUpdateTimestamp(null);
       setIsLoadingFirestore(false);
+      setStockHistory([]);
+      setIsLoadingHistory(false);
     }
-  }, [currentUser, isAuthLoading, dashboardProducts.length, isSavingFirestore, toast]);
-
+  }, [currentUser, isAuthLoading, dashboardProducts.length, isSavingFirestore, isAdmin, toast, lastDataUpdateTimestamp]); // lastDataUpdateTimestamp added
 
   const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
-    if (!isAdmin) {
+    if (!currentUser || !isAdmin) {
       toast({ title: "Acesso Negado", description: "Apenas administradores podem salvar dados.", variant: "destructive" });
       return;
     }
@@ -229,39 +217,30 @@ export default function DashboardPage() {
       toast({ title: "Erro de Configuração", description: "Instância do Firestore não está disponível para salvar.", variant: "destructive" });
       return;
     }
-    console.log("DashboardPage: Admin attempting to save products to GLOBAL collection. Firestore available:", !!firestore);
+    console.log("DashboardPage: Admin attempting to save products to GLOBAL collection.");
     setIsSavingFirestore(true);
     let totalDeleted = 0;
     let totalAdded = 0;
 
     try {
-      const productsColPath = "shared_products"; // GLOBAL path
-      console.log("DashboardPage: Firestore products collection path for saving:", productsColPath);
+      const productsColPath = "shared_products";
       const productsColRef = collection(firestore, productsColPath);
       
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
-
-      const deletePromises: Promise<void>[] = [];
-      // No _metadata doc in shared_products, so no need to filter it out here
       const docsToDelete = existingDocsSnapshot.docs; 
 
+      const deletePromises: Promise<void>[] = [];
       for (let i = 0; i < docsToDelete.length; i += FIRESTORE_BATCH_LIMIT) {
         const batch = writeBatch(firestore);
         const chunk = docsToDelete.slice(i, i + FIRESTORE_BATCH_LIMIT);
-        chunk.forEach(docSnapshot => {
-            batch.delete(docSnapshot.ref);
-            totalDeleted++;
-        });
-        console.log(`DashboardPage: Committing a batch of ${chunk.length} deletions for GLOBAL products.`);
+        chunk.forEach(docSnapshot => { batch.delete(docSnapshot.ref); totalDeleted++; });
         deletePromises.push(batch.commit());
       }
       await Promise.all(deletePromises);
 
-
       const addPromises: Promise<void>[] = [];
       if (productsToSave.length > 0) {
-        console.log(`DashboardPage: Adding ${productsToSave.length} new products in chunks of ${FIRESTORE_BATCH_LIMIT}.`);
         for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
           const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
@@ -270,19 +249,30 @@ export default function DashboardPage() {
             batch.set(newDocRef, productToFirestore(product));
             totalAdded++;
           });
-          console.log(`DashboardPage: Committing a batch of ${chunk.length} additions for GLOBAL products.`);
           addPromises.push(batch.commit());
         }
         await Promise.all(addPromises);
       }
 
-      const metadataDocRef = doc(firestore, "app_metadata", "products_metadata"); // GLOBAL path
+      // Record stock history
+      const currentTotalStockUnits = productsToSave.reduce((sum, p) => sum + p.stock, 0);
+      const currentTotalSkusWithStock = productsToSave.filter(p => p.stock > 0).length;
+      await addDoc(collection(firestore, "stock_history"), {
+        date: serverTimestamp(),
+        totalStockUnits: currentTotalStockUnits,
+        totalSkusWithStock: currentTotalSkusWithStock,
+      });
+      console.log("DashboardPage: Stock history entry added.");
+
+
+      const metadataDocRef = doc(firestore, "app_metadata", "products_metadata");
       const newTimestamp = serverTimestamp();
       await setDoc(metadataDocRef, { lastUpdatedAt: newTimestamp }, { merge: true });
-      setLastDataUpdateTimestamp(new Date()); 
+      
+      setDashboardProducts(productsToSave); // Update local state
+      setLastDataUpdateTimestamp(new Date()); // Trigger re-fetch of history
 
-      setDashboardProducts(productsToSave);
-      toast({ title: "Dados Globais Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
+      toast({ title: "Dados Globais Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''} Histórico atualizado.` });
 
     } catch (error) {
       console.error("DashboardPage: Error saving products to Firestore:", error);
@@ -290,12 +280,11 @@ export default function DashboardPage() {
     } finally {
       setIsSavingFirestore(false);
     }
-  }, [isAdmin, toast]);
+  }, [currentUser, isAdmin, toast]);
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
     await saveProductsToFirestore(parsedProducts);
   }, [saveProductsToFirestore]);
-
 
   const handleProcessingStart = () => setIsProcessingExcel(true);
   const handleProcessingEnd = () => setIsProcessingExcel(false);
@@ -320,9 +309,9 @@ export default function DashboardPage() {
         skusByProductType: [],
         skusBySize: [],
         stockByPrint: [],
-        collectionSkuStatus: [],
         collectionRupturePercentage: [],
         skuStockStatus: [],
+        collectionSkuStatus: [],
         totalStock: 0,
         totalSkus: 0,
         totalZeroStockSkus: 0,
@@ -349,7 +338,7 @@ export default function DashboardPage() {
       const collectionKey = product.collection || 'Não Especificada';
       const typeKey = product.productType || 'Não Especificado';
       const sizeKey = product.size || 'Não Especificado';
-      const printKey = product.description || 'Não Especificada';
+      const printKey = product.description || 'Não Especificada'; // Using "Descrição" for estampa
 
       const currentCol = stockByCollectionMap.get(collectionKey) || { stock: 0, skus: 0 };
       currentCol.stock += product.stock;
@@ -377,7 +366,7 @@ export default function DashboardPage() {
         totalZeroStockSkus++;
       }
       totalStock += product.stock;
-      totalReadyToShipStock += product.readyToShip;
+      totalReadyToShipStock += product.readyToShip || 0;
       totalRegulatorStock += product.regulatorStock || 0;
       totalOpenOrders += product.openOrders || 0;
     });
@@ -385,37 +374,29 @@ export default function DashboardPage() {
     const collectionSkuStatusData: CollectionSkuStatusData[] = Array.from(stockByCollectionMap.entries()).map(([name, collData]) => {
       const zeroSkusCount = zeroStockSkusByCollectionMap.get(name) || 0;
       const activeSkusCount = collData.skus - zeroSkusCount;
-      return {
-        name,
-        activeSkus: activeSkusCount,
-        zeroStockSkus: zeroSkusCount,
-      };
+      return { name, activeSkus: activeSkusCount, zeroStockSkus: zeroSkusCount, };
     }).sort((a,b) => (b.activeSkus + b.zeroStockSkus) - (a.activeSkus + a.zeroStockSkus));
-
-    const collectionRupturePercentageData: CollectionRuptureData[] = Array.from(stockByCollectionMap.entries()).map(([name, collData]) => {
-      const zeroStockCount = zeroStockSkusByCollectionMap.get(name) || 0;
-      const totalSkusInCollection = collData.skus;
-      const rupturePercentage = totalSkusInCollection > 0 ? (zeroStockCount / totalSkusInCollection) * 100 : 0;
-      return {
-        name,
-        rupturePercentage: parseFloat(rupturePercentage.toFixed(2)),
-      };
+    
+    const collectionRupturePercentageData = Array.from(stockByCollectionMap.entries()).map(([name, collData]) => {
+        const zeroStockCount = zeroStockSkusByCollectionMap.get(name) || 0;
+        const totalSkusInCollection = collData.skus;
+        const rupturePercentage = totalSkusInCollection > 0 ? (zeroStockCount / totalSkusInCollection) * 100 : 0;
+        return { name, rupturePercentage: parseFloat(rupturePercentage.toFixed(2)), };
     }).sort((a, b) => b.rupturePercentage - a.rupturePercentage);
 
-    const skuStockStatusData: SkuStockStatusData[] = [
+    const skuStockStatusData = [
       { name: 'SKUs com Estoque', value: totalSkus - totalZeroStockSkus },
       { name: 'SKUs Zerados', value: totalZeroStockSkus },
     ].filter(d => d.value > 0);
 
-
     return {
       stockByCollection: Array.from(stockByCollectionMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock),
       skusByProductType: Array.from(skusByProductTypeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.totalSkus - a.totalSkus),
-      skusBySize: Array.from(skusBySizeMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.totalSkus - a.totalSkus),
+      skusBySize: Array.from(skusBySizeMap.get(sizeKey) || { totalSkus: 0, skusWithStock: 0, skusWithoutStock: 0 }).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.totalSkus - a.totalSkus),
       stockByPrint: Array.from(stockByPrintMap.entries()).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.stock - a.stock).slice(0, 15),
-      collectionSkuStatus: collectionSkuStatusData,
       collectionRupturePercentage: collectionRupturePercentageData,
       skuStockStatus: skuStockStatusData,
+      collectionSkuStatus: collectionSkuStatusData,
       totalStock,
       totalSkus,
       totalZeroStockSkus,
@@ -429,10 +410,7 @@ export default function DashboardPage() {
     const config: ChartConfig = {...chartConfigBase};
     data.forEach((item, index) => {
       if (!config[item.name] && useBaseColors) {
-        config[item.name] = {
-          label: item.name,
-          color: COLORS[index % COLORS.length],
-        };
+        config[item.name] = { label: item.name, color: COLORS[index % COLORS.length], };
       } else if (!config[item.name]) {
          config[item.name] = { label: item.name };
       }
@@ -445,43 +423,16 @@ export default function DashboardPage() {
   const skusBySizeChartConfig = useMemo(() => createChartConfig(aggregatedData.skusBySize), [aggregatedData.skusBySize]);
   const stockByPrintChartConfig = useMemo(() => createChartConfig(aggregatedData.stockByPrint, true), [aggregatedData.stockByPrint]);
   const collectionSkuStatusChartConfig = useMemo(() => createChartConfig(aggregatedData.collectionSkuStatus), [aggregatedData.collectionSkuStatus]);
-
-
-  const collectionRuptureChartConfig = useMemo(() => {
-    const config: ChartConfig = {
-        rupturePercentage: {
-            label: "Ruptura (%)",
-            color: "hsl(var(--destructive))",
-        },
-    };
-    aggregatedData.collectionRupturePercentage.forEach((item) => {
-        if (!config[item.name]) {
-          config[item.name] = {
-              label: item.name,
-          };
-        }
-    });
-    return config;
-  }, [aggregatedData.collectionRupturePercentage]);
-
-  const skuStockStatusChartConfig = useMemo(() => {
-    const config: ChartConfig = {};
-    aggregatedData.skuStockStatus.forEach((item, index) => {
-      config[item.name] = {
-        label: item.name,
-        color: PIE_COLORS[index % PIE_COLORS.length],
-      };
-    });
-    return config;
-  }, [aggregatedData.skuStockStatus]);
+  const collectionRuptureChartConfig = useMemo(() => createChartConfig(aggregatedData.collectionRupturePercentage), [aggregatedData.collectionRupturePercentage]);
+  const skuStockStatusChartConfig = useMemo(() => createChartConfig(aggregatedData.skuStockStatus), [aggregatedData.skuStockStatus]);
+  const stockHistoryChartConfig = useMemo(() => chartConfigBase, []);
 
 
   const generateDashboardPdf = async () => {
-    if (filteredProductsForDashboard.length === 0) {
+    if (filteredProductsForDashboard.length === 0 && stockHistory.length === 0) {
       toast({ title: "Sem Dados", description: "Carregue dados e selecione filtros antes de gerar o PDF.", variant: "destructive" });
       return;
     }
-
     setIsGeneratingPdf(true);
     toast({ title: "Gerando PDF...", description: "Por favor, aguarde. Isso pode levar alguns instantes." });
 
@@ -498,7 +449,6 @@ export default function DashboardPage() {
         reportTitle += ` - Coleção: ${selectedCollection}`;
       }
 
-
       doc.setFontSize(18);
       doc.text(reportTitle, pageWidth / 2, yPos, { align: "center" });
       yPos += 10;
@@ -508,10 +458,9 @@ export default function DashboardPage() {
       yPos += 7;
       if (lastDataUpdateTimestamp) {
         doc.setFontSize(9);
-        doc.text(`Dados atualizados em: ${formatDateFns(lastDataUpdateTimestamp, 'dd/MM/yyyy HH:mm:ss', { locale: ptBR })}`, pageWidth / 2, yPos, { align: "center" });
+        doc.text(`Dados de Produtos atualizados em: ${formatDateFns(lastDataUpdateTimestamp, 'dd/MM/yyyy HH:mm:ss', { locale: ptBR })}`, pageWidth / 2, yPos, { align: "center" });
         yPos += 7;
       }
-
 
       doc.setFontSize(12);
       doc.text("Resumo Geral dos Indicadores:", margin, yPos);
@@ -549,59 +498,35 @@ export default function DashboardPage() {
           yPos += 8;
           return;
         }
-
-        if (yPos + 10 > pageHeight - margin) { 
-             doc.addPage();
-             yPos = margin;
-        }
+        if (yPos + 10 > pageHeight - margin) { doc.addPage(); yPos = margin; }
         doc.setFontSize(13);
         doc.setFont('helvetica', 'bold');
         doc.text(chartTitle, margin, yPos);
         doc.setFont('helvetica', 'normal');
         yPos += 8;
 
-
         try {
-          const canvas = await html2canvas(chartElement, {
-            scale: 1.5,
-            useCORS: true,
-            logging: false,
-            backgroundColor: '#ffffff'
-          });
+          const canvas = await html2canvas(chartElement, { scale: 1.5, useCORS: true, logging: false, backgroundColor: '#ffffff' });
           const imgData = canvas.toDataURL('image/png', 0.95);
-
           const imgProps = doc.getImageProperties(imgData);
           let imgHeight = (imgProps.height * contentWidth) / imgProps.width;
           let imgWidth = contentWidth;
-
           const maxChartHeight = pageHeight * 0.45;
-          if (imgHeight > maxChartHeight) {
-              imgHeight = maxChartHeight;
-              imgWidth = (imgProps.width * imgHeight) / imgProps.height;
-          }
-
+          if (imgHeight > maxChartHeight) { imgHeight = maxChartHeight; imgWidth = (imgProps.width * imgHeight) / imgProps.height; }
           if (yPos + imgHeight > pageHeight - margin) {
-            doc.addPage();
-            yPos = margin;
-            doc.setFontSize(13);
-            doc.setFont('helvetica', 'bold');
-            doc.text(chartTitle, margin, yPos);
-            doc.setFont('helvetica', 'normal');
-            yPos += 8;
+            doc.addPage(); yPos = margin;
+            doc.setFontSize(13); doc.setFont('helvetica', 'bold'); doc.text(chartTitle, margin, yPos); doc.setFont('helvetica', 'normal'); yPos += 8;
           }
           doc.addImage(imgData, 'PNG', margin, yPos, imgWidth, imgHeight);
           yPos += imgHeight + 10;
         } catch (error) {
           console.error(`Erro ao capturar gráfico ${elementId}:`, error);
-          doc.setTextColor(255,0,0);
-          doc.setFontSize(10);
-          doc.text(`Erro ao renderizar o gráfico: ${chartTitle}. Verifique o console.`, margin, yPos);
-          doc.setTextColor(0);
-          yPos += 8;
+          doc.setTextColor(255,0,0); doc.setFontSize(10); doc.text(`Erro ao renderizar o gráfico: ${chartTitle}. Verifique o console.`, margin, yPos); doc.setTextColor(0); yPos += 8;
         }
       };
 
       const chartSections = [
+        { id: 'chart-stock-history', title: 'Histórico de Estoque (Unidades Totais e SKUs com Estoque)', data: stockHistory },
         { id: 'chart-stock-by-collection', title: 'Estoque por Descrição Linha Comercial', data: aggregatedData.stockByCollection },
         { id: 'chart-sku-stock-status', title: 'Distribuição de SKUs (Estoque vs. Zerado)', data: aggregatedData.skuStockStatus },
         { id: 'chart-rupture-by-collection', title: 'Ruptura (%) por Descrição Linha Comercial', data: aggregatedData.collectionRupturePercentage },
@@ -616,11 +541,7 @@ export default function DashboardPage() {
             await addChartToPdf(chartInfo.id, chartInfo.title);
          } else {
             if (yPos + 10 > pageHeight - margin) { doc.addPage(); yPos = margin; }
-            doc.setFontSize(11);
-            doc.setTextColor(100);
-            doc.text(`Gráfico "${chartInfo.title}" não possui dados para exibir com os filtros atuais.`, margin, yPos);
-            doc.setTextColor(0);
-            yPos += 10;
+            doc.setFontSize(11); doc.setTextColor(100); doc.text(`Gráfico "${chartInfo.title}" não possui dados para exibir com os filtros atuais.`, margin, yPos); doc.setTextColor(0); yPos += 10;
          }
       }
 
@@ -629,7 +550,6 @@ export default function DashboardPage() {
         pdfFileName += `_${selectedCollection.replace(/[^a-zA-Z0-9]/g, '_')}`;
       }
       pdfFileName += '.pdf';
-
       doc.save(pdfFileName);
       toast({ title: "PDF Gerado!", description: "O download do relatório foi iniciado." });
     } catch (error) {
@@ -646,9 +566,7 @@ export default function DashboardPage() {
     const x = cx + radius * Math.cos(-midAngle * RADIAN);
     const y = cy + radius * Math.sin(-midAngle * RADIAN);
     const percentage = (percent * 100).toFixed(0);
-
     if (percentage === "0") return null;
-
     return (
       <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize="12px" fontWeight="bold">
         {`${percentage}%`}
@@ -656,7 +574,7 @@ export default function DashboardPage() {
     );
   };
 
-  const displayLoader = (isLoadingFirestore || isAuthLoading) && dashboardProducts.length === 0 && !isSavingFirestore;
+  const displayLoader = (isLoadingFirestore || isAuthLoading || isLoadingHistory) && dashboardProducts.length === 0 && stockHistory.length === 0 && !isSavingFirestore;
 
   if (displayLoader) {
     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Carregando dados...</p></div>;
@@ -667,47 +585,33 @@ export default function DashboardPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-foreground">Dashboard de Performance</h1>
-          <p className="text-muted-foreground">Visão geral dos dados da coleção com base na coluna "Descrição Linha Comercial".</p>
+          <p className="text-muted-foreground">Visão geral dos dados com base na coluna "Descrição Linha Comercial" e histórico de estoque.</p>
         </div>
         <Button 
           onClick={generateDashboardPdf} 
-          disabled={isGeneratingPdf || isSavingFirestore || isLoadingFirestore || filteredProductsForDashboard.length === 0 || isAuthLoading}
+          disabled={isGeneratingPdf || isSavingFirestore || isLoadingFirestore || (filteredProductsForDashboard.length === 0 && stockHistory.length === 0) || isAuthLoading || isLoadingHistory}
         >
-            {isGeneratingPdf ? (
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-            ) : (
-              <Download className="mr-2 h-5 w-5" />
-            )}
+            {isGeneratingPdf ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
             Baixar Relatório PDF
         </Button>
       </div>
       {lastDataUpdateTimestamp && (
         <div className="text-sm text-muted-foreground flex items-center">
             <Clock className="mr-2 h-4 w-4" />
-            Última atualização dos dados: {formatDateFns(lastDataUpdateTimestamp, 'dd/MM/yyyy HH:mm:ss', { locale: ptBR })}
+            Última atualização dos dados de produtos: {formatDateFns(lastDataUpdateTimestamp, 'dd/MM/yyyy HH:mm:ss', { locale: ptBR })}
         </div>
       )}
 
       <Card className="shadow-md border-primary/30 border-l-4">
-        <CardHeader>
-          <CardTitle className="flex items-center"><ListFilter className="mr-2 h-5 w-5 text-primary" />Filtros do Dashboard</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle className="flex items-center"><ListFilter className="mr-2 h-5 w-5 text-primary" />Filtros do Dashboard</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <Label htmlFor="collectionFilterDashboard">Filtrar por Coleção (Desc. Linha Comercial)</Label>
-            <Select
-              value={selectedCollection}
-              onValueChange={setSelectedCollection}
-              disabled={isLoadingFirestore || isSavingFirestore || isGeneratingPdf || isAuthLoading}
-            >
-              <SelectTrigger id="collectionFilterDashboard" aria-label="Filtrar por Coleção">
-                <SelectValue placeholder="Filtrar por Coleção" />
-              </SelectTrigger>
+            <Select value={selectedCollection} onValueChange={setSelectedCollection} disabled={isLoadingFirestore || isSavingFirestore || isGeneratingPdf || isAuthLoading}>
+              <SelectTrigger id="collectionFilterDashboard" aria-label="Filtrar por Coleção"><SelectValue placeholder="Filtrar por Coleção" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={ALL_COLLECTIONS_VALUE}>Todas as Coleções</SelectItem>
-                {availableDashboardCollections.map(collection => (
-                  <SelectItem key={collection as string} value={collection as string}>{collection as string}</SelectItem>
-                ))}
+                {availableDashboardCollections.map(collection => (<SelectItem key={collection as string} value={collection as string}>{collection as string}</SelectItem>))}
               </SelectContent>
             </Select>
           </div>
@@ -721,7 +625,7 @@ export default function DashboardPage() {
           onProcessingEnd={handleProcessingEnd}
           collectionColumnKey="Descrição Linha Comercial"
           cardTitle="Upload de Dados para Dashboard"
-          cardDescription="Carregue o arquivo Excel. Os dados serão salvos globalmente e usados para os gráficos abaixo."
+          cardDescription="Carregue o arquivo Excel. Os dados serão salvos globalmente e usados para os gráficos e histórico abaixo."
           isProcessingParent={isSavingFirestore}
           passwordProtected={true}
           unlockPassword="exceladmin159"
@@ -730,301 +634,116 @@ export default function DashboardPage() {
       {!isAdmin && dashboardProducts.length === 0 && !isLoadingFirestore && (
          <Card className="shadow-md text-center py-10">
             <CardHeader><CardTitle className="flex items-center justify-center text-xl"><Database className="mr-2 h-7 w-7 text-primary" />Sem Dados para Visualizar</CardTitle></CardHeader>
-            <CardContent>
-                <p className="text-muted-foreground">Nenhum dado de produto foi carregado no sistema. Por favor, peça a um administrador para carregar uma planilha de dados.</p>
-            </CardContent>
+            <CardContent><p className="text-muted-foreground">Nenhum dado de produto foi carregado no sistema. Por favor, peça a um administrador para carregar uma planilha de dados.</p></CardContent>
          </Card>
       )}
-
-
       {isSavingFirestore && ( 
-        <Card className="shadow-lg">
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" />
-              Salvando dados...
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground">Por favor, aguarde.</p>
-          </CardContent>
-        </Card>
+        <Card className="shadow-lg"><CardHeader><CardTitle className="flex items-center"><Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" />Salvando dados...</CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Por favor, aguarde.</p></CardContent></Card>
       )}
-
       {!isLoadingFirestore && !isAuthLoading && !isSavingFirestore && dashboardProducts.length === 0 && !isProcessingExcel && isAdmin && (
-        <Card className="shadow-lg">
-          <CardHeader>
-            <CardTitle className="flex items-center"><Database className="mr-2 h-6 w-6 text-primary" />Sem dados para exibir</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground">Por favor, carregue um arquivo Excel para popular o dashboard. Os dados serão salvos e carregados automaticamente nas próximas visitas.</p>
-          </CardContent>
-        </Card>
+        <Card className="shadow-lg"><CardHeader><CardTitle className="flex items-center"><Database className="mr-2 h-6 w-6 text-primary" />Sem dados para exibir</CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Por favor, carregue um arquivo Excel para popular o dashboard. Os dados serão salvos e carregados automaticamente nas próximas visitas.</p></CardContent></Card>
+      )}
+      {!isLoadingFirestore && !isAuthLoading && !isSavingFirestore && dashboardProducts.length > 0 && filteredProductsForDashboard.length === 0 && selectedCollection !== ALL_COLLECTIONS_VALUE && (
+         <Card className="shadow-lg"><CardHeader><CardTitle className="flex items-center"><Filter className="mr-2 h-6 w-6 text-primary" />Nenhum produto encontrado</CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Nenhum produto encontrado para a coleção "{selectedCollection}" selecionada.</p></CardContent></Card>
       )}
 
-      {!isLoadingFirestore && !isAuthLoading && !isSavingFirestore && dashboardProducts.length > 0 && filteredProductsForDashboard.length === 0 && selectedCollection !== ALL_COLLECTIONS_VALUE && (
-         <Card className="shadow-lg">
-          <CardHeader>
-            <CardTitle className="flex items-center"><Filter className="mr-2 h-6 w-6 text-primary" />Nenhum produto encontrado</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground">Nenhum produto encontrado para a coleção "{selectedCollection}" selecionada.</p>
-          </CardContent>
-        </Card>
+      {isLoadingHistory && stockHistory.length === 0 && (
+        <Card className="shadow-lg"><CardHeader><CardTitle className="flex items-center"><Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" />Carregando histórico...</CardTitle></CardHeader></Card>
+      )}
+      
+      {!isLoadingHistory && stockHistory.length > 0 && (
+         <Card id="chart-stock-history" className="shadow-lg hover:shadow-xl transition-shadow">
+            <CardHeader>
+              <CardTitle className="flex items-center"><LineChart className="mr-2 h-5 w-5 text-primary" />Histórico de Estoque</CardTitle>
+              <CardDescription>Tendência de unidades totais em estoque e SKUs com estoque ao longo do tempo (baseado nos uploads de planilhas).</CardDescription>
+            </CardHeader>
+            <CardContent className="h-[400px]">
+              <ChartContainer config={stockHistoryChartConfig} className="h-full w-full">
+                <RechartsLineChart data={stockHistory} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tickFormatter={(value) => formatDateFns(new Date(value), "dd/MM/yy", { locale: ptBR })} />
+                  <YAxis yAxisId="left" stroke="hsl(var(--chart-1))" label={{ value: 'Unidades Totais', angle: -90, position: 'insideLeft', style: {textAnchor: 'middle', fill: 'hsl(var(--chart-1))'} }} />
+                  <YAxis yAxisId="right" orientation="right" stroke="hsl(var(--chart-2))" label={{ value: 'SKUs c/ Estoque', angle: 90, position: 'insideRight', style: {textAnchor: 'middle', fill: 'hsl(var(--chart-2))'} }} />
+                  <Tooltip
+                    content={<ChartTooltipContent
+                        labelFormatter={(label) => formatDateFns(new Date(label), "dd/MM/yyyy", { locale: ptBR })} 
+                        formatter={(value, name) => [`${(value as number).toLocaleString()} ${name === 'totalStockUnits' ? 'unid.' : 'SKUs'}`, name === 'totalStockUnits' ? 'Unidades Totais' : 'SKUs c/ Estoque']}
+                    />}
+                    
+                    />
+                  <Legend />
+                  <RechartsLine yAxisId="left" type="monotone" dataKey="totalStockUnits" name="Unidades Totais" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                  <RechartsLine yAxisId="right" type="monotone" dataKey="totalSkusWithStock" name="SKUs c/ Estoque" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                </RechartsLineChart>
+              </ChartContainer>
+            </CardContent>
+          </Card>
+      )}
+      {!isLoadingHistory && stockHistory.length === 0 && !displayLoader && (
+          <Card className="shadow-md text-center py-6">
+            <CardHeader><CardTitle className="flex items-center justify-center text-lg"><LineChart className="mr-2 h-6 w-6 text-muted-foreground" />Sem Histórico de Estoque</CardTitle></CardHeader>
+            <CardContent><p className="text-muted-foreground">Nenhum histórico de estoque encontrado. Faça um upload de planilha para começar a registrar o histórico.</p></CardContent>
+          </Card>
       )}
 
 
       {!isLoadingFirestore && !isAuthLoading && !isSavingFirestore && filteredProductsForDashboard.length > 0 && (
         <>
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            <Card className="shadow-lg hover:shadow-xl transition-shadow">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Estoque Total</CardTitle>
-                <Layers className="h-5 w-5 text-primary" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-foreground">{aggregatedData.totalStock.toLocaleString()}</div>
-                <p className="text-xs text-muted-foreground">unidades em estoque</p>
-              </CardContent>
-            </Card>
-            <Card className="shadow-lg hover:shadow-xl transition-shadow">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Pronta Entrega</CardTitle>
-                <PackageCheck className="h-5 w-5 text-green-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-foreground">{aggregatedData.totalReadyToShipStock.toLocaleString()}</div>
-                <p className="text-xs text-muted-foreground">unidades prontas para envio</p>
-              </CardContent>
-            </Card>
-            <Card className="shadow-lg hover:shadow-xl transition-shadow">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Regulador</CardTitle>
-                <Activity className="h-5 w-5 text-orange-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-foreground">{aggregatedData.totalRegulatorStock.toLocaleString()}</div>
-                <p className="text-xs text-muted-foreground">unidades no depósito Regulador</p>
-              </CardContent>
-            </Card>
-            <Card className="shadow-lg hover:shadow-xl transition-shadow">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Pedidos em Aberto</CardTitle>
-                <ClipboardList className="h-5 w-5 text-blue-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-foreground">{aggregatedData.totalOpenOrders.toLocaleString()}</div>
-                <p className="text-xs text-muted-foreground">unidades com pedido em aberto</p>
-              </CardContent>
-            </Card>
-            <Card className="shadow-lg hover:shadow-xl transition-shadow">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total SKUs</CardTitle>
-                <FileSpreadsheet className="h-5 w-5 text-primary" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-foreground">{aggregatedData.totalSkus.toLocaleString()}</div>
-                <p className="text-xs text-muted-foreground">SKUs distintos carregados</p>
-              </CardContent>
-            </Card>
-            <Card className="shadow-lg hover:shadow-xl transition-shadow">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total SKUs Zerados</CardTitle>
-                <AlertTriangle className="h-5 w-5 text-destructive" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-destructive">{aggregatedData.totalZeroStockSkus.toLocaleString()}</div>
-                <p className="text-xs text-muted-foreground">SKUs com estoque zero</p>
-              </CardContent>
-            </Card>
+            <Card className="shadow-lg hover:shadow-xl transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Estoque Total</CardTitle><Layers className="h-5 w-5 text-primary" /></CardHeader><CardContent><div className="text-2xl font-bold text-foreground">{aggregatedData.totalStock.toLocaleString()}</div><p className="text-xs text-muted-foreground">unidades em estoque</p></CardContent></Card>
+            <Card className="shadow-lg hover:shadow-xl transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Pronta Entrega</CardTitle><PackageCheck className="h-5 w-5 text-green-500" /></CardHeader><CardContent><div className="text-2xl font-bold text-foreground">{aggregatedData.totalReadyToShipStock.toLocaleString()}</div><p className="text-xs text-muted-foreground">unidades prontas para envio</p></CardContent></Card>
+            <Card className="shadow-lg hover:shadow-xl transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Regulador</CardTitle><Activity className="h-5 w-5 text-orange-500" /></CardHeader><CardContent><div className="text-2xl font-bold text-foreground">{aggregatedData.totalRegulatorStock.toLocaleString()}</div><p className="text-xs text-muted-foreground">unidades no depósito Regulador</p></CardContent></Card>
+            <Card className="shadow-lg hover:shadow-xl transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Pedidos em Aberto</CardTitle><ClipboardList className="h-5 w-5 text-blue-500" /></CardHeader><CardContent><div className="text-2xl font-bold text-foreground">{aggregatedData.totalOpenOrders.toLocaleString()}</div><p className="text-xs text-muted-foreground">unidades com pedido em aberto</p></CardContent></Card>
+            <Card className="shadow-lg hover:shadow-xl transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Total SKUs</CardTitle><FileSpreadsheet className="h-5 w-5 text-primary" /></CardHeader><CardContent><div className="text-2xl font-bold text-foreground">{aggregatedData.totalSkus.toLocaleString()}</div><p className="text-xs text-muted-foreground">SKUs distintos carregados</p></CardContent></Card>
+            <Card className="shadow-lg hover:shadow-xl transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Total SKUs Zerados</CardTitle><AlertTriangle className="h-5 w-5 text-destructive" /></CardHeader><CardContent><div className="text-2xl font-bold text-destructive">{aggregatedData.totalZeroStockSkus.toLocaleString()}</div><p className="text-xs text-muted-foreground">SKUs com estoque zero</p></CardContent></Card>
           </div>
 
           <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-2">
             {aggregatedData.stockByCollection.length > 0 && (
               <Card id="chart-stock-by-collection" className="shadow-lg hover:shadow-xl transition-shadow">
-                <CardHeader>
-                  <CardTitle className="flex items-center"><ShoppingBag className="mr-2 h-5 w-5 text-primary" />Estoque por Descrição Linha Comercial</CardTitle>
-                  <CardDescription>Distribuição de estoque e SKUs pela coluna "Descrição Linha Comercial" do Excel.</CardDescription>
-                </CardHeader>
-                <CardContent className="h-[400px]">
-                  <ChartContainer config={stockByCollectionChartConfig} className="h-full w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={aggregatedData.stockByCollection} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false}/>
-                          <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/>
-                          <YAxis yAxisId="left" orientation="left" stroke="hsl(var(--primary))" tickFormatter={(value) => value.toLocaleString()}/>
-                          <YAxis yAxisId="right" orientation="right" stroke="hsl(var(--accent))" tickFormatter={(value) => value.toLocaleString()}/>
-                          <Tooltip content={<ChartTooltipContent />} />
-                          <Legend />
-                          <Bar yAxisId="left" dataKey="stock" name="Estoque" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                          <Bar yAxisId="right" dataKey="skus" name="SKUs" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </ChartContainer>
-                </CardContent>
+                <CardHeader><CardTitle className="flex items-center"><ShoppingBag className="mr-2 h-5 w-5 text-primary" />Estoque por Descrição Linha Comercial</CardTitle><CardDescription>Distribuição de estoque e SKUs pela coluna "Descrição Linha Comercial" do Excel.</CardDescription></CardHeader>
+                <CardContent className="h-[400px]"><ChartContainer config={stockByCollectionChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={aggregatedData.stockByCollection} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}><CartesianGrid strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/><YAxis yAxisId="left" orientation="left" stroke="hsl(var(--primary))" tickFormatter={(value) => value.toLocaleString()}/><YAxis yAxisId="right" orientation="right" stroke="hsl(var(--accent))" tickFormatter={(value) => value.toLocaleString()}/><Tooltip content={<ChartTooltipContent />} /><Legend /><Bar yAxisId="left" dataKey="stock" name="Estoque" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} /><Bar yAxisId="right" dataKey="skus" name="SKUs" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartContainer></CardContent>
               </Card>
             )}
-
             {aggregatedData.skuStockStatus.length > 0 && aggregatedData.totalSkus > 0 && (
               <Card id="chart-sku-stock-status" className="shadow-lg hover:shadow-xl transition-shadow">
-                <CardHeader>
-                  <CardTitle className="flex items-center"><PieChartLucide className="mr-2 h-5 w-5 text-primary" />Distribuição de SKUs (Estoque vs. Zerado)</CardTitle>
-                  <CardDescription>Proporção de SKUs com estoque e SKUs com estoque zerado.</CardDescription>
-                </CardHeader>
-                <CardContent className="h-[400px]">
-                   <ChartContainer config={skuStockStatusChartConfig} className="h-full w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Tooltip content={<ChartTooltipContent nameKey="name" />} />
-                        <Pie
-                          data={aggregatedData.skuStockStatus}
-                          dataKey="value"
-                          nameKey="name"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={120}
-                          labelLine={false}
-                          label={renderCustomizedLabel}
-                        >
-                          {aggregatedData.skuStockStatus.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Legend />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </ChartContainer>
-                </CardContent>
+                <CardHeader><CardTitle className="flex items-center"><PieChartLucide className="mr-2 h-5 w-5 text-primary" />Distribuição de SKUs (Estoque vs. Zerado)</CardTitle><CardDescription>Proporção de SKUs com estoque e SKUs com estoque zerado.</CardDescription></CardHeader>
+                <CardContent className="h-[400px]"><ChartContainer config={skuStockStatusChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><PieChart><Tooltip content={<ChartTooltipContent nameKey="name" />} /><Pie data={aggregatedData.skuStockStatus} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={120} labelLine={false} label={renderCustomizedLabel}>{aggregatedData.skuStockStatus.map((entry, index) => (<Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />))}</Pie><Legend /></PieChart></ResponsiveContainer></ChartContainer></CardContent>
               </Card>
             )}
           </div>
-
           <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-2">
             {aggregatedData.collectionRupturePercentage.length > 0 && (
               <Card id="chart-rupture-by-collection" className="shadow-lg hover:shadow-xl transition-shadow">
-                <CardHeader>
-                  <CardTitle className="flex items-center"><Percent className="mr-2 h-5 w-5 text-destructive" />Ruptura (%) por Descrição Linha Comercial</CardTitle>
-                  <CardDescription>Porcentagem de SKUs com estoque zero em cada descrição linha comercial.</CardDescription>
-                </CardHeader>
-                <CardContent className="h-[400px]">
-                  <ChartContainer config={collectionRuptureChartConfig} className="h-full w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={aggregatedData.collectionRupturePercentage} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                            <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/>
-                            <YAxis
-                              tickFormatter={(value) => `${value}%`}
-                              domain={[0, 'dataMax + 5']}
-                              allowDecimals={false}
-                            />
-                            <Tooltip
-                              content={<ChartTooltipContent />}
-                              formatter={(value: number) => `${value.toFixed(2)}%`}
-                            />
-                            <Legend />
-                            <Bar dataKey="rupturePercentage" name="Ruptura (%)" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} />
-                        </BarChart>
-                    </ResponsiveContainer>
-                    </ChartContainer>
-                </CardContent>
+                <CardHeader><CardTitle className="flex items-center"><Percent className="mr-2 h-5 w-5 text-destructive" />Ruptura (%) por Descrição Linha Comercial</CardTitle><CardDescription>Porcentagem de SKUs com estoque zero em cada descrição linha comercial.</CardDescription></CardHeader>
+                <CardContent className="h-[400px]"><ChartContainer config={collectionRuptureChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={aggregatedData.collectionRupturePercentage} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} height={80} tick={{fontSize: 12}}/><YAxis tickFormatter={(value) => `${value}%`} domain={[0, 'dataMax + 5']} allowDecimals={false}/><Tooltip content={<ChartTooltipContent />} formatter={(value: number) => `${value.toFixed(2)}%`} /><Legend /><Bar dataKey="rupturePercentage" name="Ruptura (%)" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartContainer></CardContent>
               </Card>
             )}
-
             {aggregatedData.skusBySize.length > 0 && (
               <Card id="chart-skus-by-size" className="shadow-lg hover:shadow-xl transition-shadow">
-                <CardHeader>
-                  <CardTitle className="flex items-center"><Ruler className="mr-2 h-5 w-5 text-accent" />SKUs por Tamanho (Excel)</CardTitle>
-                  <CardDescription>Distribuição de SKUs (com e sem estoque) por tamanho (coluna "Tamanho" do Excel).</CardDescription>
-                </CardHeader>
-                <CardContent className="h-[400px]">
-                  <ChartContainer config={skusBySizeChartConfig} className="h-full w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={aggregatedData.skusBySize} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}>
-                              <CartesianGrid strokeDasharray="3 3" horizontal={false}/>
-                              <XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/>
-                              <YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/>
-                              <Tooltip content={<ChartTooltipContent />} />
-                              <Legend />
-                              <Bar dataKey="skusWithStock" name="SKUs c/ Estoque" fill="hsl(var(--chart-2))" stackId="size" radius={[0, 4, 4, 0]} />
-                              <Bar dataKey="skusWithoutStock" name="SKUs s/ Estoque" fill="hsl(var(--destructive))" stackId="size" radius={[0, 4, 4, 0]}/>
-                          </BarChart>
-                      </ResponsiveContainer>
-                    </ChartContainer>
-                </CardContent>
+                <CardHeader><CardTitle className="flex items-center"><Ruler className="mr-2 h-5 w-5 text-accent" />SKUs por Tamanho (Excel)</CardTitle><CardDescription>Distribuição de SKUs (com e sem estoque) por tamanho (coluna "Tamanho" do Excel).</CardDescription></CardHeader>
+                <CardContent className="h-[400px]"><ChartContainer config={skusBySizeChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={aggregatedData.skusBySize} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false}/><XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/><YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/><Tooltip content={<ChartTooltipContent />} /><Legend /><Bar dataKey="skusWithStock" name="SKUs c/ Estoque" fill="hsl(var(--chart-2))" stackId="size" radius={[0, 4, 4, 0]} /><Bar dataKey="skusWithoutStock" name="SKUs s/ Estoque" fill="hsl(var(--destructive))" stackId="size" radius={[0, 4, 4, 0]}/></BarChart></ResponsiveContainer></ChartContainer></CardContent>
               </Card>
             )}
           </div>
-
           <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-2">
             {aggregatedData.stockByPrint.length > 0 && (
               <Card id="chart-stock-by-print" className="shadow-lg hover:shadow-xl transition-shadow">
-                <CardHeader>
-                  <CardTitle className="flex items-center"><Palette className="mr-2 h-5 w-5" style={{color: 'hsl(var(--chart-4))'}} />Estoque por Estampa (Top 15 - Coluna Descrição)</CardTitle>
-                  <CardDescription>Distribuição de estoque pelas principais estampas (extraído da coluna H: 'Descrição' do Excel).</CardDescription>
-                </CardHeader>
-                <CardContent className="h-[400px]">
-                  <ChartContainer config={stockByPrintChartConfig} className="h-full w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={aggregatedData.stockByPrint} margin={{ top: 5, right: 20, left: 10, bottom: 90 }}>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false}/>
-                          <XAxis dataKey="name" angle={-60} textAnchor="end" interval={0} height={100} tick={{fontSize: 10}}/>
-                          <YAxis tickFormatter={(value) => value.toLocaleString()}/>
-                          <Tooltip content={<ChartTooltipContent />} />
-                          <Legend />
-                          <Bar dataKey="stock" name="Estoque" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </ChartContainer>
-                </CardContent>
+                <CardHeader><CardTitle className="flex items-center"><Palette className="mr-2 h-5 w-5" style={{color: 'hsl(var(--chart-4))'}} />Estoque por Estampa (Top 15 - Coluna Descrição)</CardTitle><CardDescription>Distribuição de estoque pelas principais estampas (extraído da coluna H: 'Descrição' do Excel).</CardDescription></CardHeader>
+                <CardContent className="h-[400px]"><ChartContainer config={stockByPrintChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={aggregatedData.stockByPrint} margin={{ top: 5, right: 20, left: 10, bottom: 90 }}><CartesianGrid strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" angle={-60} textAnchor="end" interval={0} height={100} tick={{fontSize: 10}}/><YAxis tickFormatter={(value) => value.toLocaleString()}/><Tooltip content={<ChartTooltipContent />} /><Legend /><Bar dataKey="stock" name="Estoque" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartContainer></CardContent>
               </Card>
             )}
-
             {aggregatedData.skusByProductType.length > 0 && (
               <Card id="chart-skus-by-product-type" className="shadow-lg hover:shadow-xl transition-shadow">
-                <CardHeader>
-                  <CardTitle className="flex items-center"><Box className="mr-2 h-5 w-5" style={{color: 'hsl(var(--chart-5))'}} />SKUs por Tipo de Produto (Coluna Tipo. Produto)</CardTitle>
-                  <CardDescription>Distribuição de SKUs (com e sem estoque) por tipo (coluna "Tipo. Produto" do Excel).</CardDescription>
-                </CardHeader>
-                <CardContent className="h-[400px]">
-                  <ChartContainer config={skusByProductTypeChartConfig} className="h-full w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={aggregatedData.skusByProductType} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}>
-                              <CartesianGrid strokeDasharray="3 3" horizontal={false}/>
-                              <XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/>
-                              <YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/>
-                              <Tooltip content={<ChartTooltipContent />} />
-                              <Legend />
-                              <Bar dataKey="skusWithStock" name="SKUs c/ Estoque" fill="hsl(var(--chart-2))" stackId="type" radius={[0, 4, 4, 0]} />
-                              <Bar dataKey="skusWithoutStock" name="SKUs s/ Estoque" fill="hsl(var(--destructive))" stackId="type" radius={[0, 4, 4, 0]}/>
-                          </BarChart>
-                      </ResponsiveContainer>
-                    </ChartContainer>
-                </CardContent>
+                <CardHeader><CardTitle className="flex items-center"><Box className="mr-2 h-5 w-5" style={{color: 'hsl(var(--chart-5))'}} />SKUs por Tipo de Produto (Coluna Tipo. Produto)</CardTitle><CardDescription>Distribuição de SKUs (com e sem estoque) por tipo (coluna "Tipo. Produto" do Excel).</CardDescription></CardHeader>
+                <CardContent className="h-[400px]"><ChartContainer config={skusByProductTypeChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={aggregatedData.skusByProductType} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false}/><XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/><YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/><Tooltip content={<ChartTooltipContent />} /><Legend /><Bar dataKey="skusWithStock" name="SKUs c/ Estoque" fill="hsl(var(--chart-2))" stackId="type" radius={[0, 4, 4, 0]} /><Bar dataKey="skusWithoutStock" name="SKUs s/ Estoque" fill="hsl(var(--destructive))" stackId="type" radius={[0, 4, 4, 0]}/></BarChart></ResponsiveContainer></ChartContainer></CardContent>
               </Card>
             )}
           </div>
-
           {aggregatedData.collectionSkuStatus.length > 0 && (
             <Card id="chart-collection-sku-status" className="shadow-lg hover:shadow-xl transition-shadow">
-                <CardHeader>
-                <CardTitle className="flex items-center"><BarChartHorizontal className="mr-2 h-5 w-5 text-primary" />Status de SKUs por Descrição Linha Comercial (Ativos vs. Zerados)</CardTitle>
-                <CardDescription>Contagem de SKUs ativos (com estoque) e zerados em cada descrição linha comercial.</CardDescription>
-                </CardHeader>
-                <CardContent className="h-[400px]">
-                <ChartContainer config={collectionSkuStatusChartConfig} className="h-full w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={aggregatedData.collectionSkuStatus} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                            <XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/>
-                            <YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/>
-                            <Tooltip content={<ChartTooltipContent />} />
-                            <Legend />
-                            <Bar dataKey="activeSkus" name="SKUs Ativos" fill="hsl(var(--chart-1))" stackId="collection" radius={[0, 4, 4, 0]}/>
-                            <Bar dataKey="zeroStockSkus" name="SKUs Zerados" fill="hsl(var(--destructive))" stackId="collection" radius={[0, 4, 4, 0]}/>
-                        </BarChart>
-                    </ResponsiveContainer>
-                    </ChartContainer>
-                </CardContent>
+                <CardHeader><CardTitle className="flex items-center"><BarChartHorizontal className="mr-2 h-5 w-5 text-primary" />Status de SKUs por Descrição Linha Comercial (Ativos vs. Zerados)</CardTitle><CardDescription>Contagem de SKUs ativos (com estoque) e zerados em cada descrição linha comercial.</CardDescription></CardHeader>
+                <CardContent className="h-[400px]"><ChartContainer config={collectionSkuStatusChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={aggregatedData.collectionSkuStatus} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} /><XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/><YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/><Tooltip content={<ChartTooltipContent />} /><Legend /><Bar dataKey="activeSkus" name="SKUs Ativos" fill="hsl(var(--chart-1))" stackId="collection" radius={[0, 4, 4, 0]}/><Bar dataKey="zeroStockSkus" name="SKUs Zerados" fill="hsl(var(--destructive))" stackId="collection" radius={[0, 4, 4, 0]}/></BarChart></ResponsiveContainer></ChartContainer></CardContent>
             </Card>
             )}
         </>
