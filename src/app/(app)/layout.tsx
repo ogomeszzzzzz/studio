@@ -17,10 +17,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { cn } from '@/lib/utils';
-import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
-import { collection, query, where, onSnapshot, type Unsubscribe, type DocumentData } from 'firebase/firestore';
-import { ToastAction } from "@/components/ui/toast";
-import { Badge } from '@/components/ui/badge'; // Added import for Badge
+import { Badge } from '@/components/ui/badge';
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -33,34 +30,36 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { toast } = useToast();
-  const { currentUser, logout, isLoading: authContextLoading, setCurrentUser: setAuthContextUser } = useAuth();
+  const { currentUser, logout, isLoading: authContextLoading } = useAuth();
   const [activeAccordionItem, setActiveAccordionItem] = useState<string | undefined>(undefined);
-  const [notifiedPendingUserIds, setNotifiedPendingUserIds] = useState<Set<string>>(new Set());
   const [isUserAdmin, setIsUserAdmin] = useState(false);
+  const [isUserApproved, setIsUserApproved] = useState(false);
+  const [isUserDataLoaded, setIsUserDataLoaded] = useState(false);
+
 
   useEffect(() => {
     if (!authContextLoading && currentUser) {
       const isAdminByFlag = currentUser.isAdmin === true;
       const isAdminByEmail = currentUser.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase();
       
-      // For this application, being the specific admin email OR having the isAdmin flag is enough.
-      // The isAdmin flag is set during registration for the primary admin.
       setIsUserAdmin(isAdminByEmail || isAdminByFlag);
+      setIsUserApproved(currentUser.isApproved === true);
+      setIsUserDataLoaded(true);
 
       if (isAdminByFlag && !isAdminByEmail) {
         console.warn("AppLayout: User has isAdmin flag true, but email does not match ADMIN_PRIMARY_EMAIL_CLIENT. Proceeding as admin based on flag.");
       }
-       if (!isAdminByFlag && isAdminByEmail && currentUser.email === ADMIN_PRIMARY_EMAIL_CLIENT) {
-        // This specific case is important for the primary admin who might not have the flag set yet if created manually
-        // or if the flag logic in registration wasn't perfect initially.
+      if (!isAdminByFlag && isAdminByEmail) {
         console.log(`AppLayout: User ${currentUser.email} matches ADMIN_PRIMARY_EMAIL_CLIENT, ensuring admin status.`);
-        setIsUserAdmin(true);
+        setIsUserAdmin(true); // Ensure primary admin is always admin
+        setIsUserApproved(true); // Ensure primary admin is always approved
       }
-
 
     } else if (!authContextLoading && !currentUser) {
       setIsUserAdmin(false);
-      if (pathname !== '/login' && pathname !== '/register') { // Avoid redirect loop if already on public pages
+      setIsUserApproved(false);
+      setIsUserDataLoaded(true);
+      if (pathname !== '/login' && pathname !== '/register') {
         router.replace('/login');
       }
     }
@@ -77,93 +76,14 @@ export default function AppLayout({ children }: AppLayoutProps) {
     }
   }, [pathname]);
 
-  // Firestore listener for new pending users (admin only)
-  useEffect(() => {
-    let unsubscribe: Unsubscribe | undefined;
-    console.log("AppLayout: Admin listener check. isUserAdmin:", isUserAdmin, "firestore available:", !!firestore, "init error:", firestoreClientInitializationError);
-
-    if (isUserAdmin && firestore && !firestoreClientInitializationError) {
-      console.log("AppLayout: Admin detected, setting up pending users listener.");
-      const q = query(
-        collection(firestore, "auth_users"),
-        where("pendingApproval", "==", true),
-        where("isApproved", "==", false)
-      );
-
-      unsubscribe = onSnapshot(q, (querySnapshot) => {
-        const currentNotifiedIds = new Set(notifiedPendingUserIds); // Work with a copy
-        let newNotificationsMade = false;
-
-        querySnapshot.forEach((docSnap) => {
-          const userData = docSnap.data() as DocumentData;
-          const userId = docSnap.id; // email is the doc ID
-
-          if (!notifiedPendingUserIds.has(userId)) { // Check against original set
-            console.log(`AppLayout: New pending user detected - ${userId}`);
-            toast({
-              title: "Novo Usuário Pendente",
-              description: `${userData.name || userId} aguarda sua aprovação.`,
-              action: (
-                <ToastAction altText="Ver Aprovações" onClick={() => router.push('/admin')}>
-                  Ver Aprovações
-                </ToastAction>
-              ),
-              duration: 15000, // Increased duration
-            });
-            currentNotifiedIds.add(userId); // Add to the copy
-            newNotificationsMade = true;
-          }
-        });
-
-        if (newNotificationsMade) {
-          setNotifiedPendingUserIds(currentNotifiedIds); // Update state with the new set
-        }
-      }, (error) => {
-        console.error("AppLayout: Error listening to pending users:", error);
-        // Avoid overly aggressive toasting for listener errors if they are frequent.
-        // Consider logging to a more persistent system in production.
-        if (error.message.includes("Missing or insufficient permissions")) {
-            console.warn("AppLayout: Firestore permission error for pending users listener. Check Firestore rules for `auth_users` list access.");
-            // Optionally, toast only once or less frequently for permission issues.
-            toast({
-              title: "Erro de Permissão (Admin)",
-              description: `Não foi possível verificar novos usuários pendentes devido a permissões. Verifique as regras do Firestore.`,
-              variant: "destructive",
-              duration: 20000
-            });
-        } else {
-            toast({
-            title: "Erro de Notificação de Admin",
-            description: `Não foi possível verificar novos usuários pendentes: ${error.message}.`,
-            variant: "destructive",
-            });
-        }
-      });
-    } else {
-      if (isUserAdmin && (firestoreClientInitializationError || !firestore)) {
-        console.warn("AppLayout: Firestore not available for admin listener. Error:", firestoreClientInitializationError);
-      }
-    }
-
-    return () => {
-      if (unsubscribe) {
-        console.log("AppLayout: Cleaning up pending users listener.");
-        unsubscribe();
-      }
-    };
-  // notifiedPendingUserIds is included because we read it to check if a user was already notified
-  // router and toast are stable, firestoreClientInitializationError is a static error string
-  // isUserAdmin and firestore instance are the main drivers for setting up/tearing down.
-  }, [isUserAdmin, firestore, firestoreClientInitializationError, toast, router, notifiedPendingUserIds]);
-
 
   const handleSignOut = () => {
-    logout(); // AuthContext handles localStorage removal and currentUser state
+    logout();
     toast({ title: 'Logout', description: 'Você foi desconectado.' });
     // router.push('/login'); // AuthContext or HomePage will handle redirect
   };
 
-  if (authContextLoading) {
+  if (authContextLoading || (!isUserDataLoaded && !authContextLoading && currentUser)) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -172,23 +92,17 @@ export default function AppLayout({ children }: AppLayoutProps) {
     );
   }
 
-  if (!currentUser) {
-     // This case should ideally be caught by the useEffect that redirects to /login if not on login/register page
-    if (pathname !== '/login' && pathname !== '/register') {
-        // To prevent infinite loops if already on login page and no user
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-background">
-                <Loader2 className="h-12 w-12 animate-spin text-primary" />
-                <p className="ml-4 text-lg text-foreground">Redirecionando para o login...</p>
-            </div>
-        );
-    }
-    // If on login/register page and no currentUser, allow children (the login/register page) to render
+  if (!currentUser && (pathname !== '/login' && pathname !== '/register')) {
+    return (
+        <div className="flex items-center justify-center min-h-screen bg-background">
+            <Loader2 className="h-12 w-12 animate-spin text-primary" />
+            <p className="ml-4 text-lg text-foreground">Redirecionando para o login...</p>
+        </div>
+    );
   }
   
-  // Special handling for the primary admin email to always be considered approved
-  const isPrimaryAdmin = currentUser?.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase();
-  const effectivelyApproved = isPrimaryAdmin || currentUser?.isApproved;
+  // Special handling for the primary admin email to always be considered approved.
+  const effectivelyApproved = (currentUser?.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase()) || isUserApproved;
 
   if (currentUser && !effectivelyApproved && currentUser.pendingApproval) {
     return (
@@ -262,18 +176,14 @@ export default function AppLayout({ children }: AppLayoutProps) {
     </header>
   );
 
-  // If not loading, and no current user, but on login/register page, render children
   if (!authContextLoading && !currentUser && (pathname === '/login' || pathname === '/register')) {
     return <>{children}</>;
   }
   
-  // If not loading, and no current user, and NOT on login/register (should have been redirected, but as a safeguard)
   if (!authContextLoading && !currentUser) {
-     // This should ideally not be reached if redirection logic is perfect
      return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Redirecionando...</p></div>;
   }
   
-  // If effectively approved or the children are public pages not needing approval check (which isn't the case for (app) layout)
   if (currentUser && effectivelyApproved) {
     return (
         <div className="flex min-h-screen">
@@ -360,10 +270,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
         </div>
     );
   }
-  // If none of the above, it means currentUser exists but is not approved, or auth is still loading
-  // The specific messages for "Pending Approval" or "Access Denied" are handled above.
-  // If it's still authContextLoading, the top-level loader handles it.
-  // This return is a fallback for completeness, though other conditions should catch specific states.
+
   return (
     <div className="flex items-center justify-center min-h-screen bg-background">
       <Loader2 className="h-12 w-12 animate-spin text-primary" />
