@@ -2,40 +2,39 @@
 rules_version = '2';
 
 service cloud.firestore {
-
-  // Rules for the (default) database, where auth_users collection will reside
   match /databases/(default)/documents {
-    // Collection for user authentication and profiles
-    match /auth_users/{userEmail} {
-      // Allow client to get its own user profile to check approval status
-      // This is needed for the AppLayout to function correctly.
-      allow get: if true; // Simplified for prototype, ideally check if requesting userEmail matches some client context
 
-      // Server Actions (using Admin SDK) will handle create, update, delete.
-      // Deny direct client modification of user profiles.
+    // Coleção para perfis de usuário e autenticação customizada
+    match /auth_users/{userEmail} {
+      // Permite que o cliente leia o documento de um usuário específico (GET)
+      // Isso é necessário para o AppLayout verificar isApproved e isAdmin.
+      allow get: if true;
+
+      // Bloqueia a listagem de todos os usuários ou modificações diretas pelo cliente.
+      // Registro e aprovação são feitos por Server Actions (que usam Admin SDK e ignoram estas regras).
       allow list, create, update, delete: if false;
     }
 
-    // Deny access to any other collections in the (default) database by default.
-    match /{document=**} {
-      allow read, write: if false;
-    }
-  }
-
-  // Rules for the "ecom" named database, where user_products collection will reside
-  match /databases/ecom/documents {
-    // User-specific product data
-    match /user_products/{userEmail}/uploaded_products/{document=**} {
-      // For prototype: Allow client to read/write/delete its own product data.
-      // In a production app, you'd want to secure this further, possibly by
-      // verifying that the userEmail in the path matches the authenticated user
-      // (which is hard without Firebase Auth tokens, relying on client to send correct userEmail).
-      // For now, to make client-side operations work:
-      allow read, write: if true; // More permissive for client-side prototype
+    // Coleção de nível raiz para os dados de produtos de cada usuário
+    match /user_products/{userEmail} {
+      // Esta regra é um placeholder, as permissões reais são na subcoleção abaixo.
+      // Pode ser útil para permitir que um usuário crie/delete seu próprio documento user_products se necessário.
+      // Por agora, vamos manter simples.
+      allow read, write: if false; // Geralmente não se interage diretamente com este documento.
     }
 
-    // Deny access to any other collections in the "ecom" database by default.
-    match /{document=**} {
+    // Subcoleção onde os produtos carregados via Excel são armazenados
+    match /user_products/{userEmail}/uploaded_products/{documentId} {
+      // Permite LISTAR documentos na coleção (necessário para getDocs()).
+      // Permite LER documentos individuais (necessário para getDoc(), ex: _metadata).
+      // Permite CRIAR, ATUALIZAR, DELETAR documentos (necessário para writeBatch e setDoc).
+      // Para fins de protótipo, estamos permitindo essas operações do lado do cliente.
+      // {documentId} pode ser um ID de produto ou a string "_metadata".
+      allow read, write, delete: if true;
+    }
+
+    // Regra de fallback para negar explicitamente acesso a quaisquer outros caminhos
+    match /{path=**} {
       allow read, write: if false;
     }
   }
