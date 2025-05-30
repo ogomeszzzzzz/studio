@@ -2,7 +2,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,23 +25,40 @@ interface AppLayoutProps {
   children: ReactNode;
 }
 
+// Fallback admin email if NEXT_PUBLIC_ADMIN_EMAIL is not set
 const ADMIN_PRIMARY_EMAIL_CLIENT = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br";
 
 export default function AppLayout({ children }: AppLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { toast } = useToast();
-  const { currentUser, logout, isLoading: authContextLoading } = useAuth();
+  const { currentUser, logout, isLoading: authContextLoading, setCurrentUser: setAuthContextUser } = useAuth();
   const [activeAccordionItem, setActiveAccordionItem] = useState<string | undefined>(undefined);
   const [notifiedPendingUserIds, setNotifiedPendingUserIds] = useState<Set<string>>(new Set());
-
-  const isUserAdmin = currentUser?.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase() && currentUser?.isAdmin === true;
+  const [isUserAdmin, setIsUserAdmin] = useState(false);
 
   useEffect(() => {
-    if (!authContextLoading && !currentUser) {
+    if (!authContextLoading && currentUser) {
+      // Primary check for admin status is the isAdmin flag from the user profile
+      const isAdminByFlag = currentUser.isAdmin === true;
+      // Fallback or secondary check via email if needed, but isAdmin flag should be source of truth
+      const isAdminByEmail = currentUser.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase();
+      
+      setIsUserAdmin(isAdminByFlag); // Use isAdmin flag from profile
+
+      if (isAdminByFlag && !isAdminByEmail) {
+        console.warn("AppLayout: User has isAdmin flag true, but email does not match ADMIN_PRIMARY_EMAIL_CLIENT. Proceeding as admin based on flag.");
+      }
+      if (!isAdminByFlag && isAdminByEmail) {
+        console.warn("AppLayout: User email matches ADMIN_PRIMARY_EMAIL_CLIENT, but isAdmin flag is not true. User will NOT be treated as admin. This might need correction in Firestore for the admin user.");
+      }
+
+    } else if (!authContextLoading && !currentUser) {
+      setIsUserAdmin(false);
       router.replace('/login');
     }
   }, [authContextLoading, currentUser, router]);
+
 
   useEffect(() => {
     if (pathname?.startsWith('/admin')) {
@@ -57,6 +74,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
   useEffect(() => {
     let unsubscribe: Unsubscribe | undefined;
 
+    console.log("AppLayout: Admin listener check. isUserAdmin:", isUserAdmin, "firestore available:", !!firestore, "init error:", firestoreClientInitializationError);
+
     if (isUserAdmin && firestore && !firestoreClientInitializationError) {
       console.log("AppLayout: Admin detected, setting up pending users listener.");
       const q = query(
@@ -66,12 +85,12 @@ export default function AppLayout({ children }: AppLayoutProps) {
       );
 
       unsubscribe = onSnapshot(q, (querySnapshot) => {
-        const currentNotifiedIds = new Set(notifiedPendingUserIds); // Create a mutable copy for this snapshot
+        const currentNotifiedIds = new Set(notifiedPendingUserIds);
         let newNotifications = false;
 
-        querySnapshot.forEach((doc) => {
-          const userData = doc.data() as DocumentData; // Cast to DocumentData
-          const userId = doc.id; // email is the doc ID
+        querySnapshot.forEach((docSnap) => {
+          const userData = docSnap.data() as DocumentData;
+          const userId = docSnap.id; // email is the doc ID
 
           if (!currentNotifiedIds.has(userId)) {
             console.log(`AppLayout: New pending user detected - ${userId}`);
@@ -83,7 +102,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                   Ver Aprovações
                 </ToastAction>
               ),
-              duration: 15000, // Longer duration for important notifications
+              duration: 15000,
             });
             currentNotifiedIds.add(userId);
             newNotifications = true;
@@ -96,8 +115,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
       }, (error) => {
         console.error("AppLayout: Error listening to pending users:", error);
         toast({
-          title: "Erro de Notificação",
-          description: "Não foi possível verificar novos usuários pendentes.",
+          title: "Erro de Notificação de Admin",
+          description: `Não foi possível verificar novos usuários pendentes: ${error.message}. Verifique as regras do Firestore.`,
           variant: "destructive",
         });
       });
@@ -107,18 +126,18 @@ export default function AppLayout({ children }: AppLayoutProps) {
       }
     }
 
-    // Cleanup listener on component unmount or if user is no longer admin
     return () => {
       if (unsubscribe) {
         console.log("AppLayout: Cleaning up pending users listener.");
         unsubscribe();
       }
     };
-  }, [isUserAdmin, firestore, toast, router, notifiedPendingUserIds]); // notifiedPendingUserIds is needed to use its current value inside onSnapshot
+  }, [isUserAdmin, firestore, firestoreClientInitializationError, toast, router, notifiedPendingUserIds]);
 
   const handleSignOut = () => {
-    logout();
+    logout(); // AuthContext handles localStorage removal
     toast({ title: 'Logout', description: 'Você foi desconectado.' });
+    router.push('/login'); // Ensure redirect after logout
   };
 
   if (authContextLoading) {
@@ -131,6 +150,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   }
 
   if (!currentUser) {
+     // This case should ideally be caught by the useEffect that redirects to /login
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -138,11 +158,12 @@ export default function AppLayout({ children }: AppLayoutProps) {
       </div>
     );
   }
+  
+  // Special handling for the primary admin email to always be considered approved
+  // The main check is now currentUser.isApproved from AuthContext, which should come from Firestore.
+  const effectivelyApproved = currentUser.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase() || currentUser.isApproved;
 
-  // User is logged in, now check approval status (unless it's the special admin email)
-  const needsApprovalCheck = currentUser.email.toLowerCase() !== ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase();
-
-  if (needsApprovalCheck && !currentUser.isApproved && currentUser.pendingApproval) {
+  if (!effectivelyApproved && currentUser.pendingApproval) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6">
         <Card className="w-full max-w-md text-center shadow-lg">
@@ -165,7 +186,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     );
   }
 
-  if (needsApprovalCheck && !currentUser.isApproved && !currentUser.pendingApproval) {
+  if (!effectivelyApproved && !currentUser.pendingApproval) {
       return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6">
         <Card className="w-full max-w-md text-center shadow-lg">
@@ -188,7 +209,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
     );
   }
 
-  // If user is approved (or is the special admin), render the main app layout
   const AuthenticatedHeader = () => (
     <header className="bg-card border-b border-border shadow-sm sticky top-0 z-50">
       <div className="container mx-auto px-4 md:px-6 lg:px-8 py-3 flex items-center justify-between">
@@ -203,6 +223,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <UserCircle className="h-5 w-5" />
               <span>{currentUser.email}</span>
+               {isUserAdmin && <Badge variant="outline" className="border-green-600 text-green-700">Admin</Badge>}
             </div>
           )}
           <Button variant="outline" size="sm" onClick={handleSignOut}>

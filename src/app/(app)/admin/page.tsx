@@ -11,6 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import type { UserProfile } from '@/types';
 import { getPendingUsers, approveUserInFirestore } from '@/app/actions/admin';
+import { Badge } from '@/components/ui/badge';
 
 // Fallback admin email for client-side checks, primary source should be context or env.
 const ADMIN_PRIMARY_EMAIL_CLIENT = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br";
@@ -18,43 +19,48 @@ const ADMIN_PRIMARY_EMAIL_CLIENT = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "gusta
 export default function AdminPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, isLoading: authLoading } = useAuth(); // AuthContext provides the current user state
+  const { currentUser, isLoading: authLoading } = useAuth();
   const [isDefinitelyAdmin, setIsDefinitelyAdmin] = useState(false);
   const [pendingUsers, setPendingUsers] = useState<UserProfile[]>([]);
-  const [isLoadingPendingUsers, setIsLoadingPendingUsers] = useState(false);
+  const [isLoadingPage, setIsLoadingPage] = useState(true); // Combined loading state
   const [isApproving, startApproveTransition] = useTransition();
+
 
   useEffect(() => {
     console.log("AdminPage: useEffect for auth check triggered. authLoading:", authLoading, "currentUser:", currentUser);
     if (!authLoading) {
-      if (currentUser && currentUser.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase() && currentUser.isAdmin) {
+      if (currentUser && currentUser.isAdmin && currentUser.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase()) {
         console.log("AdminPage: User is definitely admin.");
         setIsDefinitelyAdmin(true);
       } else {
-        console.log("AdminPage: User is NOT admin or currentUser is null/not admin.");
+        console.log("AdminPage: User is NOT admin or currentUser is null/not admin based on flag/email.");
         setIsDefinitelyAdmin(false);
-        if (!currentUser) { // If no user at all, redirect to login (should be handled by AppLayout ideally)
-            router.replace('/login');
+        if (!currentUser) {
+            router.replace('/login'); // Should be handled by AppLayout, but good safeguard
         }
       }
+      setIsLoadingPage(false); // Auth check complete
+    } else {
+      setIsLoadingPage(true); // Auth is still loading
     }
   }, [authLoading, currentUser, router]);
 
   const fetchPendingUsers = useCallback(async () => {
-    console.log("AdminPage: fetchPendingUsers called. currentUser:", currentUser, "isDefinitelyAdmin:", isDefinitelyAdmin);
-    if (!currentUser || !isDefinitelyAdmin) {
-      console.log("AdminPage: fetchPendingUsers prerequisites not met (no current user or not admin). Aborting fetch.");
-      setIsLoadingPendingUsers(false);
-      if (currentUser && !isDefinitelyAdmin) { // Logged in but not admin, no need to show loading for pending users
-          setPendingUsers([]);
+    if (!currentUser || !currentUser.isAdmin) { // Rely on isAdmin flag from context
+      console.log("AdminPage: fetchPendingUsers prerequisites not met (no current user or not admin flag). Aborting fetch.");
+      setPendingUsers([]);
+      if (currentUser && !currentUser.isAdmin) {
+        // Already determined not admin, no need to show loading for pending users
       }
       return;
     }
-    setIsLoadingPendingUsers(true);
+
+    console.log("AdminPage: Admin identified, attempting to fetch pending users. Admin email:", currentUser.email);
+    // Set loading specifically for this fetch if not already covered by general page load
+    if (pendingUsers.length === 0) setIsLoadingPage(true); 
+    
     try {
-      // Pass the admin's email for server-side verification context
-      console.log(`AdminPage: Calling getPendingUsers server action with admin email: ${currentUser.email}`);
-      const result = await getPendingUsers(currentUser.email);
+      const result = await getPendingUsers(currentUser.email); // Pass admin's email for server-side context
       console.log("AdminPage: getPendingUsers server action result:", result);
       if (result.status === 'success' && result.users) {
         setPendingUsers(result.users);
@@ -71,29 +77,29 @@ export default function AdminPage() {
       toast({ title: "Erro Crítico ao Buscar Usuários", description: errorMessage, variant: "destructive" });
       setPendingUsers([]);
     } finally {
-      setIsLoadingPendingUsers(false);
+       if(isDefinitelyAdmin) setIsLoadingPage(false); // Only stop loading if admin has been confirmed
     }
-  }, [currentUser, toast, isDefinitelyAdmin]); // Added isDefinitelyAdmin
+  }, [currentUser, toast, isDefinitelyAdmin, pendingUsers.length]); // Added isDefinitelyAdmin to deps
 
   useEffect(() => {
-    console.log("AdminPage: useEffect for fetching pending users triggered. authLoading:", authLoading, "isDefinitelyAdmin:", isDefinitelyAdmin);
-    if (!authLoading && isDefinitelyAdmin) {
+    // This effect triggers fetching users once admin status is confirmed and page isn't loading auth
+    console.log("AdminPage: useEffect for fetching pending users. isLoadingPage:", isLoadingPage, "isDefinitelyAdmin:", isDefinitelyAdmin);
+    if (!isLoadingPage && isDefinitelyAdmin) {
       fetchPendingUsers();
-    } else if (!authLoading && !isDefinitelyAdmin) {
+    } else if (!isLoadingPage && !isDefinitelyAdmin) {
       setPendingUsers([]); // Clear if not admin
     }
-  }, [authLoading, isDefinitelyAdmin, fetchPendingUsers]);
+  }, [isLoadingPage, isDefinitelyAdmin, fetchPendingUsers]);
 
 
   const handleApproveUser = async (userEmailToApprove: string) => {
     startApproveTransition(async () => {
-      if (!currentUser || !isDefinitelyAdmin) {
+      if (!currentUser || !currentUser.isAdmin) {
          toast({ title: "Ação não permitida", description: "Apenas administradores podem aprovar usuários.", variant: "destructive" });
          return;
       }
       console.log(`AdminPage: Attempting to approve user: ${userEmailToApprove} by admin: ${currentUser.email}`);
       try {
-        // Pass admin's email for server-side verification context
         const result = await approveUserInFirestore(currentUser.email, userEmailToApprove);
         console.log("AdminPage: approveUserInFirestore server action result:", result);
         if (result.status === 'success') {
@@ -110,8 +116,8 @@ export default function AdminPage() {
     });
   };
 
-  if (authLoading) {
-    return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Verificando permissões...</p></div>;
+  if (isLoadingPage) { // Use the combined loading state
+    return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Carregando...</p></div>;
   }
 
   if (!isDefinitelyAdmin) {
@@ -129,11 +135,8 @@ export default function AdminPage() {
     );
   }
   
-  // If currentUser is null here, it means authLoading is false, but currentUser is still null,
-  // which should have been handled by AppLayout redirecting to /login.
-  // This is a safeguard.
   if (!currentUser) {
-     console.log("AdminPage: currentUser is null after authLoading is false. Redirecting to login.");
+     console.log("AdminPage: currentUser is null after loading is false. This shouldn't happen if AppLayout works.");
      router.replace('/login');
      return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Sessão expirada. Redirecionando...</p></div>;
   }
@@ -145,18 +148,14 @@ export default function AdminPage() {
           <CardTitle className="flex items-center text-2xl">
             <ShieldCheck className="mr-3 h-7 w-7 text-primary" />
             Administração de Usuários - Aprovações Pendentes
+             {currentUser.isAdmin && <Badge variant="outline" className="ml-3 border-green-600 text-green-700">Admin Autenticado</Badge>}
           </CardTitle>
           <CardDescription>
             Aprove ou gerencie usuários que se registraram e estão aguardando aprovação para acessar o sistema.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {isLoadingPendingUsers ? (
-            <div className="flex items-center justify-center py-10">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="ml-3 text-muted-foreground">Buscando usuários pendentes...</p>
-            </div>
-          ) : pendingUsers.length === 0 ? (
+          {pendingUsers.length === 0 && !isLoadingPage ? ( // Check isLoadingPage here too
             <div className="text-center py-10">
               <Users className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
               <p className="text-muted-foreground">Nenhum usuário aguardando aprovação no momento.</p>
@@ -174,7 +173,7 @@ export default function AdminPage() {
                 </TableHeader>
                 <TableBody>
                   {pendingUsers.map((user) => (
-                    <TableRow key={user.uid}> {/* user.uid is now the email */}
+                    <TableRow key={user.uid}>
                       <TableCell className="font-medium">{user.name || 'N/A'}</TableCell>
                       <TableCell>{user.email}</TableCell>
                       <TableCell>
@@ -187,7 +186,7 @@ export default function AdminPage() {
                       <TableCell className="text-right">
                         <Button
                           size="sm"
-                          onClick={() => handleApproveUser(user.email)} // Pass email
+                          onClick={() => handleApproveUser(user.email)}
                           disabled={isApproving}
                           variant="default"
                           className="bg-green-600 hover:bg-green-700 text-white"

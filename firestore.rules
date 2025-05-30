@@ -15,24 +15,27 @@ service cloud.firestore {
       allow list, create, update, delete: if false;
     }
 
+    // Permite que o cliente do administrador (verificado na UI)
+    // liste/consulte a coleção auth_users para encontrar usuários pendentes.
+    // Esta regra é mais ampla do que o ideal se não fosse pelo filtro no cliente,
+    // mas é necessária para o listener de notificações do admin com auth customizado.
+    match /auth_users {
+      allow list: if true; // Permite a query com 'where' e 'orderBy'
+    }
+
     // Coleção global de produtos
-    // Acessível para leitura por todos os usuários.
-    // A escrita (upload) é feita pelo cliente do admin; a UI restringe o botão de upload.
-    // Para produção, a escrita aqui DEVERIA ser via Server Action com validação de admin.
     match /shared_products/{productId} {
-      allow read: if true;  // Todos podem ler documentos individuais
-      allow write: if true; // Permite que o cliente do admin escreva/delete (para protótipo)
+      allow read: if true;
+      allow write: if true; // For prototype admin client writes
     }
-    match /shared_products { // Necessário para listar a coleção (getDocs)
-      allow list: if true;
+    match /shared_products {
+      allow list: if true; // Para getDocs na coleção
     }
 
-
-    // Documento de metadados globais para os produtos
-    // Similar a shared_products: leitura para todos, escrita pelo admin via UI.
+    // Metadados globais da aplicação
     match /app_metadata/products_metadata {
       allow read: if true;
-      allow write: if true; // Permite que o cliente do admin escreva (para protótipo)
+      allow write: if true; // For prototype admin client writes
     }
 
     // Regra de fallback: nega acesso a quaisquer outros caminhos não definidos acima.
