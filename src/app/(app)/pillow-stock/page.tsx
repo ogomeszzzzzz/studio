@@ -7,7 +7,7 @@ import type { Product } from '@/types';
 import { BedDouble, Loader2, Database, Filter as FilterIcon, AlertTriangle, ShoppingBag, TrendingDown, PackageX, BarChart3, ListFilter, SortAsc, SortDesc, Clock, Zap } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { firestore } from '@/lib/firebase/config'; // No clientAuth needed
+import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
 import { collection, getDocs, doc, Timestamp, query, getDoc } from 'firebase/firestore';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Button } from '@/components/ui/button';
 import { format as formatDateFns } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
+import { useAuth } from '@/contexts/AuthContext';
 
 
 const PILLOW_PRODUCT_TYPE_EXCEL = "TRAVESSEIRO";
@@ -81,7 +81,7 @@ export default function PillowStockPage() {
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [aggregatedPillowStockState, setAggregatedPillowStockState] = useState<AggregatedPillow[]>([]);
   const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
-  const { currentUser } = useAuth(); // Get currentUser from AuthContext
+  const { currentUser, isLoading: isAuthLoading } = useAuth();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
@@ -92,45 +92,62 @@ export default function PillowStockPage() {
 
 
   useEffect(() => {
-    if (currentUser && allProducts.length === 0 && !isLoadingFirestore ) {
-      console.log(`PillowStockPage: Fetching products for user email: ${currentUser.email} because allProducts is empty.`);
-      setIsLoadingFirestore(true);
-      const fetchProducts = async () => {
-        try {
-          // Path using user's email
-          const productsColPath = `user_products/${currentUser.email}/uploaded_products`;
-          const productsCol = collection(firestore, productsColPath);
-          const snapshot = await getDocs(query(productsCol));
-          const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
-          setAllProducts(productsFromDb);
+    if (isAuthLoading) {
+      console.log("PillowStockPage: Auth context is loading...");
+      if (allProducts.length === 0) setIsLoadingFirestore(true);
+      return;
+    }
 
-          const metadataDocPath = `user_products/${currentUser.email}/_metadata`;
-          const metadataDocRef = doc(firestore, metadataDocPath);
-          const metadataDocSnap = await getDoc(metadataDocRef);
-          if (metadataDocSnap.exists()) {
-            const data = metadataDocSnap.data();
-            if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
-              setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
+    if (firestoreClientInitializationError) {
+      toast({ title: "Erro de Configuração", description: `Firebase client não inicializado: ${firestoreClientInitializationError}`, variant: "destructive", duration: Infinity });
+      setIsLoadingFirestore(false);
+      return;
+    }
+    if (!firestore) {
+      toast({ title: "Erro de Configuração", description: "Instância do Firestore não está disponível.", variant: "destructive", duration: Infinity });
+      setIsLoadingFirestore(false);
+      return;
+    }
+
+    if (currentUser) {
+      if (allProducts.length === 0) {
+        console.log(`PillowStockPage: Attempting to fetch products for user email: ${currentUser.email}`);
+        setIsLoadingFirestore(true);
+        const fetchProducts = async () => {
+          try {
+            const productsColPath = `user_products/${currentUser.email}/uploaded_products`;
+            const productsCol = collection(firestore, productsColPath);
+            const snapshot = await getDocs(query(productsCol));
+            const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
+            setAllProducts(productsFromDb);
+
+            const metadataDocPath = `user_products/${currentUser.email}/_metadata`;
+            const metadataDocRef = doc(firestore, metadataDocPath);
+            const metadataDocSnap = await getDoc(metadataDocRef);
+            if (metadataDocSnap.exists()) {
+              const data = metadataDocSnap.data();
+              if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
+                setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
+              }
             }
+          } catch (error) {
+            console.error("Error fetching products from Firestore (Pillow Stock):", error);
+            toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${(error as Error).message}`, variant: "destructive" });
+          } finally {
+            setIsLoadingFirestore(false);
           }
-
-        } catch (error) {
-          console.error("Error fetching products from Firestore (Pillow Stock):", error);
-          toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${(error as Error).message}`, variant: "destructive" });
-        } finally {
-          setIsLoadingFirestore(false);
-        }
-      };
-      fetchProducts();
-    } else if (!currentUser) {
+        };
+        fetchProducts();
+      } else {
+        setIsLoadingFirestore(false);
+      }
+    } else {
       setIsLoadingFirestore(false);
       setAllProducts([]);
       setAggregatedPillowStockState([]);
       setLastDataUpdateTimestamp(null);
-    } else if (isLoadingFirestore && !currentUser) {
-        setIsLoadingFirestore(false);
     }
-  }, [currentUser, toast, allProducts.length, isLoadingFirestore]);
+  }, [currentUser, isAuthLoading, allProducts.length, toast]);
 
   const pillowProducts = useMemo(() => {
     return allProducts.filter(p => p.productType?.toUpperCase() === PILLOW_PRODUCT_TYPE_EXCEL.toUpperCase());
@@ -236,11 +253,14 @@ export default function PillowStockPage() {
     return allProducts.length > 0 && pillowProducts.length === 0;
   }, [allProducts, pillowProducts]);
 
-
-  const isAnyDataLoading = isLoadingFirestore && allProducts.length === 0;
+  const displayLoader = (isLoadingFirestore || isAuthLoading) && allProducts.length === 0;
   const lowStockFilterThreshold = (MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE).toFixed(0);
   const goodStockFilterThreshold = (MAX_STOCK_PER_PILLOW_COLUMN * GOOD_STOCK_THRESHOLD_PERCENTAGE).toFixed(0);
 
+
+  if (displayLoader) {
+    return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Carregando dados...</p></div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -262,21 +282,14 @@ export default function PillowStockPage() {
         </div>
       )}
 
-      {isAnyDataLoading && (
-        <Card className="shadow-lg"><CardHeader><CardTitle className="flex items-center">
-              <Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" />
-              Carregando dados...
-            </CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Aguarde.</p></CardContent></Card>
-      )}
-
-      {!isAnyDataLoading && allProducts.length === 0 && (
+      {!isLoadingFirestore && !isAuthLoading && allProducts.length === 0 && (
         <Card className="shadow-lg text-center py-10"><CardHeader><CardTitle className="flex items-center justify-center text-xl">
               <Database className="mr-2 h-7 w-7 text-primary" /> Sem dados para exibir
             </CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Por favor, carregue um arquivo Excel na página do Dashboard para visualizar o estoque de travesseiros.</p>
             <p className="text-sm text-muted-foreground mt-2">Os dados da planilha serão salvos em seu perfil e carregados aqui.</p></CardContent></Card>
       )}
 
-      {!isAnyDataLoading && allProducts.length > 0 && (
+      {!isLoadingFirestore && !isAuthLoading && allProducts.length > 0 && (
         <>
           <Card className="shadow-md border-primary/30 border-l-4">
             <CardHeader><CardTitle className="flex items-center"><BarChart3 className="mr-2 h-5 w-5 text-primary" />Indicadores Chave de Travesseiros</CardTitle></CardHeader>
@@ -385,3 +398,5 @@ export default function PillowStockPage() {
     </div>
   );
 }
+
+    
