@@ -27,7 +27,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
+import { doc, onSnapshot } from 'firebase/firestore';
+import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
+import type { UserProfile } from '@/types';
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -54,7 +56,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
       
       const effectiveIsAdmin = isAdminByEmail || isAdminByFlag;
       setIsUserAdmin(effectiveIsAdmin);
-      // For admin, approval is implicit. For others, check isApproved flag.
       setIsUserApproved(effectiveIsAdmin || currentUser.isApproved === true);
       setIsUserDataLoaded(true);
 
@@ -64,15 +65,64 @@ export default function AppLayout({ children }: AppLayoutProps) {
       console.log("AppLayout: No current user, and auth not loading. Redirecting to login.");
       setIsUserAdmin(false);
       setIsUserApproved(false);
-      setIsUserDataLoaded(true); // Mark as loaded to prevent infinite loader
+      setIsUserDataLoaded(true); 
       if (pathname !== '/login' && pathname !== '/register') {
         router.replace('/login');
       }
     } else if (authContextLoading) {
       console.log("AppLayout: Auth context is still loading...");
-      setIsUserDataLoaded(false); // Waiting for auth context
+      setIsUserDataLoaded(false); 
     }
   }, [authContextLoading, currentUser, router, pathname]);
+
+  // Real-time listener for current user's approval status
+  useEffect(() => {
+    if (currentUser && currentUser.email && firestore && !firestoreClientInitializationError) {
+      // Do not apply this forced logout to the primary admin
+      if (currentUser.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase()) {
+        return;
+      }
+
+      const userDocRef = doc(firestore, "auth_users", currentUser.email.toLowerCase());
+      const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const userData = docSnap.data() as UserProfile;
+          console.log("AppLayout: Real-time update for user:", currentUser.email, "isApproved:", userData.isApproved);
+          if (userData.isApproved === false) {
+            // Check if the user in context is still considered logged in and approved (by old state)
+            // This prevents multiple logout calls if the state is already reflecting the disapproval
+            if (authContextLoading === false && isUserApproved === true) { 
+              toast({
+                title: "Acesso Revogado",
+                description: "Sua conta foi desaprovada pelo administrador. Você será desconectado.",
+                variant: "destructive",
+                duration: 7000,
+              });
+              logout(); // This will clear context and localStorage, leading to redirect
+            }
+          } else if (userData.isApproved === true && isUserApproved === false && authContextLoading === false) {
+            // If user was previously not approved and now is, update context
+            // This helps if approval happens while user is on "Pending" screen
+             console.log("AppLayout: User was approved in real-time. Updating context.");
+             setCurrentUser({ ...currentUser, isApproved: true, pendingApproval: false });
+             setIsUserApproved(true); // Update local state as well
+          }
+        } else {
+          // User document was deleted, which is an unexpected state for a logged-in user
+          console.warn("AppLayout: Current user's document in Firestore was deleted. Forcing logout.");
+          if (authContextLoading === false && isUserApproved === true) {
+            logout();
+          }
+        }
+      }, (error) => {
+        console.error("AppLayout: Error listening to user document changes:", error);
+        // Optionally, handle this error, e.g., by logging out the user if connection is lost
+        // For now, we'll just log it to avoid aggressive logouts on temporary network issues.
+      });
+
+      return () => unsubscribe(); // Cleanup listener on component unmount or currentUser change
+    }
+  }, [currentUser, firestore, logout, toast, isUserApproved, authContextLoading, setCurrentUser]);
 
 
   useEffect(() => {
@@ -82,19 +132,15 @@ export default function AppLayout({ children }: AppLayoutProps) {
       setActiveAccordionItem("ecommerce-category");
     } else if (pathname?.startsWith('/retail')) {
       setActiveAccordionItem("retail-category");
-    } else if (pathname?.startsWith('/profile')) {
-      // No accordion for profile, or handle as needed
     }
   }, [pathname]);
 
 
   const handleSignOut = () => {
-    logout(); // This clears localStorage and resets AuthContext
+    logout(); 
     toast({ title: 'Logout', description: 'Você foi desconectado.' });
-    // router.replace('/login'); // AuthContext or HomePage will handle redirect
   };
 
-  // This loader shows while AuthContext is loading or initial user data processing is pending
   if (authContextLoading || !isUserDataLoaded) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
@@ -104,14 +150,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
     );
   }
 
-  // If user data is loaded, but there's no user, and we are not on public pages, redirect.
   if (isUserDataLoaded && !currentUser && (pathname !== '/login' && pathname !== '/register')) {
-    console.log("AppLayout: User data loaded, no currentUser, not on public page. Redirecting to login.");
-    // router.replace('/login'); // This will be handled by useEffect or page itself
      return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Redirecionando...</p></div>;
   }
   
-  // Special handling for the primary admin email to always be considered approved.
   const effectivelyApproved = (currentUser?.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase()) || isUserApproved;
 
   if (currentUser && !effectivelyApproved && currentUser.pendingApproval) {
@@ -137,7 +179,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     );
   }
 
-  if (currentUser && !effectivelyApproved && !currentUser.pendingApproval) { // Not admin, not approved, and not pending (i.e., explicitly rejected or issue)
+  if (currentUser && !effectivelyApproved && !currentUser.pendingApproval) { 
       return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6">
         <Card className="w-full max-w-md text-center shadow-lg">
@@ -165,7 +207,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     const initial = currentUser.name ? currentUser.name.charAt(0).toUpperCase() : currentUser.email.charAt(0).toUpperCase();
     return (
       <Avatar className="h-8 w-8">
-        <AvatarImage src={currentUser.photoURL} alt={currentUser.name || currentUser.email} />
+        <AvatarImage src={currentUser.photoURL || undefined} alt={currentUser.name || currentUser.email} />
         <AvatarFallback>{initial}</AvatarFallback>
       </Avatar>
     );
@@ -213,20 +255,17 @@ export default function AppLayout({ children }: AppLayoutProps) {
     </header>
   );
 
-  // If auth context is not loading, but there's no user, and current path is public - render children (login/register)
   if (!authContextLoading && !currentUser && (pathname === '/login' || pathname === '/register')) {
     console.log("AppLayout: Rendering public page (login/register).");
     return <>{children}</>;
   }
   
-  // If auth context is not loading, no user, and NOT on public pages (should have been caught by useEffect, but defensive)
   if (!authContextLoading && !currentUser) {
      console.warn("AppLayout: Reached unexpected state - no user, not loading, not on public page. Forcing redirect.");
-     router.replace('/login'); // Force redirect if somehow missed by useEffect
+     router.replace('/login'); 
      return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Redirecionando...</p></div>;
   }
   
-  // If user is loaded and effectively approved, render the authenticated layout
   if (currentUser && effectivelyApproved) {
     return (
         <div className="flex min-h-screen">
@@ -323,7 +362,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
     );
   }
 
-  // Fallback loader if none of the above conditions met (should be rare)
   console.log("AppLayout: Reached fallback loader. State: authLoading", authContextLoading, "isUserDataLoaded", isUserDataLoaded, "currentUser", !!currentUser, "effectivelyApproved", effectivelyApproved);
   return (
     <div className="flex items-center justify-center min-h-screen bg-background">
