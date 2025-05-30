@@ -41,7 +41,7 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
   
   if (adminSDKInitializationError) {
     console.error(`[Get Pending Users Action] Failing due to Admin SDK init error: ${adminSDKInitializationError}`);
-    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError}`, status: 'error' };
+    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0, 200)}`, status: 'error' };
   }
   if (!adminFirestore_DefaultDB) {
     console.error("[Get Pending Users Action] Failing because Firestore Admin (Default DB) is not available.");
@@ -65,15 +65,16 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
     // Campos do Índice:
     //   1. `pendingApproval` (Ascendente)
     //   2. `isApproved` (Ascendente)
-    //   3. `createdAt` (Ascendente ou Descendente)
-    // O Firestore geralmente fornecerá um link para criar este índice se ele estiver faltando.
+    //   3. `createdAt` (Ascendente ou Descendente) - O Firestore geralmente sugere a ordem para `createdAt`
+    // O Firestore fornecerá um link para criar este índice se ele estiver faltando.
     // Verifique os logs do servidor para este link se o erro "FAILED_PRECONDITION" ocorrer.
     // O link será específico para o seu projeto.
+    // Exemplo: `isApproved` (Ascendente), `pendingApproval` (Ascendente), `createdAt` (Descendente)
     // =====================================================================================
     const snapshot = await adminFirestore_DefaultDB
       .collection('auth_users')
       .where('pendingApproval', '==', true)
-      .where('isApproved', '==', false)
+      .where('isApproved', '==', false) // Ensure we only get those not yet approved
       .orderBy('createdAt', 'asc')
       .get();
 
@@ -82,28 +83,26 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
       return { message: 'Nenhum usuário pendente de aprovação.', status: 'success', users: [] };
     }
 
-    const users: UserProfile[] = snapshot.docs.map(doc => {
-        const data = doc.data();
-        let createdAtDate : Date | undefined = undefined;
+    const users: UserProfile[] = snapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        let createdAtVal: Date | { seconds: number; nanoseconds: number } | undefined;
         if (data.createdAt) {
             if (data.createdAt instanceof Timestamp) {
-                createdAtDate = data.createdAt.toDate();
-            } else if (typeof data.createdAt === 'object' && 'seconds' in data.createdAt && typeof (data.createdAt as any).seconds === 'number') {
-                 createdAtDate = new Date((data.createdAt as any).seconds * 1000);
-            } else if (typeof data.createdAt === 'string' && !isNaN(new Date(data.createdAt).getTime())) {
-                 createdAtDate = new Date(data.createdAt);
-            } else if (typeof data.createdAt === 'number') { 
-                createdAtDate = new Date(data.createdAt);
+                createdAtVal = { seconds: data.createdAt.seconds, nanoseconds: data.createdAt.nanoseconds };
+            } else if (typeof data.createdAt === 'object' && 'seconds' in data.createdAt && typeof data.createdAt.seconds === 'number') {
+                 createdAtVal = { seconds: data.createdAt.seconds, nanoseconds: data.createdAt.nanoseconds || 0 };
+            } else {
+                console.warn(`[Get Pending Users Action] User ${data.email} has an unexpected createdAt format:`, data.createdAt);
             }
         }
         return {
-            uid: doc.id, // email é o ID
+            uid: docSnap.id,
             email: data.email,
             name: data.name || 'N/A',
             isApproved: data.isApproved === true, 
             pendingApproval: data.pendingApproval === true, 
             isAdmin: data.isAdmin === true, 
-            createdAt: createdAtDate,
+            createdAt: createdAtVal,
         } as UserProfile;
     });
     console.log(`[Get Pending Users Action] Fetched ${users.length} pending users from Firestore (Default DB).`);
@@ -125,7 +124,7 @@ export async function approveUserInFirestore(adminUserEmail: string, userEmailTo
   console.log(`[Approve User Action] Received request from admin '${adminUserEmail}' to approve user email: ${userEmailToApprove}`);
   if (adminSDKInitializationError) {
      console.error(`[Approve User Action] Failing due to Admin SDK init error: ${adminSDKInitializationError}`);
-     return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError}`, status: 'error' };
+     return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,200)}`, status: 'error' };
   }
   if (!adminFirestore_DefaultDB) {
     console.error("[Approve User Action] Failing because Firestore Admin (Default DB) is not available.");
@@ -152,6 +151,7 @@ export async function approveUserInFirestore(adminUserEmail: string, userEmailTo
       isApproved: true,
       pendingApproval: false,
       // You might want to add an 'approvedAt: Timestamp.now()' field here too
+      // approvedAt: Timestamp.now(),
     });
     console.log(`[Approve User Action] User ${userEmailToApprove} approved successfully in Firestore (Default DB).`);
     return { message: 'Usuário aprovado com sucesso!', status: 'success' };
