@@ -92,6 +92,8 @@ export default function PillowStockPage() {
 
 
   useEffect(() => {
+    console.log("PillowStockPage: useEffect triggered. AuthLoading:", isAuthLoading, "CurrentUser:", !!currentUser, "Products loaded:", allProducts.length, "Firestore client init error:", firestoreClientInitializationError);
+    
     if (isAuthLoading) {
       console.log("PillowStockPage: Auth context is loading...");
       if (allProducts.length === 0) setIsLoadingFirestore(true);
@@ -99,27 +101,35 @@ export default function PillowStockPage() {
     }
 
     if (firestoreClientInitializationError) {
-      toast({ title: "Erro de Configuração", description: `Firebase client não inicializado: ${firestoreClientInitializationError}`, variant: "destructive", duration: Infinity });
+      toast({ title: "Erro Crítico de Configuração Firebase", description: `Cliente Firebase não inicializado: ${firestoreClientInitializationError}. Verifique o console e as configurações .env.`, variant: "destructive", duration: Infinity });
       setIsLoadingFirestore(false);
       return;
     }
     if (!firestore) {
-      toast({ title: "Erro de Configuração", description: "Instância do Firestore não está disponível.", variant: "destructive", duration: Infinity });
+      toast({ title: "Erro Crítico de Conexão", description: "Instância do Firestore não está disponível. Verifique a conexão e configuração.", variant: "destructive", duration: Infinity });
       setIsLoadingFirestore(false);
       return;
     }
 
     if (currentUser) {
       if (allProducts.length === 0) {
-        console.log(`PillowStockPage: Attempting to fetch products for user email: ${currentUser.email}`);
+        console.log(`PillowStockPage: Attempting to fetch products for user email: ${currentUser.email}. Firestore available: ${!!firestore}`);
         setIsLoadingFirestore(true);
+        if (!firestore) {
+             toast({ title: "Erro Interno", description: "Firestore não disponível para buscar dados.", variant: "destructive" });
+             setIsLoadingFirestore(false);
+             return;
+          }
         const fetchProducts = async () => {
           try {
             const productsColPath = `user_products/${currentUser.email}/uploaded_products`;
             const productsQuery = query(collection(firestore, productsColPath));
             const snapshot = await getDocs(productsQuery);
-            const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
+            const productsFromDb: Product[] = snapshot.docs
+                .filter(docSnap => docSnap.id !== '_metadata')
+                .map(docSnap => productFromFirestore(docSnap.data()));
             setAllProducts(productsFromDb);
+            console.log(`PillowStockPage: Fetched ${productsFromDb.length} products.`);
 
             const metadataDocRef = doc(firestore, `user_products/${currentUser.email}/uploaded_products`, '_metadata');
             const metadataDocSnap = await getDoc(metadataDocRef);
@@ -128,7 +138,13 @@ export default function PillowStockPage() {
               if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
                 setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
               }
+            } else {
+                setLastDataUpdateTimestamp(null);
             }
+             if (productsFromDb.length === 0) {
+               toast({ title: "Sem Dados no Perfil", description: "Nenhum produto encontrado para análise de travesseiros. Faça upload de uma planilha no Dashboard.", variant: "default" });
+            }
+
           } catch (error) {
             console.error("Error fetching products from Firestore (Pillow Stock):", error);
             toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${(error as Error).message}`, variant: "destructive" });
@@ -234,19 +250,38 @@ export default function PillowStockPage() {
   const pillowKPIs = useMemo(() => {
     if (pillowProducts.length === 0) return { totalPillowSKUs: 0, totalPillowUnits: 0, lowStockPillowTypes: 0, zeroStockPillowTypes: 0, averageStockPerType: 0, criticalPillowsCount: 0 };
 
-    const uniquePillowDisplays = aggregatedPillowStockState; 
+    // Use aggregatedPillowStockState for KPIs as it reflects filtered data if filters are applied
+    // However, for "total" type KPIs, it might be better to use `pillowProducts` before filtering by searchTerm or stockStatusFilter,
+    // or adjust based on whether filters should affect KPIs.
+    // For simplicity now, let's use the `aggregatedPillowStockState` which reflects the currently displayed items.
+    // If you want KPIs to always reflect *all* pillows from the Excel, use a separate memo based on `pillowProducts`.
+    // For this iteration, let's use the derived unique pillow displays before search/status filters.
+    const uniquePillowDisplaysForKpi = Array.from(new Map(pillowProducts.map(p => [derivePillowDisplayName(p.name), p])).values())
+        .map(p => {
+            // Re-aggregate stock and sales for derived display names for KPI calculation
+            const displayName = derivePillowDisplayName(p.name);
+            const relevantProducts = pillowProducts.filter(prod => derivePillowDisplayName(prod.name) === displayName);
+            const stock = relevantProducts.reduce((sum, item) => sum + item.stock, 0);
+            const sales30d = relevantProducts.reduce((sum, item) => sum + (item.sales30d || 0), 0);
+            const daysOfStock = sales30d > 0 ? (stock / (sales30d / 30)) : Infinity;
+            const isCritical = stock === 0 && sales30d > 0;
+            const isUrgent = stock > 0 && stock < (MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE) && 
+                             (sales30d > HIGH_SALES_THRESHOLD || (daysOfStock < LOW_DAYS_OF_STOCK_THRESHOLD && sales30d > 0));
+            return { name: displayName, stock, sales30d, isCritical, isUrgent };
+        });
 
-    const totalPillowSKUs = uniquePillowDisplays.length;
-    const totalPillowUnits = uniquePillowDisplays.reduce((sum, p) => sum + p.stock, 0);
+
+    const totalPillowSKUs = uniquePillowDisplaysForKpi.length;
+    const totalPillowUnits = uniquePillowDisplaysForKpi.reduce((sum, p) => sum + p.stock, 0);
     
     const lowStockThresholdValue = MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE;
-    const lowStockPillowTypes = uniquePillowDisplays.filter(p => p.stock > 0 && p.stock < lowStockThresholdValue && !p.isCritical && !p.isUrgent).length;
-    const zeroStockPillowTypes = uniquePillowDisplays.filter(p => p.stock === 0 && !p.isCritical).length; 
+    const lowStockPillowTypes = uniquePillowDisplaysForKpi.filter(p => p.stock > 0 && p.stock < lowStockThresholdValue && !p.isCritical && !p.isUrgent).length;
+    const zeroStockPillowTypes = uniquePillowDisplaysForKpi.filter(p => p.stock === 0 && !p.isCritical).length; 
     const averageStockPerType = totalPillowSKUs > 0 ? parseFloat((totalPillowUnits / totalPillowSKUs).toFixed(1)) : 0;
-    const criticalPillowsCount = uniquePillowDisplays.filter(p => p.isCritical || p.isUrgent).length;
+    const criticalPillowsCount = uniquePillowDisplaysForKpi.filter(p => p.isCritical || p.isUrgent).length;
     
     return { totalPillowSKUs, totalPillowUnits, lowStockPillowTypes, zeroStockPillowTypes, averageStockPerType, criticalPillowsCount };
-  }, [pillowProducts, aggregatedPillowStockState]);
+  }, [pillowProducts]); // pillowProducts is used here to make KPIs reflect overall data, not just filtered view
 
   const noPillowsFoundInExcel = useMemo(() => {
     return allProducts.length > 0 && pillowProducts.length === 0;

@@ -47,6 +47,8 @@ export default function AbcAnalysisPage() {
 
 
   useEffect(() => {
+    console.log("AbcAnalysisPage: useEffect triggered. AuthLoading:", isAuthLoading, "CurrentUser:", !!currentUser, "Products loaded:", allProducts.length, "Firestore client init error:", firestoreClientInitializationError);
+    
     if (isAuthLoading) {
       console.log("AbcAnalysisPage: Auth context is loading...");
       if (allProducts.length === 0) setIsLoadingFirestore(true);
@@ -54,12 +56,12 @@ export default function AbcAnalysisPage() {
     }
 
     if (firestoreClientInitializationError) {
-      toast({ title: "Erro de Configuração", description: `Firebase client não inicializado: ${firestoreClientInitializationError}`, variant: "destructive", duration: Infinity });
+      toast({ title: "Erro Crítico de Configuração Firebase", description: `Cliente Firebase não inicializado: ${firestoreClientInitializationError}. Verifique o console e as configurações .env.`, variant: "destructive", duration: Infinity });
       setIsLoadingFirestore(false);
       return;
     }
     if (!firestore) {
-      toast({ title: "Erro de Configuração", description: "Instância do Firestore não está disponível.", variant: "destructive", duration: Infinity });
+      toast({ title: "Erro Crítico de Conexão", description: "Instância do Firestore não está disponível. Verifique a conexão e configuração.", variant: "destructive", duration: Infinity });
       setIsLoadingFirestore(false);
       return;
     }
@@ -68,12 +70,21 @@ export default function AbcAnalysisPage() {
       if (allProducts.length === 0) {
         setIsLoadingFirestore(true);
         const fetchProducts = async () => {
+          console.log(`AbcAnalysisPage: Attempting to fetch products for user email: ${currentUser.email}. Firestore instance available: ${!!firestore}`);
+           if (!firestore) {
+             toast({ title: "Erro Interno", description: "Firestore não disponível para buscar dados.", variant: "destructive" });
+             setIsLoadingFirestore(false);
+             return;
+          }
           try {
             const productsColPath = `user_products/${currentUser.email}/uploaded_products`;
             const productsQuery = query(collection(firestore, productsColPath));
             const snapshot = await getDocs(productsQuery);
-            const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
+            const productsFromDb: Product[] = snapshot.docs
+              .filter(docSnap => docSnap.id !== '_metadata')
+              .map(docSnap => productFromFirestore(docSnap.data()));
             setAllProducts(productsFromDb);
+            console.log(`AbcAnalysisPage: Fetched ${productsFromDb.length} products.`);
 
             const metadataDocRef = doc(firestore, `user_products/${currentUser.email}/uploaded_products`, '_metadata');
             const metadataDocSnap = await getDoc(metadataDocRef);
@@ -82,9 +93,13 @@ export default function AbcAnalysisPage() {
               if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
                 setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
               }
+            } else {
+               setLastDataUpdateTimestamp(null);
             }
             if (productsFromDb.length > 0) {
               toast({ title: "Dados Carregados", description: `${productsFromDb.length} produtos carregados do banco de dados.` });
+            } else {
+               toast({ title: "Sem Dados no Perfil", description: "Nenhum produto encontrado para análise ABC. Faça upload de uma planilha no Dashboard.", variant: "default" });
             }
           } catch (error) {
             console.error("Error fetching products from Firestore (ABC Analysis):", error);
@@ -298,7 +313,7 @@ export default function AbcAnalysisPage() {
         </div>
         <Button 
             onClick={handleExportToExcel} 
-            disabled={isExporting || abcAnalyzedProducts.length === 0 || isAuthLoading}
+            disabled={isExporting || abcAnalyzedProducts.length === 0 || isAuthLoading || isLoadingFirestore}
         >
           {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
           Exportar Análise ABC

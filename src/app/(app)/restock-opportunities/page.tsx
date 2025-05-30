@@ -48,6 +48,8 @@ export default function RestockOpportunitiesPage() {
 
 
   useEffect(() => {
+    console.log("RestockOpportunitiesPage: useEffect triggered. AuthLoading:", isAuthLoading, "CurrentUser:", !!currentUser, "Products loaded:", allProducts.length, "Firestore client init error:", firestoreClientInitializationError);
+
     if (isAuthLoading) {
       console.log("RestockOpportunitiesPage: Auth context is loading...");
       if (allProducts.length === 0) setIsLoadingFirestore(true);
@@ -55,28 +57,37 @@ export default function RestockOpportunitiesPage() {
     }
     
     if (firestoreClientInitializationError) {
-      toast({ title: "Erro de Configuração", description: `Firebase client não inicializado: ${firestoreClientInitializationError}`, variant: "destructive", duration: Infinity });
+      toast({ title: "Erro Crítico de Configuração Firebase", description: `Cliente Firebase não inicializado: ${firestoreClientInitializationError}. Verifique o console e as configurações .env.`, variant: "destructive", duration: Infinity });
       setIsLoadingFirestore(false);
       return;
     }
     if (!firestore) {
-      toast({ title: "Erro de Configuração", description: "Instância do Firestore não está disponível.", variant: "destructive", duration: Infinity });
+      toast({ title: "Erro Crítico de Conexão", description: "Instância do Firestore não está disponível. Verifique a conexão e configuração.", variant: "destructive", duration: Infinity });
       setIsLoadingFirestore(false);
       return;
     }
 
     if (currentUser) {
       if (allProducts.length === 0) {
-        console.log(`RestockOpportunitiesPage: Attempting to fetch products for user email: ${currentUser.email}`);
+        console.log(`RestockOpportunitiesPage: Attempting to fetch products for user email: ${currentUser.email}. Firestore available: ${!!firestore}`);
         setIsLoadingFirestore(true);
+         if (!firestore) {
+             toast({ title: "Erro Interno", description: "Firestore não disponível para buscar dados.", variant: "destructive" });
+             setIsLoadingFirestore(false);
+             return;
+          }
         const fetchProducts = async () => {
           try {
             const productsColPath = `user_products/${currentUser.email}/uploaded_products`;
             const productsQuery = query(collection(firestore, productsColPath));
             const snapshot = await getDocs(productsQuery);
-            const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
+            const productsFromDb: Product[] = snapshot.docs
+              .filter(docSnap => docSnap.id !== '_metadata')
+              .map(docSnap => productFromFirestore(docSnap.data()));
             
             setAllProducts(productsFromDb);
+            console.log(`RestockOpportunitiesPage: Fetched ${productsFromDb.length} products.`);
+
 
             const metadataDocRef = doc(firestore, `user_products/${currentUser.email}/uploaded_products`, '_metadata');
             const metadataDocSnap = await getDoc(metadataDocRef);
@@ -85,9 +96,14 @@ export default function RestockOpportunitiesPage() {
               if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
                 setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
               }
+            } else {
+                setLastDataUpdateTimestamp(null);
             }
+
             if (productsFromDb.length > 0) {
               toast({ title: "Dados Carregados", description: "Dados de produtos carregados do banco de dados." });
+            } else {
+               toast({ title: "Sem Dados no Perfil", description: "Nenhum produto encontrado para análise de oportunidades. Faça upload de uma planilha no Dashboard.", variant: "default" });
             }
           } catch (error) {
             console.error("Error fetching products from Firestore (Restock):", error);
@@ -122,12 +138,12 @@ export default function RestockOpportunitiesPage() {
   const applyAllFilters = useCallback(() => {
     if (isAuthLoading || isLoadingFirestore) {
         if (!isAuthLoading && !isLoadingFirestore && allProducts.length === 0){
-            setFilteredProducts([]);
+            setFilteredProducts([]); // Clear if no products and not loading
         }
-        return;
+        return; // Don't filter if still loading auth/firestore initial data or no products
     }
 
-    setIsLoading(true);
+    setIsLoading(true); // Start loading state for filtering
     console.log("Applying filters with baseFilters:", baseFilters, "lowStockThreshold:", lowStockThreshold);
     let tempFiltered = [...allProducts];
     const effectiveThreshold = parseInt(lowStockThreshold, 10);
@@ -169,7 +185,7 @@ export default function RestockOpportunitiesPage() {
 
     console.log("Filtered products count:", tempFiltered.length);
     setFilteredProducts(tempFiltered);
-    setIsLoading(false);
+    setIsLoading(false); // End loading state for filtering
   }, [allProducts, baseFilters, lowStockThreshold, toast, isAuthLoading, isLoadingFirestore]);
 
 
@@ -178,11 +194,15 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
+   // Apply filters whenever allProducts, lowStockThreshold, or baseFilters change,
+   // but only if auth and initial Firestore load are complete.
    if(!isAuthLoading && !isLoadingFirestore && allProducts.length > 0) {
     applyAllFilters();
    } else if (!isAuthLoading && !isLoadingFirestore && allProducts.length === 0) {
+    // If no products are loaded (and not currently loading them), ensure filtered list is empty
     setFilteredProducts([]);
    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allProducts, lowStockThreshold, baseFilters, applyAllFilters, isAuthLoading, isLoadingFirestore]);
 
 
@@ -462,7 +482,7 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
   if (endDateInput instanceof Date && isDateValid(endDateInput)) {
     endDate = new Date(endDateInput.valueOf()); 
   } else if (typeof endDateInput === 'string') {
-    const parsedDate = new Date(endDateInput); // Try parsing common date string formats, or ISO if excel-parser provides that
+    const parsedDate = new Date(endDateInput); 
     if (isDateValid(parsedDate)) {
       endDate = parsedDate;
     }

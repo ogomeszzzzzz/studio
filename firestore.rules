@@ -1,41 +1,36 @@
-
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/(default)/documents {
 
-    // Coleção para perfis de usuário e autenticação customizada
+    // WARNING: TEMPORARY DIAGNOSTIC RULES - HIGHLY INSECURE
+    // These rules allow anyone to read and write to your entire (default) database.
+    // Use ONLY for debugging the "client is offline" issue.
+    // REVERT TO SECURE RULES IMMEDIATELY AFTER DIAGNOSIS.
+    match /{document=**} {
+      allow read, write: if true;
+    }
+
+    /*
+    // PREVIOUS SECURE RULES (Commented out for diagnostics)
+    // Rules for the authentication users collection
     match /auth_users/{userEmail} {
-      // Permite que o cliente leia o documento de um usuário específico (GET)
-      // Isso é necessário para o AppLayout verificar isApproved e isAdmin.
-      allow get: if true;
-
-      // Bloqueia a listagem de todos os usuários ou modificações diretas pelo cliente.
-      // Registro e aprovação são feitos por Server Actions (que usam Admin SDK e ignoram estas regras).
-      allow list, create, update, delete: if false;
+      allow get: if true; // Allows client to read specific user profile for approval status
+      allow list, create, update, delete: if false; // Other ops by server actions
     }
 
-    // Coleção de nível raiz para os dados de produtos de cada usuário
-    match /user_products/{userEmail} {
-      // Esta regra é um placeholder, as permissões reais são na subcoleção abaixo.
-      // Pode ser útil para permitir que um usuário crie/delete seu próprio documento user_products se necessário.
-      // Por agora, vamos manter simples.
-      allow read, write: if false; // Geralmente não se interage diretamente com este documento.
-    }
-
-    // Subcoleção onde os produtos carregados via Excel são armazenados
+    // Rules for the user-specific product data
+    // Path: user_products/{loggedInUserEmail}/uploaded_products/{productIdOrMetadata}
     match /user_products/{userEmail}/uploaded_products/{documentId} {
-      // Permite LISTAR documentos na coleção (necessário para getDocs()).
-      // Permite LER documentos individuais (necessário para getDoc(), ex: _metadata).
-      // Permite CRIAR, ATUALIZAR, DELETAR documentos (necessário para writeBatch e setDoc).
-      // Para fins de protótipo, estamos permitindo essas operações do lado do cliente.
-      // {documentId} pode ser um ID de produto ou a string "_metadata".
+      // PERMISSIVE FOR PROTOTYPE - Client needs to know userEmail.
+      // For production, all writes should be via server actions.
       allow read, write, delete: if true;
     }
 
-    // Regra de fallback para negar explicitamente acesso a quaisquer outros caminhos
+    // Fallback rule: Deny access to any other paths not defined above.
     match /{path=**} {
       allow read, write: if false;
     }
+    */
   }
 }
