@@ -18,6 +18,7 @@ import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/u
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
+import type { jsPDFDocumentProperties } from 'jspdf'; // For type safety with autoTable
 import html2canvas from 'html2canvas';
 import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
 import { collection, getDocs, writeBatch, doc, Timestamp, query, setDoc, getDoc, serverTimestamp, orderBy, addDoc, deleteDoc, collectionGroup } from 'firebase/firestore';
@@ -145,16 +146,15 @@ export default function DashboardPage() {
       console.log("DashboardPage (fetchHistory): Fetch attempt finished. Setting isLoadingHistory to false.");
       setIsLoadingHistory(false);
     }
-  }, [currentUser, firestore, firestoreClientInitializationError, toast, isSavingFirestore]);
-
+  }, [currentUser, toast]); // Removed firestore, firestoreClientInitializationError, isSavingFirestore as they are checked before call or in parent useEffect
 
   useEffect(() => {
-    console.log(`DashboardPage: Main useEffect triggered. AuthLoading: ${isAuthLoading}, CurrentUser: ${!!currentUser}, Products loaded: ${dashboardProducts.length}, Saving: ${isSavingFirestore}, Firestore client init error: ${firestoreClientInitializationError}, Firestore instance: ${!!firestore}`);
+    console.log(`DashboardPage (Main useEffect): AuthLoading: ${isAuthLoading}, CurrentUser: ${!!currentUser}, Products loaded: ${dashboardProducts.length}, Saving: ${isSavingFirestore}, Firestore client init error: ${firestoreClientInitializationError}, Firestore instance: ${!!firestore}`);
     
     if (isAuthLoading) {
-      console.log("DashboardPage: Auth context is loading, waiting...");
+      console.log("DashboardPage (Main useEffect): Auth context is loading, waiting...");
       if (dashboardProducts.length === 0) setIsLoadingFirestore(true);
-      if (stockHistory.length === 0) setIsLoadingHistory(true);
+      // Don't reset isLoadingHistory here if already true from initial state
       return;
     }
 
@@ -172,19 +172,19 @@ export default function DashboardPage() {
     }
 
     if (currentUser) {
-      console.log(`DashboardPage: User is available. Products loaded: ${dashboardProducts.length}, Saving: ${isSavingFirestore}`);
+      console.log(`DashboardPage (Main useEffect): User is available. Products loaded: ${dashboardProducts.length}, Saving: ${isSavingFirestore}`);
       // Fetch Products
       if (dashboardProducts.length === 0 && !isSavingFirestore) {
         setIsLoadingFirestore(true);
         const fetchProducts = async () => {
-          console.log("DashboardPage: Attempting to fetch products from GLOBAL /shared_products.");
+          console.log("DashboardPage (Main useEffect): Attempting to fetch products from GLOBAL /shared_products.");
           try {
             const productsColPath = "shared_products";
             const productsQuery = query(collection(firestore, productsColPath));
             const snapshot = await getDocs(productsQuery);
             const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
             setDashboardProducts(productsFromDb);
-            console.log("DashboardPage: Fetched products from Firestore:", productsFromDb.length);
+            console.log("DashboardPage (Main useEffect): Fetched products from Firestore:", productsFromDb.length);
             
             const metadataDocRef = doc(firestore, "app_metadata", "products_metadata");
             const metadataDocSnap = await getDoc(metadataDocRef);
@@ -192,7 +192,7 @@ export default function DashboardPage() {
               const data = metadataDocSnap.data();
               if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
                 setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
-                 console.log("DashboardPage: Fetched lastDataUpdateTimestamp:", data.lastUpdatedAt.toDate());
+                 console.log("DashboardPage (Main useEffect): Fetched lastDataUpdateTimestamp:", data.lastUpdatedAt.toDate());
               } else {
                 setLastDataUpdateTimestamp(null);
               }
@@ -203,12 +203,12 @@ export default function DashboardPage() {
                toast({ title: "Sem Dados Carregados", description: "Nenhum produto encontrado. O administrador precisa carregar uma planilha.", variant: "default" });
             }
           } catch (error) {
-            console.error("DashboardPage: Error fetching products from Firestore:", error);
+            console.error("DashboardPage (Main useEffect): Error fetching products from Firestore:", error);
             const firestoreError = error as Error;
             toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${firestoreError.message}`, variant: "destructive" });
           } finally {
             setIsLoadingFirestore(false);
-            console.log("DashboardPage: Finished fetching products, isLoadingFirestore set to false.");
+            console.log("DashboardPage (Main useEffect): Finished fetching products, isLoadingFirestore set to false.");
           }
         };
         fetchProducts();
@@ -217,39 +217,35 @@ export default function DashboardPage() {
       }
 
       // Stock History Fetching Logic
-      if (!isSavingFirestore) {
-        const needsToFetchHistory =
-          stockHistory.length === 0 ||
+      const shouldFetchHistory =
+        !isSavingFirestore &&
+        (stockHistory.length === 0 ||
           (lastDataUpdateTimestamp &&
            stockHistory.length > 0 &&
            stockHistory[stockHistory.length - 1]?.date && 
-           stockHistory[stockHistory.length - 1].date < lastDataUpdateTimestamp);
+           lastDataUpdateTimestamp > stockHistory[stockHistory.length - 1].date));
 
-        if (needsToFetchHistory) {
-          console.log("DashboardPage: Main useEffect determined history fetch needed.");
-          fetchHistory(); 
-        } else {
-          if (isLoadingHistory) { // If not fetching, but was loading, set to false.
-            console.log("DashboardPage: Main useEffect determined history fetch NOT needed, ensuring isLoadingHistory is false.");
-            setIsLoadingHistory(false);
-          }
-        }
-      } else { // isSavingFirestore is true
-        if (isLoadingHistory) {
-          console.log("DashboardPage: Main useEffect - saving in progress, ensuring isLoadingHistory is false.");
-          setIsLoadingHistory(false);
+      console.log("DashboardPage (Main useEffect for History): AuthLoading:", isAuthLoading, "CurrentUser:", !!currentUser, "Saving:", isSavingFirestore, "History length:", stockHistory.length, "lastDataUpdateTimestamp:", lastDataUpdateTimestamp, "shouldFetchHistory:", shouldFetchHistory);
+      
+      if (shouldFetchHistory) {
+        console.log("DashboardPage (Main useEffect for History): Fetching history because shouldFetchHistory is true.");
+        fetchHistory();
+      } else {
+        console.log("DashboardPage (Main useEffect for History): Not fetching history. Current isLoadingHistory:", isLoadingHistory);
+        if (isLoadingHistory && !isSavingFirestore) { // If not fetching (and not saving), ensure loading stops
+           setIsLoadingHistory(false);
         }
       }
 
     } else { 
-      console.log("DashboardPage: No current user. Clearing data and setting loading to false.");
+      console.log("DashboardPage (Main useEffect): No current user. Clearing data and setting loading to false.");
       setDashboardProducts([]);
       setLastDataUpdateTimestamp(null);
       setIsLoadingFirestore(false);
       setStockHistory([]);
       setIsLoadingHistory(false);
     }
-  }, [currentUser, isAuthLoading, dashboardProducts.length, isAdmin, toast, isSavingFirestore, lastDataUpdateTimestamp, firestore, firestoreClientInitializationError, fetchHistory, stockHistory.length, isLoadingHistory]);
+  }, [currentUser, isAuthLoading, isAdmin, toast, isSavingFirestore, lastDataUpdateTimestamp, dashboardProducts.length, stockHistory.length, fetchHistory]);
 
 
   const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
@@ -263,8 +259,7 @@ export default function DashboardPage() {
     }
     console.log("DashboardPage: Admin attempting to save products to GLOBAL /shared_products collection.");
     setIsSavingFirestore(true);
-    setIsLoadingFirestore(true); // Indicate loading while saving
-    setIsLoadingHistory(true); // Also indicate history might be reloaded
+    setIsLoadingFirestore(true); 
 
     let totalDeleted = 0;
     let totalAdded = 0;
@@ -273,6 +268,7 @@ export default function DashboardPage() {
       const productsColPath = "shared_products";
       const productsColRef = collection(firestore, productsColPath);
       
+      // Delete existing products in batches
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
       const docsToDelete = existingDocsSnapshot.docs; 
@@ -287,6 +283,7 @@ export default function DashboardPage() {
         console.log(`DashboardPage: Batch deleted ${chunk.length} products. Total deleted so far: ${totalDeleted}`);
       }
 
+      // Add new products in batches
       if (productsToSave.length > 0) {
         console.log(`DashboardPage: Starting to add ${productsToSave.length} new products.`);
         for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
@@ -302,6 +299,7 @@ export default function DashboardPage() {
         }
       }
 
+      // Add stock history entry
       if (productsToSave.length > 0) {
         const currentTotalStockUnits = productsToSave.reduce((sum, p) => sum + (p.stock || 0), 0);
         const currentTotalSkusWithStock = productsToSave.filter(p => (p.stock || 0) > 0).length;
@@ -313,16 +311,16 @@ export default function DashboardPage() {
         console.log("DashboardPage: Stock history entry added.");
       }
 
+      // Update metadata
       const metadataDocRef = doc(firestore, "app_metadata", "products_metadata");
       await setDoc(metadataDocRef, { lastUpdatedAt: serverTimestamp() }, { merge: true });
       console.log("DashboardPage: Products metadata (lastUpdatedAt) updated.");
       
-      setDashboardProducts(productsToSave); // Update local state
-      const newTimestamp = new Date(); // Use client date as approximation until next fetch
+      setDashboardProducts(productsToSave);
+      const newTimestamp = new Date();
       setLastDataUpdateTimestamp(newTimestamp);
       
-      setStockHistory([]); // Clear current history
-      // setIsLoadingHistory(true); // Signal that history needs to be re-fetched by the useEffect
+      setStockHistory([]); // Clear current history, useEffect will trigger a re-fetch
 
       toast({ title: "Dados Globais Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} antigos foram removidos.` : ''} Histórico de estoque atualizado.` });
 
@@ -332,11 +330,10 @@ export default function DashboardPage() {
       toast({ title: "Erro ao Salvar", description: `Não foi possível salvar: ${firestoreError.message}`, variant: "destructive" });
     } finally {
       setIsSavingFirestore(false);
-      setIsLoadingFirestore(false); // Data saving/loading process complete
-      // Let useEffect handle history loading based on changed lastDataUpdateTimestamp or cleared stockHistory
+      setIsLoadingFirestore(false);
       console.log("DashboardPage: Finished saving products, isSavingFirestore set to false.");
     }
-  }, [currentUser, isAdmin, toast, firestore]); // Removed stockHistory and setIsLoadingHistory as direct dependencies
+  }, [currentUser, isAdmin, toast]); // Removed firestore to avoid re-creating function if firestore instance changes (it shouldn't often)
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
     console.log("DashboardPage: Excel data processed, parsed products count:", parsedProducts.length);
@@ -505,7 +502,7 @@ export default function DashboardPage() {
     toast({ title: "Gerando PDF...", description: "Por favor, aguarde. Isso pode levar alguns instantes." });
 
     try {
-      const doc = new jsPDF('p', 'mm', 'a4');
+      const doc = new jsPDF('p', 'mm', 'a4') as jsPDF & { autoTable: (options: any) => void };
       let yPos = 15;
       const pageHeight = doc.internal.pageSize.height;
       const pageWidth = doc.internal.pageSize.width;
@@ -543,7 +540,7 @@ export default function DashboardPage() {
         ["Total SKUs Zerados", aggregatedData.totalZeroStockSkus.toLocaleString()],
       ];
 
-      (doc as any).autoTable({ 
+      doc.autoTable({ 
         startY: yPos,
         head: [["Métrica", "Valor"]],
         body: summaryTableBody,
@@ -716,7 +713,8 @@ export default function DashboardPage() {
          <Card className="shadow-lg"><CardHeader><CardTitle className="flex items-center"><Filter className="mr-2 h-6 w-6 text-primary" />Nenhum produto encontrado</CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Nenhum produto encontrado para a coleção "{selectedCollection}" selecionada.</p></CardContent></Card>
       )}
 
-      {isLoadingHistory && stockHistory.length === 0 && (
+      {/* Stock History Chart */}
+      {isLoadingHistory && (
         <Card className="shadow-lg"><CardHeader><CardTitle className="flex items-center"><Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" />Carregando histórico...</CardTitle></CardHeader></Card>
       )}
       
@@ -759,7 +757,7 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
       )}
-      {!isLoadingHistory && stockHistory.length === 0 && !displayLoader && (
+      {!isLoadingHistory && stockHistory.length === 0 && (
           <Card className="shadow-md text-center py-6">
             <CardHeader><CardTitle className="flex items-center justify-center text-lg"><LineChart className="mr-2 h-6 w-6 text-muted-foreground" />Sem Histórico de Estoque</CardTitle></CardHeader>
             <CardContent><p className="text-muted-foreground">Nenhum histórico de estoque encontrado. Faça um upload de planilha para começar a registrar o histórico.</p></CardContent>
