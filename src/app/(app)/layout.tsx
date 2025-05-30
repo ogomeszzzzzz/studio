@@ -2,14 +2,14 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, LogOut, LayoutDashboard, UserCircle, ShieldCheck, Store, Building, TrendingUp, BarChart, BedDouble, Lock } from 'lucide-react';
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
+import { useAuth } from '@/contexts/AuthContext';
 import {
   Accordion,
   AccordionContent,
@@ -17,6 +17,9 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { cn } from '@/lib/utils';
+import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
+import { collection, query, where, onSnapshot, type Unsubscribe, type DocumentData } from 'firebase/firestore';
+import { ToastAction } from "@/components/ui/toast";
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -28,10 +31,11 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { toast } = useToast();
-  const { currentUser, logout, isLoading: authContextLoading } = useAuth(); // Use AuthContext
+  const { currentUser, logout, isLoading: authContextLoading } = useAuth();
   const [activeAccordionItem, setActiveAccordionItem] = useState<string | undefined>(undefined);
+  const [notifiedPendingUserIds, setNotifiedPendingUserIds] = useState<Set<string>>(new Set());
 
-  const isUserAdmin = currentUser?.isAdmin === true;
+  const isUserAdmin = currentUser?.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase() && currentUser?.isAdmin === true;
 
   useEffect(() => {
     if (!authContextLoading && !currentUser) {
@@ -40,7 +44,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
   }, [authContextLoading, currentUser, router]);
 
   useEffect(() => {
-    // Determine active accordion based on pathname
     if (pathname?.startsWith('/admin')) {
       setActiveAccordionItem("admin-category");
     } else if (pathname?.startsWith('/dashboard') || pathname?.startsWith('/restock-opportunities') || pathname?.startsWith('/pillow-stock') || pathname?.startsWith('/abc-analysis')) {
@@ -50,8 +53,71 @@ export default function AppLayout({ children }: AppLayoutProps) {
     }
   }, [pathname]);
 
+  // Firestore listener for new pending users (admin only)
+  useEffect(() => {
+    let unsubscribe: Unsubscribe | undefined;
+
+    if (isUserAdmin && firestore && !firestoreClientInitializationError) {
+      console.log("AppLayout: Admin detected, setting up pending users listener.");
+      const q = query(
+        collection(firestore, "auth_users"),
+        where("pendingApproval", "==", true),
+        where("isApproved", "==", false)
+      );
+
+      unsubscribe = onSnapshot(q, (querySnapshot) => {
+        const currentNotifiedIds = new Set(notifiedPendingUserIds); // Create a mutable copy for this snapshot
+        let newNotifications = false;
+
+        querySnapshot.forEach((doc) => {
+          const userData = doc.data() as DocumentData; // Cast to DocumentData
+          const userId = doc.id; // email is the doc ID
+
+          if (!currentNotifiedIds.has(userId)) {
+            console.log(`AppLayout: New pending user detected - ${userId}`);
+            toast({
+              title: "Novo Usuário Pendente",
+              description: `${userData.name || userId} aguarda sua aprovação.`,
+              action: (
+                <ToastAction altText="Ver Aprovações" onClick={() => router.push('/admin')}>
+                  Ver Aprovações
+                </ToastAction>
+              ),
+              duration: 15000, // Longer duration for important notifications
+            });
+            currentNotifiedIds.add(userId);
+            newNotifications = true;
+          }
+        });
+
+        if (newNotifications) {
+          setNotifiedPendingUserIds(currentNotifiedIds);
+        }
+      }, (error) => {
+        console.error("AppLayout: Error listening to pending users:", error);
+        toast({
+          title: "Erro de Notificação",
+          description: "Não foi possível verificar novos usuários pendentes.",
+          variant: "destructive",
+        });
+      });
+    } else {
+      if (isUserAdmin && (firestoreClientInitializationError || !firestore)) {
+        console.warn("AppLayout: Firestore not available for admin listener. Error:", firestoreClientInitializationError);
+      }
+    }
+
+    // Cleanup listener on component unmount or if user is no longer admin
+    return () => {
+      if (unsubscribe) {
+        console.log("AppLayout: Cleaning up pending users listener.");
+        unsubscribe();
+      }
+    };
+  }, [isUserAdmin, firestore, toast, router, notifiedPendingUserIds]); // notifiedPendingUserIds is needed to use its current value inside onSnapshot
+
   const handleSignOut = () => {
-    logout(); // Use logout from AuthContext
+    logout();
     toast({ title: 'Logout', description: 'Você foi desconectado.' });
   };
 
@@ -65,8 +131,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
   }
 
   if (!currentUser) {
-    // This case should ideally be caught by the useEffect above,
-    // but as a fallback or for initial render before effect runs.
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -75,7 +139,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
     );
   }
 
-  if (!currentUser.isApproved && currentUser.pendingApproval) {
+  // User is logged in, now check approval status (unless it's the special admin email)
+  const needsApprovalCheck = currentUser.email.toLowerCase() !== ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase();
+
+  if (needsApprovalCheck && !currentUser.isApproved && currentUser.pendingApproval) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6">
         <Card className="w-full max-w-md text-center shadow-lg">
@@ -98,8 +165,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     );
   }
 
-  if (!currentUser.isApproved && !currentUser.pendingApproval) {
-     // This case implies the user was rejected or some other state.
+  if (needsApprovalCheck && !currentUser.isApproved && !currentUser.pendingApproval) {
       return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6">
         <Card className="w-full max-w-md text-center shadow-lg">
@@ -122,7 +188,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     );
   }
 
-  // If user is approved, render the main app layout
+  // If user is approved (or is the special admin), render the main app layout
   const AuthenticatedHeader = () => (
     <header className="bg-card border-b border-border shadow-sm sticky top-0 z-50">
       <div className="container mx-auto px-4 md:px-6 lg:px-8 py-3 flex items-center justify-between">
@@ -227,9 +293,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
       <div className="flex-1 flex flex-col bg-background">
         <AuthenticatedHeader />
         <main className="flex-grow p-4 md:p-6 lg:p-8">
-          {currentUser.isApproved ? children : null}
+          {children}
         </main>
       </div>
     </div>
   );
 }
+
