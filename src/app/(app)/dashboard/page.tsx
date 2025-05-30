@@ -17,10 +17,10 @@ import { ResponsiveContainer, BarChart as RechartsBarChart, Bar, XAxis, YAxis, T
 import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart";
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
+import 'jspdf-autotable'; // Ensure plugin is imported for autoTable to be registered
 import html2canvas from 'html2canvas';
-import autoTable from 'jspdf-autotable';
 import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
-import { collection, getDocs, writeBatch, doc, Timestamp, query, setDoc, getDoc, serverTimestamp, orderBy, addDoc, deleteDoc } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, Timestamp, query, setDoc, getDoc, serverTimestamp, orderBy, addDoc, deleteDoc, collectionGroup } from 'firebase/firestore';
 import { format as formatDateFns, isValid as isDateValid } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '@/contexts/AuthContext';
@@ -66,7 +66,7 @@ const chartConfigBase = {
 } satisfies ChartConfig;
 
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
-const PIE_COLORS = ["hsl(var(--primary))", "hsl(var(--destructive))"];
+const PIE_COLORS = ["hsl(var(--chart-2))", "hsl(var(--destructive))"]; // Green for with stock, Red for zero stock
 
 const productToFirestore = (product: Product): any => {
   const data: any = { ...product };
@@ -94,7 +94,7 @@ const productFromFirestore = (data: any): Product => {
 const stockHistoryEntryFromFirestore = (id: string, data: any): StockHistoryEntry => {
   return {
     id,
-    date: data.date instanceof Timestamp ? data.date.toDate() : new Date(),
+    date: data.date instanceof Timestamp ? data.date.toDate() : new Date(), // Fallback to current date
     totalStockUnits: data.totalStockUnits || 0,
     totalSkusWithStock: data.totalSkusWithStock || 0,
   };
@@ -120,8 +120,9 @@ export default function DashboardPage() {
 
   const isAdmin = useMemo(() => currentUser?.email.toLowerCase() === process.env.NEXT_PUBLIC_ADMIN_EMAIL?.toLowerCase() && currentUser?.isAdmin, [currentUser]);
 
- useEffect(() => {
-    console.log("DashboardPage: AuthContext loading:", isAuthLoading, "CurrentUser:", !!currentUser);
+  useEffect(() => {
+    console.log("DashboardPage: useEffect triggered. AuthLoading:", isAuthLoading, "CurrentUser:", !!currentUser, "Products loaded:", dashboardProducts.length, "Firestore client init error:", firestoreClientInitializationError, "Firestore instance:", !!firestore);
+
     if (isAuthLoading) {
       console.log("DashboardPage: Auth context is loading, waiting...");
       if (dashboardProducts.length === 0) setIsLoadingFirestore(true);
@@ -148,7 +149,7 @@ export default function DashboardPage() {
       if (dashboardProducts.length === 0 && !isSavingFirestore) {
         setIsLoadingFirestore(true);
         const fetchProducts = async () => {
-          console.log("DashboardPage: Attempting to fetch products from GLOBAL collection /shared_products. Firestore instance available:", !!firestore);
+          console.log("DashboardPage: Attempting to fetch products from GLOBAL /shared_products. Firestore instance available:", !!firestore);
           try {
             const productsColPath = "shared_products";
             const productsQuery = query(collection(firestore, productsColPath));
@@ -177,20 +178,20 @@ export default function DashboardPage() {
             }
           } catch (error) {
             console.error("DashboardPage: Error fetching products from Firestore:", error);
-            toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${(error as Error).message}`, variant: "destructive" });
+            const firestoreError = error as Error;
+            toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${firestoreError.message}`, variant: "destructive" });
           } finally {
             setIsLoadingFirestore(false);
             console.log("DashboardPage: Finished fetching products, isLoadingFirestore set to false.");
           }
         };
         fetchProducts();
-      } else if (dashboardProducts.length > 0 && !isSavingFirestore) {
+      } else if (!isSavingFirestore) { // Products already loaded or save in progress
         setIsLoadingFirestore(false);
-        console.log("DashboardPage: Products already loaded or saving in progress, skipping fetch. isLoadingFirestore set to false.");
       }
 
       // Fetch Stock History
-      if (stockHistory.length === 0 || (lastDataUpdateTimestamp && stockHistory.length > 0 && stockHistory[stockHistory.length-1]?.date < lastDataUpdateTimestamp)) { 
+      if ((stockHistory.length === 0 || (lastDataUpdateTimestamp && stockHistory.length > 0 && stockHistory[stockHistory.length-1]?.date < lastDataUpdateTimestamp)) && !isLoadingHistory && !isSavingFirestore ) { 
         setIsLoadingHistory(true);
         const fetchHistory = async () => {
           console.log("DashboardPage: Fetching stock history");
@@ -223,7 +224,7 @@ export default function DashboardPage() {
       setStockHistory([]);
       setIsLoadingHistory(false);
     }
-  }, [currentUser, isAuthLoading, dashboardProducts.length, isSavingFirestore, isAdmin, toast, stockHistory.length, lastDataUpdateTimestamp]);
+  }, [currentUser, isAuthLoading, dashboardProducts.length, isAdmin, toast, isSavingFirestore, stockHistory.length, lastDataUpdateTimestamp, isLoadingHistory]); // Added isLoadingHistory
 
   const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
     if (!currentUser || !isAdmin) {
@@ -243,7 +244,6 @@ export default function DashboardPage() {
       const productsColPath = "shared_products";
       const productsColRef = collection(firestore, productsColPath);
       
-      // Delete existing products in batches
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
       const docsToDelete = existingDocsSnapshot.docs; 
@@ -259,7 +259,6 @@ export default function DashboardPage() {
       }
       console.log(`DashboardPage: Finished deleting ${totalDeleted} products.`);
 
-      // Add new products in batches
       if (productsToSave.length > 0) {
         console.log(`DashboardPage: Starting to add ${productsToSave.length} new products.`);
         for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
@@ -276,7 +275,6 @@ export default function DashboardPage() {
         console.log(`DashboardPage: Finished adding ${totalAdded} products.`);
       }
 
-      // Record stock history
       if (productsToSave.length > 0) {
         const currentTotalStockUnits = productsToSave.reduce((sum, p) => sum + (p.stock || 0), 0);
         const currentTotalSkusWithStock = productsToSave.filter(p => (p.stock || 0) > 0).length;
@@ -286,22 +284,25 @@ export default function DashboardPage() {
           totalSkusWithStock: currentTotalSkusWithStock,
         });
         console.log("DashboardPage: Stock history entry added with units:", currentTotalStockUnits, "and SKUs with stock:", currentTotalSkusWithStock);
+         // Force re-fetch of history by clearing it and setting loading to true
+        setStockHistory([]); 
+        setIsLoadingHistory(true); // This will trigger the history fetch useEffect
       }
-
 
       const metadataDocRef = doc(firestore, "app_metadata", "products_metadata");
       const newTimestamp = serverTimestamp();
       await setDoc(metadataDocRef, { lastUpdatedAt: newTimestamp }, { merge: true });
       console.log("DashboardPage: Products metadata (lastUpdatedAt) updated in Firestore.");
       
-      setDashboardProducts(productsToSave); // Update local state
-      setLastDataUpdateTimestamp(new Date()); // Trigger re-fetch of history
+      setDashboardProducts(productsToSave);
+      setLastDataUpdateTimestamp(new Date());
 
       toast({ title: "Dados Globais Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''} Histórico de estoque atualizado.` });
 
     } catch (error) {
       console.error("DashboardPage: Error saving products to Firestore:", error);
-      toast({ title: "Erro ao Salvar", description: `Não foi possível salvar: ${(error as Error).message}`, variant: "destructive" });
+      const firestoreError = error as Error;
+      toast({ title: "Erro ao Salvar", description: `Não foi possível salvar: ${firestoreError.message}`, variant: "destructive" });
     } finally {
       setIsSavingFirestore(false);
       console.log("DashboardPage: Finished saving products, isSavingFirestore set to false.");
@@ -358,7 +359,8 @@ export default function DashboardPage() {
     const skusByProductTypeMap = new Map<string, { totalSkus: number; skusWithStock: number; skusWithoutStock: number }>();
     const skusBySizeMap = new Map<string, { totalSkus: number; skusWithStock: number; skusWithoutStock: number }>();
     const stockByPrintMap = new Map<string, { stock: number }>();
-    const zeroStockSkusByCollectionMap = new Map<string, number>();
+    const collectionSkuMap = new Map<string, { activeSkus: number; zeroStockSkus: number; totalSkusInCollection: number }>();
+
 
     let totalStock = 0;
     let totalSkus = filteredProductsForDashboard.length;
@@ -371,7 +373,7 @@ export default function DashboardPage() {
       const collectionKey = product.collection || 'Não Especificada';
       const typeKey = product.productType || 'Não Especificado';
       const sizeKey = product.size || 'Não Especificado';
-      const printKey = product.description || 'Não Especificada'; // Using "Descrição" for estampa
+      const printKey = product.description || 'Não Especificada';
 
       const currentCol = stockByCollectionMap.get(collectionKey) || { stock: 0, skus: 0 };
       currentCol.stock += (product.stock || 0);
@@ -394,26 +396,31 @@ export default function DashboardPage() {
       currentPrint.stock += (product.stock || 0);
       stockByPrintMap.set(printKey, currentPrint);
 
-      if ((product.stock || 0) === 0) {
-        zeroStockSkusByCollectionMap.set(collectionKey, (zeroStockSkusByCollectionMap.get(collectionKey) || 0) + 1);
+      // For collectionSkuStatus and rupture
+      const currentCollectionSkuData = collectionSkuMap.get(collectionKey) || { activeSkus: 0, zeroStockSkus: 0, totalSkusInCollection: 0 };
+      currentCollectionSkuData.totalSkusInCollection +=1;
+      if ((product.stock || 0) > 0) {
+        currentCollectionSkuData.activeSkus += 1;
+      } else {
+        currentCollectionSkuData.zeroStockSkus += 1;
         totalZeroStockSkus++;
       }
+      collectionSkuMap.set(collectionKey, currentCollectionSkuData);
+
       totalStock += (product.stock || 0);
       totalReadyToShipStock += product.readyToShip || 0;
       totalRegulatorStock += product.regulatorStock || 0;
       totalOpenOrders += product.openOrders || 0;
     });
-
-    const collectionSkuStatusData: CollectionSkuStatusData[] = Array.from(stockByCollectionMap.entries()).map(([name, collData]) => {
-      const zeroSkusCount = zeroStockSkusByCollectionMap.get(name) || 0;
-      const activeSkusCount = collData.skus - zeroSkusCount;
-      return { name, activeSkus: activeSkusCount, zeroStockSkus: zeroSkusCount, };
-    }).sort((a,b) => (b.activeSkus + b.zeroStockSkus) - (a.activeSkus + a.zeroStockSkus));
     
-    const collectionRupturePercentageData = Array.from(stockByCollectionMap.entries()).map(([name, collData]) => {
-        const zeroStockCount = zeroStockSkusByCollectionMap.get(name) || 0;
-        const totalSkusInCollection = collData.skus;
-        const rupturePercentage = totalSkusInCollection > 0 ? (zeroStockCount / totalSkusInCollection) * 100 : 0;
+    const collectionSkuStatusData: CollectionSkuStatusData[] = Array.from(collectionSkuMap.entries()).map(([name, data]) => ({
+        name,
+        activeSkus: data.activeSkus,
+        zeroStockSkus: data.zeroStockSkus,
+    })).sort((a,b) => (b.activeSkus + b.zeroStockSkus) - (a.activeSkus + a.zeroStockSkus));
+
+    const collectionRupturePercentageData = Array.from(collectionSkuMap.entries()).map(([name, data]) => {
+        const rupturePercentage = data.totalSkusInCollection > 0 ? (data.zeroStockSkus / data.totalSkusInCollection) * 100 : 0;
         return { name, rupturePercentage: parseFloat(rupturePercentage.toFixed(2)), };
     }).sort((a, b) => b.rupturePercentage - a.rupturePercentage);
 
@@ -487,7 +494,7 @@ export default function DashboardPage() {
       yPos += 10;
 
       doc.setFontSize(10);
-      doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`, pageWidth / 2, yPos, { align: "center" });
+      doc.text(`Gerado em: ${formatDateFns(new Date(), 'dd/MM/yyyy HH:mm:ss', { locale: ptBR })}`, pageWidth / 2, yPos, { align: "center" });
       yPos += 7;
       if (lastDataUpdateTimestamp) {
         doc.setFontSize(9);
@@ -508,7 +515,7 @@ export default function DashboardPage() {
         ["Total SKUs Zerados", aggregatedData.totalZeroStockSkus.toLocaleString()],
       ];
 
-      autoTable(doc, {
+      (doc as any).autoTable({ // Use jsPDF-AutoTable
         startY: yPos,
         head: [["Métrica", "Valor"]],
         body: summaryTableBody,
@@ -563,10 +570,10 @@ export default function DashboardPage() {
         { id: 'chart-stock-by-collection', title: 'Estoque por Descrição Linha Comercial', data: aggregatedData.stockByCollection },
         { id: 'chart-sku-stock-status', title: 'Distribuição de SKUs (Estoque vs. Zerado)', data: aggregatedData.skuStockStatus },
         { id: 'chart-rupture-by-collection', title: 'Ruptura (%) por Descrição Linha Comercial', data: aggregatedData.collectionRupturePercentage },
+        { id: 'chart-collection-sku-status', title: 'Status de SKUs por Descrição Linha Comercial (Ativos vs. Zerados)', data: aggregatedData.collectionSkuStatus },
+        { id: 'chart-skus-by-product-type', title: 'SKUs por Tipo de Produto (Coluna Tipo. Produto)', data: aggregatedData.skusByProductType },
         { id: 'chart-skus-by-size', title: 'SKUs por Tamanho (Excel)', data: aggregatedData.skusBySize },
         { id: 'chart-stock-by-print', title: 'Estoque por Estampa (Top 15 - Coluna Descrição)', data: aggregatedData.stockByPrint },
-        { id: 'chart-skus-by-product-type', title: 'SKUs por Tipo de Produto (Coluna Tipo. Produto)', data: aggregatedData.skusByProductType },
-        { id: 'chart-collection-sku-status', title: 'Status de SKUs por Descrição Linha Comercial (Ativos vs. Zerados)', data: aggregatedData.collectionSkuStatus },
       ];
 
       for (const chartInfo of chartSections) {
@@ -578,7 +585,7 @@ export default function DashboardPage() {
          }
       }
 
-      let pdfFileName = `Relatorio_Dashboard_${new Date().toISOString().split('T')[0]}`;
+      let pdfFileName = `Relatorio_Dashboard_${formatDateFns(new Date(), 'yyyy-MM-dd', { locale: ptBR })}`;
       if (selectedCollection !== ALL_COLLECTIONS_VALUE) {
         pdfFileName += `_${selectedCollection.replace(/[^a-zA-Z0-9]/g, '_')}`;
       }
@@ -587,7 +594,8 @@ export default function DashboardPage() {
       toast({ title: "PDF Gerado!", description: "O download do relatório foi iniciado." });
     } catch (error) {
       console.error("Erro ao gerar PDF:", error);
-      toast({ title: "Erro ao Gerar PDF", description: `Não foi possível gerar o relatório: ${(error as Error).message}. Verifique o console.`, variant: "destructive" });
+      const pdfError = error as Error;
+      toast({ title: "Erro ao Gerar PDF", description: `Não foi possível gerar o relatório: ${pdfError.message}. Verifique o console.`, variant: "destructive" });
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -607,7 +615,7 @@ export default function DashboardPage() {
     );
   };
 
-  const displayLoader = (isLoadingFirestore || isAuthLoading || isLoadingHistory) && dashboardProducts.length === 0 && stockHistory.length === 0 && !isSavingFirestore;
+  const displayLoader = (isLoadingFirestore || isAuthLoading) && dashboardProducts.length === 0 && !isSavingFirestore;
 
   if (displayLoader) {
     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Carregando dados...</p></div>;
@@ -622,7 +630,7 @@ export default function DashboardPage() {
         </div>
         <Button 
           onClick={generateDashboardPdf} 
-          disabled={isGeneratingPdf || isSavingFirestore || isLoadingFirestore || (filteredProductsForDashboard.length === 0 && stockHistory.length === 0) || isAuthLoading || isLoadingHistory}
+          disabled={isGeneratingPdf || isSavingFirestore || isLoadingFirestore || (filteredProductsForDashboard.length === 0 && stockHistory.length === 0) || isAuthLoading }
         >
             {isGeneratingPdf ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
             Baixar Relatório PDF
@@ -699,7 +707,19 @@ export default function DashboardPage() {
                   <YAxis yAxisId="right" orientation="right" stroke="hsl(var(--chart-2))" label={{ value: 'SKUs c/ Estoque', angle: 90, position: 'insideRight', style: {textAnchor: 'middle', fill: 'hsl(var(--chart-2))'} }} />
                   <Tooltip
                     content={<ChartTooltipContent
-                        labelFormatter={(label) => formatDateFns(new Date(label), "dd/MM/yyyy", { locale: ptBR })} 
+                        labelFormatter={(label) => {
+                          // Ensure 'label' exists and is not null/undefined before trying to make a Date from it
+                          if (label === null || typeof label === 'undefined') {
+                            return "Data Indisponível";
+                          }
+                          const dateToFormat = label instanceof Date ? label : new Date(label);
+                          if (isDateValid(dateToFormat)) {
+                            return formatDateFns(dateToFormat, "dd/MM/yyyy", { locale: ptBR });
+                          }
+                          // Log what `label` was if it's invalid
+                          console.warn("ChartTooltip: Invalid date label encountered in stock history chart:", label);
+                          return "Data Inválida";
+                        }} 
                         formatter={(value, name) => [`${(value as number).toLocaleString()} ${name === 'totalStockUnits' ? 'unid.' : 'SKUs'}`, name === 'totalStockUnits' ? 'Unidades Totais' : 'SKUs c/ Estoque']}
                     />}
                     
