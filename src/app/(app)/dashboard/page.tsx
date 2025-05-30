@@ -13,11 +13,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection';
 import type { Product, StockHistoryEntry } from '@/types';
-import { ResponsiveContainer, BarChart as RechartsBarChart, Bar, XAxis, YAxis, Tooltip, Legend as RechartsLegend, CartesianGrid, PieChart, Pie, Cell, LineChart as RechartsLineChart, Line as RechartsLine } from 'recharts';
+import { ResponsiveContainer, BarChart as RechartsBarChart, Bar, XAxis, YAxis, Tooltip, Legend as RechartsLegend, CartesianGrid, PieChart, Pie, Cell, LineChart as RechartsLineChart, Line as RechartsLineElement } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart";
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable'; // Ensure plugin is imported for autoTable to be registered
+import 'jspdf-autotable';
 import html2canvas from 'html2canvas';
 import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
 import { collection, getDocs, writeBatch, doc, Timestamp, query, setDoc, getDoc, serverTimestamp, orderBy, addDoc, deleteDoc, collectionGroup } from 'firebase/firestore';
@@ -50,7 +50,7 @@ interface CollectionSkuStatusData {
 }
 
 const ALL_COLLECTIONS_VALUE = "_ALL_DASHBOARD_COLLECTIONS_";
-const FIRESTORE_BATCH_LIMIT = 450; 
+const FIRESTORE_BATCH_LIMIT = 450;
 
 const chartConfigBase = {
   stock: { label: "Estoque", },
@@ -66,7 +66,7 @@ const chartConfigBase = {
 } satisfies ChartConfig;
 
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
-const PIE_COLORS = ["hsl(var(--chart-2))", "hsl(var(--destructive))"]; // Green for with stock, Red for zero stock
+const PIE_COLORS = ["hsl(var(--chart-2))", "hsl(var(--destructive))"];
 
 const productToFirestore = (product: Product): any => {
   const data: any = { ...product };
@@ -94,7 +94,7 @@ const productFromFirestore = (data: any): Product => {
 const stockHistoryEntryFromFirestore = (id: string, data: any): StockHistoryEntry => {
   return {
     id,
-    date: data.date instanceof Timestamp ? data.date.toDate() : new Date(), // Fallback to current date
+    date: data.date instanceof Timestamp ? data.date.toDate() : new Date(),
     totalStockUnits: data.totalStockUnits || 0,
     totalSkusWithStock: data.totalSkusWithStock || 0,
   };
@@ -118,11 +118,39 @@ export default function DashboardPage() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
 
 
-  const isAdmin = useMemo(() => currentUser?.email.toLowerCase() === process.env.NEXT_PUBLIC_ADMIN_EMAIL?.toLowerCase() && currentUser?.isAdmin, [currentUser]);
+  const isAdmin = useMemo(() => currentUser?.email.toLowerCase() === (process.env.NEXT_PUBLIC_ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br").toLowerCase() && currentUser?.isAdmin, [currentUser]);
+
+  const fetchHistory = useCallback(async () => {
+    if (!currentUser || !firestore || firestoreClientInitializationError || isSavingFirestore) {
+      console.log("DashboardPage (fetchHistory): Pre-conditions not met or saving. User:", !!currentUser, "Firestore:", !!firestore, "Error:", firestoreClientInitializationError, "Saving:", isSavingFirestore);
+      setIsLoadingHistory(false);
+      if (!currentUser || !firestore) setStockHistory([]);
+      return;
+    }
+
+    console.log("DashboardPage (fetchHistory): Attempting to fetch stock history.");
+    setIsLoadingHistory(true);
+    try {
+      const historyQuery = query(collection(firestore, "stock_history"), orderBy("date", "asc"));
+      const historySnapshot = await getDocs(historyQuery);
+      const historyFromDb: StockHistoryEntry[] = historySnapshot.docs.map(docSnap => stockHistoryEntryFromFirestore(docSnap.id, docSnap.data()));
+      setStockHistory(historyFromDb);
+      console.log("DashboardPage (fetchHistory): Fetched stock history entries:", historyFromDb.length);
+    } catch (error) {
+      const fullError = error instanceof Error ? error : new Error(String(error));
+      console.error("DashboardPage (fetchHistory): Error fetching stock history:", fullError);
+      toast({ title: "Erro ao Carregar Histórico", description: `Não foi possível buscar o histórico de estoque: ${fullError.message}`, variant: "destructive" });
+      setStockHistory([]);
+    } finally {
+      console.log("DashboardPage (fetchHistory): Fetch attempt finished. Setting isLoadingHistory to false.");
+      setIsLoadingHistory(false);
+    }
+  }, [currentUser, firestore, firestoreClientInitializationError, toast, isSavingFirestore]);
+
 
   useEffect(() => {
-    console.log("DashboardPage: useEffect triggered. AuthLoading:", isAuthLoading, "CurrentUser:", !!currentUser, "Products loaded:", dashboardProducts.length, "Firestore client init error:", firestoreClientInitializationError, "Firestore instance:", !!firestore);
-
+    console.log(`DashboardPage: Main useEffect triggered. AuthLoading: ${isAuthLoading}, CurrentUser: ${!!currentUser}, Products loaded: ${dashboardProducts.length}, Saving: ${isSavingFirestore}, Firestore client init error: ${firestoreClientInitializationError}, Firestore instance: ${!!firestore}`);
+    
     if (isAuthLoading) {
       console.log("DashboardPage: Auth context is loading, waiting...");
       if (dashboardProducts.length === 0) setIsLoadingFirestore(true);
@@ -144,12 +172,12 @@ export default function DashboardPage() {
     }
 
     if (currentUser) {
-      console.log("DashboardPage: User is available. Products loaded:", dashboardProducts.length, "Saving:", isSavingFirestore);
+      console.log(`DashboardPage: User is available. Products loaded: ${dashboardProducts.length}, Saving: ${isSavingFirestore}`);
       // Fetch Products
       if (dashboardProducts.length === 0 && !isSavingFirestore) {
         setIsLoadingFirestore(true);
         const fetchProducts = async () => {
-          console.log("DashboardPage: Attempting to fetch products from GLOBAL /shared_products. Firestore instance available:", !!firestore);
+          console.log("DashboardPage: Attempting to fetch products from GLOBAL /shared_products.");
           try {
             const productsColPath = "shared_products";
             const productsQuery = query(collection(firestore, productsColPath));
@@ -167,11 +195,9 @@ export default function DashboardPage() {
                  console.log("DashboardPage: Fetched lastDataUpdateTimestamp:", data.lastUpdatedAt.toDate());
               } else {
                 setLastDataUpdateTimestamp(null);
-                console.log("DashboardPage: Metadata doc exists but no valid lastUpdatedAt field.");
               }
             } else {
               setLastDataUpdateTimestamp(null);
-              console.log("DashboardPage: No metadata document found for products.");
             }
              if (productsFromDb.length === 0 && !isAdmin) {
                toast({ title: "Sem Dados Carregados", description: "Nenhum produto encontrado. O administrador precisa carregar uma planilha.", variant: "default" });
@@ -186,37 +212,36 @@ export default function DashboardPage() {
           }
         };
         fetchProducts();
-      } else if (!isSavingFirestore) { // Products already loaded or save in progress
+      } else if (!isSavingFirestore) { 
         setIsLoadingFirestore(false);
       }
 
-      // Fetch Stock History
-      if ((stockHistory.length === 0 || (lastDataUpdateTimestamp && stockHistory.length > 0 && stockHistory[stockHistory.length-1]?.date < lastDataUpdateTimestamp)) && !isLoadingHistory && !isSavingFirestore ) { 
-        setIsLoadingHistory(true);
-        const fetchHistory = async () => {
-          console.log("DashboardPage: Fetching stock history");
-          try {
-            const historyQuery = query(collection(firestore, "stock_history"), orderBy("date", "asc"));
-            const historySnapshot = await getDocs(historyQuery);
-            const historyFromDb: StockHistoryEntry[] = historySnapshot.docs.map(docSnap => stockHistoryEntryFromFirestore(docSnap.id, docSnap.data()));
-            setStockHistory(historyFromDb);
-            console.log("DashboardPage: Fetched stock history entries:", historyFromDb.length);
-          } catch (error) {
-            const fullError = error instanceof Error ? error : new Error(String(error));
-            console.error("DashboardPage: Error fetching stock history:", fullError);
-            toast({ title: "Erro ao Carregar Histórico", description: `Não foi possível buscar o histórico de estoque: ${fullError.message}`, variant: "destructive" });
-          } finally {
+      // Stock History Fetching Logic
+      if (!isSavingFirestore) {
+        const needsToFetchHistory =
+          stockHistory.length === 0 ||
+          (lastDataUpdateTimestamp &&
+           stockHistory.length > 0 &&
+           stockHistory[stockHistory.length - 1]?.date && 
+           stockHistory[stockHistory.length - 1].date < lastDataUpdateTimestamp);
+
+        if (needsToFetchHistory) {
+          console.log("DashboardPage: Main useEffect determined history fetch needed.");
+          fetchHistory(); 
+        } else {
+          if (isLoadingHistory) { // If not fetching, but was loading, set to false.
+            console.log("DashboardPage: Main useEffect determined history fetch NOT needed, ensuring isLoadingHistory is false.");
             setIsLoadingHistory(false);
-            console.log("DashboardPage: Finished fetching stock history, isLoadingHistory set to false.");
           }
-        };
-        fetchHistory();
-      } else if (stockHistory.length > 0) {
-         setIsLoadingHistory(false);
+        }
+      } else { // isSavingFirestore is true
+        if (isLoadingHistory) {
+          console.log("DashboardPage: Main useEffect - saving in progress, ensuring isLoadingHistory is false.");
+          setIsLoadingHistory(false);
+        }
       }
 
-
-    } else { // No current user
+    } else { 
       console.log("DashboardPage: No current user. Clearing data and setting loading to false.");
       setDashboardProducts([]);
       setLastDataUpdateTimestamp(null);
@@ -224,7 +249,8 @@ export default function DashboardPage() {
       setStockHistory([]);
       setIsLoadingHistory(false);
     }
-  }, [currentUser, isAuthLoading, dashboardProducts.length, isAdmin, toast, isSavingFirestore, stockHistory.length, lastDataUpdateTimestamp, isLoadingHistory]); // Added isLoadingHistory
+  }, [currentUser, isAuthLoading, dashboardProducts.length, isAdmin, toast, isSavingFirestore, lastDataUpdateTimestamp, firestore, firestoreClientInitializationError, fetchHistory, stockHistory.length, isLoadingHistory]);
+
 
   const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
     if (!currentUser || !isAdmin) {
@@ -237,6 +263,9 @@ export default function DashboardPage() {
     }
     console.log("DashboardPage: Admin attempting to save products to GLOBAL /shared_products collection.");
     setIsSavingFirestore(true);
+    setIsLoadingFirestore(true); // Indicate loading while saving
+    setIsLoadingHistory(true); // Also indicate history might be reloaded
+
     let totalDeleted = 0;
     let totalAdded = 0;
 
@@ -257,7 +286,6 @@ export default function DashboardPage() {
         totalDeleted += chunk.length;
         console.log(`DashboardPage: Batch deleted ${chunk.length} products. Total deleted so far: ${totalDeleted}`);
       }
-      console.log(`DashboardPage: Finished deleting ${totalDeleted} products.`);
 
       if (productsToSave.length > 0) {
         console.log(`DashboardPage: Starting to add ${productsToSave.length} new products.`);
@@ -272,7 +300,6 @@ export default function DashboardPage() {
           totalAdded += chunk.length;
           console.log(`DashboardPage: Batch added ${chunk.length} products. Total added so far: ${totalAdded}`);
         }
-        console.log(`DashboardPage: Finished adding ${totalAdded} products.`);
       }
 
       if (productsToSave.length > 0) {
@@ -283,21 +310,21 @@ export default function DashboardPage() {
           totalStockUnits: currentTotalStockUnits,
           totalSkusWithStock: currentTotalSkusWithStock,
         });
-        console.log("DashboardPage: Stock history entry added with units:", currentTotalStockUnits, "and SKUs with stock:", currentTotalSkusWithStock);
-         // Force re-fetch of history by clearing it and setting loading to true
-        setStockHistory([]); 
-        setIsLoadingHistory(true); // This will trigger the history fetch useEffect
+        console.log("DashboardPage: Stock history entry added.");
       }
 
       const metadataDocRef = doc(firestore, "app_metadata", "products_metadata");
-      const newTimestamp = serverTimestamp();
-      await setDoc(metadataDocRef, { lastUpdatedAt: newTimestamp }, { merge: true });
-      console.log("DashboardPage: Products metadata (lastUpdatedAt) updated in Firestore.");
+      await setDoc(metadataDocRef, { lastUpdatedAt: serverTimestamp() }, { merge: true });
+      console.log("DashboardPage: Products metadata (lastUpdatedAt) updated.");
       
-      setDashboardProducts(productsToSave);
-      setLastDataUpdateTimestamp(new Date());
+      setDashboardProducts(productsToSave); // Update local state
+      const newTimestamp = new Date(); // Use client date as approximation until next fetch
+      setLastDataUpdateTimestamp(newTimestamp);
+      
+      setStockHistory([]); // Clear current history
+      // setIsLoadingHistory(true); // Signal that history needs to be re-fetched by the useEffect
 
-      toast({ title: "Dados Globais Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''} Histórico de estoque atualizado.` });
+      toast({ title: "Dados Globais Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} antigos foram removidos.` : ''} Histórico de estoque atualizado.` });
 
     } catch (error) {
       console.error("DashboardPage: Error saving products to Firestore:", error);
@@ -305,9 +332,11 @@ export default function DashboardPage() {
       toast({ title: "Erro ao Salvar", description: `Não foi possível salvar: ${firestoreError.message}`, variant: "destructive" });
     } finally {
       setIsSavingFirestore(false);
+      setIsLoadingFirestore(false); // Data saving/loading process complete
+      // Let useEffect handle history loading based on changed lastDataUpdateTimestamp or cleared stockHistory
       console.log("DashboardPage: Finished saving products, isSavingFirestore set to false.");
     }
-  }, [currentUser, isAdmin, toast]);
+  }, [currentUser, isAdmin, toast, firestore]); // Removed stockHistory and setIsLoadingHistory as direct dependencies
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
     console.log("DashboardPage: Excel data processed, parsed products count:", parsedProducts.length);
@@ -396,7 +425,6 @@ export default function DashboardPage() {
       currentPrint.stock += (product.stock || 0);
       stockByPrintMap.set(printKey, currentPrint);
 
-      // For collectionSkuStatus and rupture
       const currentCollectionSkuData = collectionSkuMap.get(collectionKey) || { activeSkus: 0, zeroStockSkus: 0, totalSkusInCollection: 0 };
       currentCollectionSkuData.totalSkusInCollection +=1;
       if ((product.stock || 0) > 0) {
@@ -515,7 +543,7 @@ export default function DashboardPage() {
         ["Total SKUs Zerados", aggregatedData.totalZeroStockSkus.toLocaleString()],
       ];
 
-      (doc as any).autoTable({ // Use jsPDF-AutoTable
+      (doc as any).autoTable({ 
         startY: yPos,
         head: [["Métrica", "Valor"]],
         body: summaryTableBody,
@@ -702,31 +730,30 @@ export default function DashboardPage() {
               <ChartContainer config={stockHistoryChartConfig} className="h-full w-full">
                 <RechartsLineChart data={stockHistory} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" tickFormatter={(value) => formatDateFns(new Date(value), "dd/MM/yy", { locale: ptBR })} />
+                  <XAxis dataKey="date" tickFormatter={(value) => {
+                      if (value === null || typeof value === 'undefined') return "Data Indisponível";
+                      const dateToFormat = value instanceof Date ? value : new Date(value);
+                      if (isDateValid(dateToFormat)) return formatDateFns(dateToFormat, "dd/MM/yy", { locale: ptBR });
+                      console.warn("ChartTooltip: Invalid date label encountered in stock history chart (XAxis):", value);
+                      return "Data Inválida";
+                  }} />
                   <YAxis yAxisId="left" stroke="hsl(var(--chart-1))" label={{ value: 'Unidades Totais', angle: -90, position: 'insideLeft', style: {textAnchor: 'middle', fill: 'hsl(var(--chart-1))'} }} />
                   <YAxis yAxisId="right" orientation="right" stroke="hsl(var(--chart-2))" label={{ value: 'SKUs c/ Estoque', angle: 90, position: 'insideRight', style: {textAnchor: 'middle', fill: 'hsl(var(--chart-2))'} }} />
                   <Tooltip
                     content={<ChartTooltipContent
                         labelFormatter={(label) => {
-                          // Ensure 'label' exists and is not null/undefined before trying to make a Date from it
-                          if (label === null || typeof label === 'undefined') {
-                            return "Data Indisponível";
-                          }
+                          if (label === null || typeof label === 'undefined') return "Data Indisponível";
                           const dateToFormat = label instanceof Date ? label : new Date(label);
-                          if (isDateValid(dateToFormat)) {
-                            return formatDateFns(dateToFormat, "dd/MM/yyyy", { locale: ptBR });
-                          }
-                          // Log what `label` was if it's invalid
-                          console.warn("ChartTooltip: Invalid date label encountered in stock history chart:", label);
+                          if (isDateValid(dateToFormat)) return formatDateFns(dateToFormat, "dd/MM/yyyy", { locale: ptBR });
+                          console.warn("ChartTooltip: Invalid date label encountered in stock history chart (Tooltip):", label);
                           return "Data Inválida";
                         }} 
                         formatter={(value, name) => [`${(value as number).toLocaleString()} ${name === 'totalStockUnits' ? 'unid.' : 'SKUs'}`, name === 'totalStockUnits' ? 'Unidades Totais' : 'SKUs c/ Estoque']}
                     />}
-                    
-                    />
+                  />
                   <RechartsLegend />
-                  <RechartsLine yAxisId="left" type="monotone" dataKey="totalStockUnits" name="Unidades Totais" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                  <RechartsLine yAxisId="right" type="monotone" dataKey="totalSkusWithStock" name="SKUs c/ Estoque" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                  <RechartsLineElement yAxisId="left" type="monotone" dataKey="totalStockUnits" name="Unidades Totais" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                  <RechartsLineElement yAxisId="right" type="monotone" dataKey="totalSkusWithStock" name="SKUs c/ Estoque" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                 </RechartsLineChart>
               </ChartContainer>
             </CardContent>
