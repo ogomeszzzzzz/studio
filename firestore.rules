@@ -3,30 +3,40 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/(default)/documents {
 
-    // Rules for user authentication profiles
+    // Coleção de perfis de autenticação de usuários
     match /auth_users/{userEmail} {
-      // Allow client to get a specific user's profile (for AppLayout to check isApproved, isAdmin)
+      // Permite que o cliente (AppLayout) leia o perfil de um usuário específico
+      // para verificar isApproved e isAdmin após o login.
       allow get: if true;
-      // Disallow client from listing, creating, updating, or deleting user profiles directly.
-      // These operations are handled by Server Actions.
+
+      // Bloqueia a listagem de todos os usuários ou a modificação direta
+      // de perfis de usuário pelo cliente. Estas operações (registro, aprovação)
+      // são gerenciadas por Server Actions que usam o Admin SDK.
       allow list, create, update, delete: if false;
     }
 
-    // Rules for the GLOBAL shared product data
-    // All authenticated users can read. Only admin can write/delete.
+    // Coleção global de produtos
+    // Acessível para leitura por todos os usuários.
+    // A escrita (upload) é feita pelo cliente do admin; a UI restringe o botão de upload.
+    // Para produção, a escrita aqui DEVERIA ser via Server Action com validação de admin.
     match /shared_products/{productId} {
-      allow read: if request.auth != null; // Any authenticated user can read
-      allow write, delete: if request.auth != null && request.auth.token.email == 'gustavo.cordeiro@altenburg.com.br' && request.auth.token.email_verified == true;
+      allow read: if true;  // Todos podem ler documentos individuais
+      allow write: if true; // Permite que o cliente do admin escreva/delete (para protótipo)
+    }
+    match /shared_products { // Necessário para listar a coleção (getDocs)
+      allow list: if true;
     }
 
-    // Rules for the GLOBAL metadata for shared products
+
+    // Documento de metadados globais para os produtos
+    // Similar a shared_products: leitura para todos, escrita pelo admin via UI.
     match /app_metadata/products_metadata {
-      allow read: if request.auth != null; // Any authenticated user can read
-      allow get, write, update, delete: if request.auth != null && request.auth.token.email == 'gustavo.cordeiro@altenburg.com.br' && request.auth.token.email_verified == true;
+      allow read: if true;
+      allow write: if true; // Permite que o cliente do admin escreva (para protótipo)
     }
 
-    // Fallback rule: deny access to any other paths not defined above.
-    match /{path=**} {
+    // Regra de fallback: nega acesso a quaisquer outros caminhos não definidos acima.
+    match /{document=**} {
       allow read, write: if false;
     }
   }
