@@ -1,24 +1,24 @@
 
 'use server';
 
-import { adminFirestore, adminSDKInitializationError } from '@/lib/firebase/adminConfig';
+import { adminFirestore_DefaultDB, adminSDKInitializationError as adminSDKAuthError } from '@/lib/firebase/adminConfig';
 import { Timestamp } from 'firebase-admin/firestore';
 import type { UserProfile } from '@/types';
 
 interface ActionResult {
   message: string;
   status: 'success' | 'error' | 'pending';
-  user?: UserProfile; // For login
+  user?: UserProfile; 
 }
 
 const ADMIN_PRIMARY_EMAIL = process.env.ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br";
 
 export async function registerUserInFirestore(prevState: any, formData: FormData): Promise<ActionResult> {
-  if (adminSDKInitializationError) {
-    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError}`, status: 'error' };
+  if (adminSDKAuthError) {
+    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKAuthError}`, status: 'error' };
   }
-  if (!adminFirestore) {
-    return { message: "Erro Crítico no Servidor: Firestore Admin não está disponível.", status: 'error' };
+  if (!adminFirestore_DefaultDB) {
+    return { message: "Erro Crítico no Servidor: Conexão com Firestore (Default DB) para usuários não está disponível.", status: 'error' };
   }
 
   const name = formData.get('name') as string;
@@ -33,7 +33,7 @@ export async function registerUserInFirestore(prevState: any, formData: FormData
   }
 
   try {
-    const userDocRef = adminFirestore.collection('auth_users').doc(email.toLowerCase());
+    const userDocRef = adminFirestore_DefaultDB.collection('auth_users').doc(email.toLowerCase());
     const userDoc = await userDocRef.get();
 
     if (userDoc.exists) {
@@ -41,16 +41,12 @@ export async function registerUserInFirestore(prevState: any, formData: FormData
     }
 
     const isAdmin = email.toLowerCase() === ADMIN_PRIMARY_EMAIL.toLowerCase();
-    const newUserProfile: UserProfile = {
-      uid: email.toLowerCase(), // Use email as UID
+    const newUserProfile: Omit<UserProfile, 'uid'> & { password?: string; createdAt: Timestamp } = {
       email: email.toLowerCase(),
       name,
-      // ADVERTÊNCIA DE SEGURANÇA: Armazenando senha em texto plano. NÃO FAÇA ISSO EM PRODUÇÃO!
-      // A senha deve ser hasheada antes de ser armazenada.
-      // password: hashedPassword, // Exemplo se estivesse usando hash
-      password: password, // Temporário para atender ao pedido, mas inseguro.
-      isApproved: isAdmin, // Admin é aprovado automaticamente
-      pendingApproval: !isAdmin, // Não admin precisa de aprovação
+      password: password, // ATENÇÃO: Senha em texto plano!
+      isApproved: isAdmin, 
+      pendingApproval: !isAdmin, 
       isAdmin: isAdmin,
       createdAt: Timestamp.now(),
     };
@@ -70,11 +66,11 @@ export async function registerUserInFirestore(prevState: any, formData: FormData
 }
 
 export async function loginUserWithFirestore(prevState: any, formData: FormData): Promise<ActionResult> {
-  if (adminSDKInitializationError) {
-    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError}`, status: 'error' };
+  if (adminSDKAuthError) {
+    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKAuthError}`, status: 'error' };
   }
-  if (!adminFirestore) {
-    return { message: "Erro Crítico no Servidor: Firestore Admin não está disponível.", status: 'error' };
+  if (!adminFirestore_DefaultDB) {
+     return { message: "Erro Crítico no Servidor: Conexão com Firestore (Default DB) para usuários não está disponível.", status: 'error' };
   }
 
   const email = formData.get('email') as string;
@@ -85,38 +81,39 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
   }
 
   try {
-    const userDocRef = adminFirestore.collection('auth_users').doc(email.toLowerCase());
+    const userDocRef = adminFirestore_DefaultDB.collection('auth_users').doc(email.toLowerCase());
     const userDocSnap = await userDocRef.get();
 
     if (!userDocSnap.exists) {
       return { message: 'Email não encontrado.', status: 'error' };
     }
 
-    const userData = userDocSnap.data() as UserProfile & { password?: string };
-
-    // ADVERTÊNCIA DE SEGURANÇA: Comparação de senha em texto plano.
-    // Em um sistema real, você compararia um hash da senha fornecida com o hash armazenado.
-    if (userData.password !== password) {
+    const userDataFromDb = userDocSnap.data();
+    if (!userDataFromDb) {
+        return { message: 'Dados do usuário não encontrados após o fetch.', status: 'error' };
+    }
+    
+    // ATENÇÃO: Comparação de senha em texto plano!
+    if (userDataFromDb.password !== password) {
       return { message: 'Senha incorreta.', status: 'error' };
     }
 
-    if (!userData.isApproved && userData.pendingApproval) {
+    if (!userDataFromDb.isApproved && userDataFromDb.pendingApproval) {
       return { message: 'Sua conta está pendente de aprovação pelo administrador.', status: 'pending' };
     }
     
-    if (!userData.isApproved && !userData.pendingApproval) {
+    if (!userDataFromDb.isApproved && !userDataFromDb.pendingApproval) {
       return { message: 'Sua conta não foi aprovada. Contate o administrador.', status: 'error'};
     }
 
-    // Login bem-sucedido
     const userProfileToReturn: UserProfile = {
-      uid: userData.uid,
-      email: userData.email,
-      name: userData.name,
-      isApproved: userData.isApproved,
-      pendingApproval: userData.pendingApproval,
-      isAdmin: userData.isAdmin,
-      createdAt: userData.createdAt ? (userData.createdAt as Timestamp).toDate() : new Date(), // Convert Timestamp
+      uid: userDocSnap.id, // email é o ID
+      email: userDataFromDb.email,
+      name: userDataFromDb.name,
+      isApproved: userDataFromDb.isApproved,
+      pendingApproval: userDataFromDb.pendingApproval,
+      isAdmin: userDataFromDb.isAdmin,
+      createdAt: userDataFromDb.createdAt ? (userDataFromDb.createdAt as Timestamp).toDate() : new Date(),
     };
 
     return { message: 'Login bem-sucedido!', status: 'success', user: userProfileToReturn };
