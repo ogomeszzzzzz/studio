@@ -136,13 +136,15 @@ export default function DashboardPage() {
 
   const [selectedCollection, setSelectedCollection] = useState<string>(ALL_COLLECTIONS_VALUE);
 
+  const isAdmin = useMemo(() => currentUser?.email === 'gustavo.cordeiro@altenburg.com.br' && currentUser?.isAdmin, [currentUser]);
+
 
   useEffect(() => {
     console.log("DashboardPage: useEffect triggered. AuthLoading:", isAuthLoading, "CurrentUser:", !!currentUser, "Products loaded:", dashboardProducts.length, "SavingFirestore:", isSavingFirestore, "Firestore client init error:", firestoreClientInitializationError);
     
     if (isAuthLoading) {
       console.log("DashboardPage: Auth context is loading...");
-      if (dashboardProducts.length === 0) setIsLoadingFirestore(true); // Show loader if auth is happening and no products yet
+      if (dashboardProducts.length === 0) setIsLoadingFirestore(true);
       return;
     }
 
@@ -157,32 +159,30 @@ export default function DashboardPage() {
       return;
     }
 
+    // All authenticated users fetch data
     if (currentUser) {
       if (dashboardProducts.length === 0 && !isSavingFirestore) {
         setIsLoadingFirestore(true);
         const fetchProducts = async () => {
-          console.log(`DashboardPage: Attempting to fetch products for user email: ${currentUser.email}. Firestore instance available: ${!!firestore}`);
-          if (!firestore) { // Double check, though covered above
+          console.log("DashboardPage: Attempting to fetch products from GLOBAL collection. Firestore instance available:", !!firestore);
+          console.log("DashboardPage: Firestore client status. Error:", firestoreClientInitializationError, "Instance:", firestore ? "Available" : "Not Available");
+          if (!firestore) {
              toast({ title: "Erro Interno", description: "Firestore não disponível para buscar dados.", variant: "destructive" });
              setIsLoadingFirestore(false);
              return;
           }
           try {
-            const productsColPath = `user_products/${currentUser.email}/uploaded_products`;
-            console.log(`DashboardPage: Firestore products collection path: ${productsColPath}`);
+            const productsColPath = "shared_products"; // GLOBAL path
+            console.log("DashboardPage: Firestore products collection path:", productsColPath);
             
-            // Fetch products
             const productsQuery = query(collection(firestore, productsColPath));
             const snapshot = await getDocs(productsQuery);
-            const productsFromDb: Product[] = snapshot.docs
-              .filter(docSnap => docSnap.id !== '_metadata') // Exclude metadata from product list
-              .map(docSnap => productFromFirestore(docSnap.data()));
+            const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
             
             setDashboardProducts(productsFromDb);
             console.log(`DashboardPage: Fetched ${productsFromDb.length} products from Firestore.`);
 
-            // Fetch metadata for last update timestamp
-            const metadataDocRef = doc(firestore, `user_products/${currentUser.email}/uploaded_products`, '_metadata');
+            const metadataDocRef = doc(firestore, "app_metadata", "products_metadata"); // GLOBAL path
             const metadataDocSnap = await getDoc(metadataDocRef);
 
             if (metadataDocSnap.exists()) {
@@ -196,9 +196,9 @@ export default function DashboardPage() {
             }
 
             if (productsFromDb.length > 0) {
-              toast({ title: "Dados Carregados", description: "Dados de produtos carregados do seu perfil." });
+              // toast({ title: "Dados Carregados", description: "Dados de produtos carregados." });
             } else {
-              toast({ title: "Sem Dados no Perfil", description: "Nenhum produto encontrado no seu perfil. Faça upload de uma planilha.", variant: "default" });
+              toast({ title: "Sem Dados Carregados", description: "Nenhum produto encontrado. O administrador precisa carregar uma planilha.", variant: "default" });
             }
           } catch (error) {
             console.error("DashboardPage: Error fetching products from Firestore:", error);
@@ -209,11 +209,9 @@ export default function DashboardPage() {
         };
         fetchProducts();
       } else if (dashboardProducts.length > 0 && !isSavingFirestore) {
-        // Products already loaded, no auth in progress, not saving
         setIsLoadingFirestore(false);
       }
     } else {
-      // No current user, and auth is not loading
       console.log("DashboardPage: No current user. Clearing products and stopping loading.");
       setDashboardProducts([]);
       setLastDataUpdateTimestamp(null);
@@ -223,29 +221,30 @@ export default function DashboardPage() {
 
 
   const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
-    if (!currentUser || !currentUser.email) {
-      toast({ title: "Usuário não autenticado", description: "Faça login para salvar os dados.", variant: "destructive" });
+    if (!isAdmin) {
+      toast({ title: "Acesso Negado", description: "Apenas administradores podem salvar dados.", variant: "destructive" });
       return;
     }
     if (!firestore) {
       toast({ title: "Erro de Configuração", description: "Instância do Firestore não está disponível para salvar.", variant: "destructive" });
       return;
     }
-    console.log(`DashboardPage: Attempting to save products for user email: ${currentUser.email}. Firestore available: ${!!firestore}`);
+    console.log("DashboardPage: Admin attempting to save products to GLOBAL collection. Firestore available:", !!firestore);
     setIsSavingFirestore(true);
     let totalDeleted = 0;
     let totalAdded = 0;
 
     try {
-      const productsColPath = `user_products/${currentUser.email}/uploaded_products`;
-      console.log(`DashboardPage: Firestore products collection path for saving: ${productsColPath}`);
+      const productsColPath = "shared_products"; // GLOBAL path
+      console.log("DashboardPage: Firestore products collection path for saving:", productsColPath);
       const productsColRef = collection(firestore, productsColPath);
       
       const existingProductsQuery = query(productsColRef);
       const existingDocsSnapshot = await getDocs(existingProductsQuery);
 
       const deletePromises: Promise<void>[] = [];
-      const docsToDelete = existingDocsSnapshot.docs.filter(docSnap => docSnap.id !== '_metadata');
+      // No _metadata doc in shared_products, so no need to filter it out here
+      const docsToDelete = existingDocsSnapshot.docs; 
 
       for (let i = 0; i < docsToDelete.length; i += FIRESTORE_BATCH_LIMIT) {
         const batch = writeBatch(firestore);
@@ -254,7 +253,7 @@ export default function DashboardPage() {
             batch.delete(docSnapshot.ref);
             totalDeleted++;
         });
-        console.log(`DashboardPage: Committing a batch of ${chunk.length} deletions for user ${currentUser.email}.`);
+        console.log(`DashboardPage: Committing a batch of ${chunk.length} deletions for GLOBAL products.`);
         deletePromises.push(batch.commit());
       }
       await Promise.all(deletePromises);
@@ -271,19 +270,19 @@ export default function DashboardPage() {
             batch.set(newDocRef, productToFirestore(product));
             totalAdded++;
           });
-          console.log(`DashboardPage: Committing a batch of ${chunk.length} additions for user ${currentUser.email}.`);
+          console.log(`DashboardPage: Committing a batch of ${chunk.length} additions for GLOBAL products.`);
           addPromises.push(batch.commit());
         }
         await Promise.all(addPromises);
       }
 
-      const metadataDocRef = doc(firestore, productsColPath, '_metadata');
+      const metadataDocRef = doc(firestore, "app_metadata", "products_metadata"); // GLOBAL path
       const newTimestamp = serverTimestamp();
       await setDoc(metadataDocRef, { lastUpdatedAt: newTimestamp }, { merge: true });
       setLastDataUpdateTimestamp(new Date()); 
 
       setDashboardProducts(productsToSave);
-      toast({ title: "Dados Salvos!", description: `${totalAdded} produtos foram salvos no seu perfil. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
+      toast({ title: "Dados Globais Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} produtos antigos foram removidos.` : ''}` });
 
     } catch (error) {
       console.error("DashboardPage: Error saving products to Firestore:", error);
@@ -291,7 +290,7 @@ export default function DashboardPage() {
     } finally {
       setIsSavingFirestore(false);
     }
-  }, [currentUser, toast]);
+  }, [isAdmin, toast]);
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
     await saveProductsToFirestore(parsedProducts);
@@ -668,7 +667,7 @@ export default function DashboardPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-foreground">Dashboard de Performance</h1>
-          <p className="text-muted-foreground">Visão geral dos dados da sua coleção com base na coluna "Descrição Linha Comercial".</p>
+          <p className="text-muted-foreground">Visão geral dos dados da coleção com base na coluna "Descrição Linha Comercial".</p>
         </div>
         <Button 
           onClick={generateDashboardPdf} 
@@ -715,18 +714,28 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
+      {isAdmin && (
+        <ExcelUploadSection
+          onDataParsed={handleExcelDataProcessed}
+          onProcessingStart={handleProcessingStart}
+          onProcessingEnd={handleProcessingEnd}
+          collectionColumnKey="Descrição Linha Comercial"
+          cardTitle="Upload de Dados para Dashboard"
+          cardDescription="Carregue o arquivo Excel. Os dados serão salvos globalmente e usados para os gráficos abaixo."
+          isProcessingParent={isSavingFirestore}
+          passwordProtected={true}
+          unlockPassword="exceladmin159"
+        />
+      )}
+      {!isAdmin && dashboardProducts.length === 0 && !isLoadingFirestore && (
+         <Card className="shadow-md text-center py-10">
+            <CardHeader><CardTitle className="flex items-center justify-center text-xl"><Database className="mr-2 h-7 w-7 text-primary" />Sem Dados para Visualizar</CardTitle></CardHeader>
+            <CardContent>
+                <p className="text-muted-foreground">Nenhum dado de produto foi carregado no sistema. Por favor, peça a um administrador para carregar uma planilha de dados.</p>
+            </CardContent>
+         </Card>
+      )}
 
-      <ExcelUploadSection
-        onDataParsed={handleExcelDataProcessed}
-        onProcessingStart={handleProcessingStart}
-        onProcessingEnd={handleProcessingEnd}
-        collectionColumnKey="Descrição Linha Comercial"
-        cardTitle="Upload de Dados para Dashboard"
-        cardDescription="Carregue o arquivo Excel. Os dados serão salvos no seu perfil e usados para os gráficos abaixo."
-        isProcessingParent={isSavingFirestore}
-        passwordProtected={true}
-        unlockPassword="exceladmin159"
-      />
 
       {isSavingFirestore && ( 
         <Card className="shadow-lg">
@@ -742,7 +751,7 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {!isLoadingFirestore && !isAuthLoading && !isSavingFirestore && dashboardProducts.length === 0 && !isProcessingExcel && (
+      {!isLoadingFirestore && !isAuthLoading && !isSavingFirestore && dashboardProducts.length === 0 && !isProcessingExcel && isAdmin && (
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center"><Database className="mr-2 h-6 w-6 text-primary" />Sem dados para exibir</CardTitle>
@@ -1023,5 +1032,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-    

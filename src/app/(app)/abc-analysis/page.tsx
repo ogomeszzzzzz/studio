@@ -70,23 +70,22 @@ export default function AbcAnalysisPage() {
       if (allProducts.length === 0) {
         setIsLoadingFirestore(true);
         const fetchProducts = async () => {
-          console.log(`AbcAnalysisPage: Attempting to fetch products for user email: ${currentUser.email}. Firestore instance available: ${!!firestore}`);
+          console.log("AbcAnalysisPage: Attempting to fetch products from GLOBAL collection. Firestore instance available:", !!firestore);
            if (!firestore) {
              toast({ title: "Erro Interno", description: "Firestore não disponível para buscar dados.", variant: "destructive" });
              setIsLoadingFirestore(false);
              return;
           }
           try {
-            const productsColPath = `user_products/${currentUser.email}/uploaded_products`;
+            const productsColPath = "shared_products"; // GLOBAL path
             const productsQuery = query(collection(firestore, productsColPath));
             const snapshot = await getDocs(productsQuery);
             const productsFromDb: Product[] = snapshot.docs
-              .filter(docSnap => docSnap.id !== '_metadata')
               .map(docSnap => productFromFirestore(docSnap.data()));
             setAllProducts(productsFromDb);
             console.log(`AbcAnalysisPage: Fetched ${productsFromDb.length} products.`);
 
-            const metadataDocRef = doc(firestore, `user_products/${currentUser.email}/uploaded_products`, '_metadata');
+            const metadataDocRef = doc(firestore, "app_metadata", "products_metadata"); // GLOBAL path
             const metadataDocSnap = await getDoc(metadataDocRef);
             if (metadataDocSnap.exists()) {
               const data = metadataDocSnap.data();
@@ -97,9 +96,9 @@ export default function AbcAnalysisPage() {
                setLastDataUpdateTimestamp(null);
             }
             if (productsFromDb.length > 0) {
-              toast({ title: "Dados Carregados", description: `${productsFromDb.length} produtos carregados do banco de dados.` });
+              // toast({ title: "Dados Carregados", description: `${productsFromDb.length} produtos carregados.` });
             } else {
-               toast({ title: "Sem Dados no Perfil", description: "Nenhum produto encontrado para análise ABC. Faça upload de uma planilha no Dashboard.", variant: "default" });
+               toast({ title: "Sem Dados no Sistema", description: "Nenhum produto encontrado para análise ABC. O administrador precisa carregar uma planilha no Dashboard.", variant: "default" });
             }
           } catch (error) {
             console.error("Error fetching products from Firestore (ABC Analysis):", error);
@@ -330,7 +329,7 @@ export default function AbcAnalysisPage() {
         <Card className="shadow-lg text-center py-10">
           <CardHeader><CardTitle className="flex items-center justify-center text-xl"><Database className="mr-2 h-7 w-7 text-primary" />Sem Dados para Análise</CardTitle></CardHeader>
           <CardContent>
-            <p className="text-muted-foreground">Nenhum dado de produto encontrado. Por favor, vá para a página do Dashboard e carregue um arquivo Excel com as colunas "Preço" e "Venda 30d".</p>
+            <p className="text-muted-foreground">Nenhum dado de produto encontrado. O administrador precisa carregar um arquivo Excel com as colunas "Preço" e "Venda 30d" no Dashboard.</p>
           </CardContent>
         </Card>
       )}
@@ -480,5 +479,3 @@ export default function AbcAnalysisPage() {
     </div>
   );
 }
-
-    

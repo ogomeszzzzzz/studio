@@ -3,34 +3,31 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/(default)/documents {
 
-    // WARNING: TEMPORARY DIAGNOSTIC RULES - HIGHLY INSECURE
-    // These rules allow anyone to read and write to your entire (default) database.
-    // Use ONLY for debugging the "client is offline" issue.
-    // REVERT TO SECURE RULES IMMEDIATELY AFTER DIAGNOSIS.
-    match /{document=**} {
-      allow read, write: if true;
-    }
-
-    /*
-    // PREVIOUS SECURE RULES (Commented out for diagnostics)
-    // Rules for the authentication users collection
+    // Rules for user authentication profiles
     match /auth_users/{userEmail} {
-      allow get: if true; // Allows client to read specific user profile for approval status
-      allow list, create, update, delete: if false; // Other ops by server actions
+      // Allow client to get a specific user's profile (for AppLayout to check isApproved, isAdmin)
+      allow get: if true;
+      // Disallow client from listing, creating, updating, or deleting user profiles directly.
+      // These operations are handled by Server Actions.
+      allow list, create, update, delete: if false;
     }
 
-    // Rules for the user-specific product data
-    // Path: user_products/{loggedInUserEmail}/uploaded_products/{productIdOrMetadata}
-    match /user_products/{userEmail}/uploaded_products/{documentId} {
-      // PERMISSIVE FOR PROTOTYPE - Client needs to know userEmail.
-      // For production, all writes should be via server actions.
-      allow read, write, delete: if true;
+    // Rules for the GLOBAL shared product data
+    // All authenticated users can read. Only admin can write/delete.
+    match /shared_products/{productId} {
+      allow read: if request.auth != null; // Any authenticated user can read
+      allow write, delete: if request.auth != null && request.auth.token.email == 'gustavo.cordeiro@altenburg.com.br' && request.auth.token.email_verified == true;
     }
 
-    // Fallback rule: Deny access to any other paths not defined above.
+    // Rules for the GLOBAL metadata for shared products
+    match /app_metadata/products_metadata {
+      allow read: if request.auth != null; // Any authenticated user can read
+      allow get, write, update, delete: if request.auth != null && request.auth.token.email == 'gustavo.cordeiro@altenburg.com.br' && request.auth.token.email_verified == true;
+    }
+
+    // Fallback rule: deny access to any other paths not defined above.
     match /{path=**} {
       allow read, write: if false;
     }
-    */
   }
 }

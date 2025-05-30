@@ -69,7 +69,7 @@ export default function RestockOpportunitiesPage() {
 
     if (currentUser) {
       if (allProducts.length === 0) {
-        console.log(`RestockOpportunitiesPage: Attempting to fetch products for user email: ${currentUser.email}. Firestore available: ${!!firestore}`);
+        console.log("RestockOpportunitiesPage: Attempting to fetch products from GLOBAL collection. Firestore available:", !!firestore);
         setIsLoadingFirestore(true);
          if (!firestore) {
              toast({ title: "Erro Interno", description: "Firestore não disponível para buscar dados.", variant: "destructive" });
@@ -78,18 +78,17 @@ export default function RestockOpportunitiesPage() {
           }
         const fetchProducts = async () => {
           try {
-            const productsColPath = `user_products/${currentUser.email}/uploaded_products`;
+            const productsColPath = "shared_products"; // GLOBAL path
             const productsQuery = query(collection(firestore, productsColPath));
             const snapshot = await getDocs(productsQuery);
             const productsFromDb: Product[] = snapshot.docs
-              .filter(docSnap => docSnap.id !== '_metadata')
               .map(docSnap => productFromFirestore(docSnap.data()));
             
             setAllProducts(productsFromDb);
             console.log(`RestockOpportunitiesPage: Fetched ${productsFromDb.length} products.`);
 
 
-            const metadataDocRef = doc(firestore, `user_products/${currentUser.email}/uploaded_products`, '_metadata');
+            const metadataDocRef = doc(firestore, "app_metadata", "products_metadata"); // GLOBAL path
             const metadataDocSnap = await getDoc(metadataDocRef);
             if (metadataDocSnap.exists()) {
               const data = metadataDocSnap.data();
@@ -101,9 +100,9 @@ export default function RestockOpportunitiesPage() {
             }
 
             if (productsFromDb.length > 0) {
-              toast({ title: "Dados Carregados", description: "Dados de produtos carregados do banco de dados." });
+              // toast({ title: "Dados Carregados", description: "Dados de produtos carregados." });
             } else {
-               toast({ title: "Sem Dados no Perfil", description: "Nenhum produto encontrado para análise de oportunidades. Faça upload de uma planilha no Dashboard.", variant: "default" });
+               toast({ title: "Sem Dados no Sistema", description: "Nenhum produto encontrado para análise de oportunidades. O administrador precisa carregar uma planilha no Dashboard.", variant: "default" });
             }
           } catch (error) {
             console.error("Error fetching products from Firestore (Restock):", error);
@@ -138,12 +137,12 @@ export default function RestockOpportunitiesPage() {
   const applyAllFilters = useCallback(() => {
     if (isAuthLoading || isLoadingFirestore) {
         if (!isAuthLoading && !isLoadingFirestore && allProducts.length === 0){
-            setFilteredProducts([]); // Clear if no products and not loading
+            setFilteredProducts([]); 
         }
-        return; // Don't filter if still loading auth/firestore initial data or no products
+        return; 
     }
 
-    setIsLoading(true); // Start loading state for filtering
+    setIsLoading(true); 
     console.log("Applying filters with baseFilters:", baseFilters, "lowStockThreshold:", lowStockThreshold);
     let tempFiltered = [...allProducts];
     const effectiveThreshold = parseInt(lowStockThreshold, 10);
@@ -185,7 +184,7 @@ export default function RestockOpportunitiesPage() {
 
     console.log("Filtered products count:", tempFiltered.length);
     setFilteredProducts(tempFiltered);
-    setIsLoading(false); // End loading state for filtering
+    setIsLoading(false); 
   }, [allProducts, baseFilters, lowStockThreshold, toast, isAuthLoading, isLoadingFirestore]);
 
 
@@ -194,15 +193,11 @@ export default function RestockOpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-   // Apply filters whenever allProducts, lowStockThreshold, or baseFilters change,
-   // but only if auth and initial Firestore load are complete.
    if(!isAuthLoading && !isLoadingFirestore && allProducts.length > 0) {
     applyAllFilters();
    } else if (!isAuthLoading && !isLoadingFirestore && allProducts.length === 0) {
-    // If no products are loaded (and not currently loading them), ensure filtered list is empty
     setFilteredProducts([]);
    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allProducts, lowStockThreshold, baseFilters, applyAllFilters, isAuthLoading, isLoadingFirestore]);
 
 
@@ -306,9 +301,8 @@ export default function RestockOpportunitiesPage() {
           </CardHeader>
           <CardContent>
             <p className="text-muted-foreground">
-              Nenhum dado de produto encontrado. Por favor, vá para a página do Dashboard e carregue um arquivo Excel.
+              Nenhum dado de produto encontrado. O administrador precisa carregar um arquivo Excel na página do Dashboard.
             </p>
-             <p className="text-sm text-muted-foreground mt-2">Os dados salvos em seu perfil serão carregados automaticamente aqui.</p>
           </CardContent>
         </Card>
       )}
@@ -510,5 +504,3 @@ const getCollectionStatus = (product: Product): { text: string; variant: 'defaul
   }
   return { text: 'Status N/A', variant: 'outline' };
 };
-
-    
