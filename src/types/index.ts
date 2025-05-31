@@ -60,11 +60,12 @@ export interface AggregatedPillow {
   derivation?: string;
   vtexId?: string | number;
   sales30d: number;
+  openOrders: number; // Added openOrders
   isCritical?: boolean;
   isUrgent?: boolean;
 }
 
-export type SortCriteria = 'name' | 'stock' | 'fillPercentage' | 'sales30d';
+export type SortCriteria = 'name' | 'stock' | 'fillPercentage' | 'sales30d' | 'openOrders'; // Added openOrders
 export type SortOrder = 'asc' | 'desc';
 export type StockStatusFilter = 'all' | 'critical' | 'empty' | 'low' | 'medium' | 'good' | 'overstocked';
 
@@ -75,3 +76,4 @@ export interface StockHistoryEntry {
   totalStockUnits: number;
   totalSkusWithStock: number;
 }
+

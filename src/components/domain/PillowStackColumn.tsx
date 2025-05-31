@@ -3,7 +3,7 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { TrendingUp, AlertCircle, PackageX, Zap } from "lucide-react";
+import { TrendingUp, AlertCircle, PackageX, Zap, Inbox } from "lucide-react";
 
 interface PillowStackColumnProps {
   pillowName: string;
@@ -11,13 +11,13 @@ interface PillowStackColumnProps {
   currentStock: number;
   maxStock?: number;
   sales30d?: number;
+  openOrders?: number;
   isCritical?: boolean;
   isUrgent?: boolean;
 }
 
 const DEFAULT_MAX_STOCK = 75;
 const LOW_STOCK_WARNING_THRESHOLD_PERCENTAGE = 0.25; // For "Baixo Estoque" general warning
-// Urgency thresholds are now calculated in the parent page
 
 export function PillowStackColumn({
   pillowName,
@@ -25,6 +25,7 @@ export function PillowStackColumn({
   currentStock,
   maxStock = DEFAULT_MAX_STOCK,
   sales30d,
+  openOrders,
   isCritical,
   isUrgent,
 }: PillowStackColumnProps) {
@@ -34,7 +35,7 @@ export function PillowStackColumn({
   const isOverStocked = currentStock > maxStock;
   
   const lowStockThresholdValue = maxStock * LOW_STOCK_WARNING_THRESHOLD_PERCENTAGE;
-  const isGenerallyLowStock = currentStock > 0 && currentStock < lowStockThresholdValue && !isCritical && !isUrgent;
+  const isGenerallyLowStock = currentStock > 0 && (currentStock + (openOrders || 0)) < lowStockThresholdValue && !isCritical && !isUrgent;
 
 
   let fillColor = 'bg-primary'; // Default color
@@ -42,12 +43,12 @@ export function PillowStackColumn({
     fillColor = 'bg-red-700'; // Most critical color
   } else if (isUrgent) {
     fillColor = 'bg-orange-500'; // Urgent color
-  } else if (isEmpty) {
+  } else if (isEmpty && (openOrders || 0) === 0) { // Only truly empty if no open orders
     fillColor = 'bg-muted';
   } else if (isGenerallyLowStock) {
     fillColor = 'bg-yellow-500';
   } else if (stockPercentage < 75) {
-    fillColor = 'bg-sky-500'; // Changed from yellow to sky for "medium" if not low/urgent
+    fillColor = 'bg-sky-500'; 
   } else {
     fillColor = 'bg-green-500'; // Good stock
   }
@@ -83,8 +84,8 @@ export function PillowStackColumn({
         <div className="mt-2 text-center w-full space-y-1">
             <p className="text-xs text-muted-foreground">
             {isFull && !isOverStocked && <span className="font-bold text-green-600">CHEIO</span>}
-            {isEmpty && !isCritical && <span className="font-bold text-destructive">VAZIO (Sem Venda)</span>}
-            {!isFull && !isEmpty && !isOverStocked && `${currentStock} / ${maxStock}`}
+            {isEmpty && (openOrders || 0) === 0 && !isCritical && <span className="font-bold text-destructive">VAZIO (Sem Venda/Pedido)</span>}
+            {!isFull && !(isEmpty && (openOrders || 0) === 0) && !isOverStocked && `${currentStock} / ${maxStock}`}
             {isOverStocked && (
                 <>
                 <span className="font-bold text-red-700">{currentStock} / {maxStock}</span>
@@ -95,12 +96,12 @@ export function PillowStackColumn({
             </p>
             {isCritical && (
                 <Badge variant="destructive" className="text-xs font-bold bg-red-700 hover:bg-red-800">
-                    <PackageX className="mr-1 h-3 w-3" /> RUPTURA (VENDENDO)
+                    <PackageX className="mr-1 h-3 w-3" /> RUPTURA
                 </Badge>
             )}
             {isUrgent && (
                  <Badge variant="destructive" className="text-xs font-bold bg-orange-500 hover:bg-orange-600 text-white">
-                    <Zap className="mr-1 h-3 w-3" /> REPOSIÇÃO URGENTE!
+                    <Zap className="mr-1 h-3 w-3" /> URGENTE
                 </Badge>
             )}
             {isGenerallyLowStock && (
@@ -115,6 +116,11 @@ export function PillowStackColumn({
             {typeof sales30d === 'number' && (
                 <p className="text-xs text-muted-foreground flex items-center justify-center">
                     <TrendingUp className="mr-1 h-3 w-3 text-blue-500" /> Vendas 30d: {sales30d}
+                </p>
+            )}
+            {typeof openOrders === 'number' && openOrders > 0 && (
+                <p className="text-xs text-muted-foreground flex items-center justify-center">
+                    <Inbox className="mr-1 h-3 w-3 text-sky-600" /> Ped. Aberto: {openOrders}
                 </p>
             )}
         </div>
