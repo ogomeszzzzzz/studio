@@ -121,9 +121,9 @@ export default function DashboardPage() {
 
   const isAdmin = useMemo(() => currentUser?.email.toLowerCase() === (process.env.NEXT_PUBLIC_ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br").toLowerCase() && currentUser?.isAdmin, [currentUser]);
 
-  const fetchHistory = useCallback(async () => {
-    if (!currentUser || !firestore || firestoreClientInitializationError || isSavingFirestore) {
-      console.log("DashboardPage (fetchHistory): Pre-conditions not met or saving. User:", !!currentUser, "Firestore:", !!firestore, "Error:", firestoreClientInitializationError, "Saving:", isSavingFirestore);
+ const fetchHistory = useCallback(async () => {
+    if (!currentUser || !firestore || firestoreClientInitializationError) {
+      console.log("DashboardPage (fetchHistory): Pre-conditions not met. User:", !!currentUser, "Firestore:", !!firestore, "Error:", firestoreClientInitializationError);
       setIsLoadingHistory(false);
       if (!currentUser || !firestore) setStockHistory([]);
       return;
@@ -146,15 +146,16 @@ export default function DashboardPage() {
       console.log("DashboardPage (fetchHistory): Fetch attempt finished. Setting isLoadingHistory to false.");
       setIsLoadingHistory(false);
     }
-  }, [currentUser, toast]); 
+  }, [currentUser, toast]); // Removed isSavingFirestore as it's handled in the calling useEffect
 
   useEffect(() => {
     console.log(`DashboardPage (Main useEffect): AuthLoading: ${isAuthLoading}, CurrentUser: ${!!currentUser}, Products loaded: ${dashboardProducts.length}, Saving: ${isSavingFirestore}, Firestore client init error: ${firestoreClientInitializationError}, Firestore instance: ${!!firestore}`);
     
     if (isAuthLoading) {
-      console.log("DashboardPage (Main useEffect): Auth context is loading, waiting...");
-      if (dashboardProducts.length === 0) setIsLoadingFirestore(true);
-      return;
+        console.log("DashboardPage (Main useEffect): Auth context is loading, waiting...");
+        if (dashboardProducts.length === 0) setIsLoadingFirestore(true);
+        if (stockHistory.length === 0) setIsLoadingHistory(true); // Set history loading if auth is pending and history empty
+        return;
     }
 
     if (firestoreClientInitializationError) {
@@ -171,19 +172,19 @@ export default function DashboardPage() {
     }
 
     if (currentUser) {
-      console.log(`DashboardPage (Main useEffect): User is available. Products loaded: ${dashboardProducts.length}, Saving: ${isSavingFirestore}`);
+      console.log(`DashboardPage (Main useEffect - User Available): Products loaded: ${dashboardProducts.length}, Saving: ${isSavingFirestore}, History Loaded: ${stockHistory.length}`);
       // Fetch Products
       if (dashboardProducts.length === 0 && !isSavingFirestore) {
         setIsLoadingFirestore(true);
         const fetchProducts = async () => {
-          console.log("DashboardPage (Main useEffect): Attempting to fetch products from GLOBAL /shared_products.");
+          console.log("DashboardPage (Main useEffect - Products): Attempting to fetch products from GLOBAL /shared_products.");
           try {
             const productsColPath = "shared_products";
             const productsQuery = query(collection(firestore, productsColPath));
             const snapshot = await getDocs(productsQuery);
             const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
             setDashboardProducts(productsFromDb);
-            console.log("DashboardPage (Main useEffect): Fetched products from Firestore:", productsFromDb.length);
+            console.log("DashboardPage (Main useEffect - Products): Fetched products from Firestore:", productsFromDb.length);
             
             const metadataDocRef = doc(firestore, "app_metadata", "products_metadata");
             const metadataDocSnap = await getDoc(metadataDocRef);
@@ -191,25 +192,25 @@ export default function DashboardPage() {
               const data = metadataDocSnap.data();
               if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
                 setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
-                 console.log("DashboardPage (Main useEffect): Fetched lastDataUpdateTimestamp:", data.lastUpdatedAt.toDate());
+                 console.log("DashboardPage (Main useEffect - Products): Fetched lastDataUpdateTimestamp:", data.lastUpdatedAt.toDate());
               } else {
                 setLastDataUpdateTimestamp(null);
               }
             } else {
               setLastDataUpdateTimestamp(null);
             }
-             if (productsFromDb.length === 0 && isAdmin) { // Only show if admin and no data
+             if (productsFromDb.length === 0 && isAdmin) { 
                toast({ title: "Sem Dados Carregados", description: "Nenhum produto encontrado. Faça o upload de uma planilha para popular os dados.", variant: "default" });
             } else if (productsFromDb.length === 0 && !isAdmin) {
                toast({ title: "Sem Dados no Sistema", description: "Nenhum produto encontrado. O administrador precisa carregar uma planilha.", variant: "default" });
             }
           } catch (error) {
-            console.error("DashboardPage (Main useEffect): Error fetching products from Firestore:", error);
+            console.error("DashboardPage (Main useEffect - Products): Error fetching products from Firestore:", error);
             const firestoreError = error as Error;
             toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${firestoreError.message}`, variant: "destructive" });
           } finally {
             setIsLoadingFirestore(false);
-            console.log("DashboardPage (Main useEffect): Finished fetching products, isLoadingFirestore set to false.");
+            console.log("DashboardPage (Main useEffect - Products): Finished fetching products, isLoadingFirestore set to false.");
           }
         };
         fetchProducts();
@@ -218,26 +219,24 @@ export default function DashboardPage() {
       }
 
       // Stock History Fetching Logic
-      const shouldFetchHistory =
-        !isSavingFirestore &&
-        (stockHistory.length === 0 ||
-          (lastDataUpdateTimestamp &&
-           stockHistory.length > 0 &&
-           stockHistory[stockHistory.length - 1]?.date && 
-           lastDataUpdateTimestamp > stockHistory[stockHistory.length - 1].date));
+       console.log(`DashboardPage (Main useEffect - History Prep): isSavingFirestore: ${isSavingFirestore}, stockHistory.length: ${stockHistory.length}, lastDataUpdateTimestamp: ${lastDataUpdateTimestamp?.toISOString()}`);
+      const fetchNeeded = 
+          stockHistory.length === 0 || 
+          (lastDataUpdateTimestamp && stockHistory.length > 0 && stockHistory[stockHistory.length-1]?.date && lastDataUpdateTimestamp > stockHistory[stockHistory.length-1].date);
 
-      console.log("DashboardPage (History): AuthLoading:", isAuthLoading, "CurrentUser:", !!currentUser, "Saving:", isSavingFirestore, "History length:", stockHistory.length, "lastDataUpdateTimestamp:", lastDataUpdateTimestamp, "shouldFetchHistory:", shouldFetchHistory);
-      
-      if (shouldFetchHistory) {
-        console.log("DashboardPage (History): Fetching history because shouldFetchHistory is true.");
+      if (!isSavingFirestore && fetchNeeded) {
+        console.log("DashboardPage (Main useEffect - History): Conditions met for fetching/refreshing history. Calling fetchHistory.");
         fetchHistory();
-      } else if (isLoadingHistory && !isSavingFirestore && !isAuthLoading) { // If not fetching (and not saving/auth loading), ensure loading stops
-           console.log("DashboardPage (History): Not fetching history. Setting isLoadingHistory to false.");
-           setIsLoadingHistory(false);
+      } else if (!isSavingFirestore && !fetchNeeded) {
+        console.log("DashboardPage (Main useEffect - History): Conditions NOT met for fetching history (or already fetched). Setting isLoadingHistory to false.");
+        setIsLoadingHistory(false);
+      } else if (isSavingFirestore) {
+        console.log("DashboardPage (Main useEffect - History): Saving products is in progress. Deferring history fetch/update. Ensuring isLoadingHistory is false.");
+        setIsLoadingHistory(false); // Explicitly set to false if saving is happening
       }
 
     } else { 
-      console.log("DashboardPage (Main useEffect): No current user. Clearing data and setting loading to false.");
+      console.log("DashboardPage (Main useEffect): No current user. Clearing data and setting loading states to false.");
       setDashboardProducts([]);
       setLastDataUpdateTimestamp(null);
       setIsLoadingFirestore(false);
@@ -259,6 +258,7 @@ export default function DashboardPage() {
     console.log("DashboardPage: Admin attempting to save products to GLOBAL /shared_products collection.");
     setIsSavingFirestore(true);
     setIsLoadingFirestore(true); 
+    setIsLoadingHistory(true); // Indicate history will also be updated/reloaded
 
     let totalDeleted = 0;
     let totalAdded = 0;
@@ -312,8 +312,8 @@ export default function DashboardPage() {
       
       setDashboardProducts(productsToSave);
       const newTimestamp = new Date();
-      setLastDataUpdateTimestamp(newTimestamp); // This will trigger the history fetch via useEffect
-      setStockHistory([]); // Clear current history, useEffect will trigger a re-fetch due to lastDataUpdateTimestamp change
+      setLastDataUpdateTimestamp(newTimestamp); 
+      setStockHistory([]); 
 
       toast({ title: "Dados Globais Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} antigos foram removidos.` : ''} Histórico de estoque atualizado.` });
 
@@ -324,6 +324,7 @@ export default function DashboardPage() {
     } finally {
       setIsSavingFirestore(false);
       setIsLoadingFirestore(false);
+      // isLoadingHistory will be handled by the main useEffect reacting to lastDataUpdateTimestamp
       console.log("DashboardPage: Finished saving products, isSavingFirestore set to false.");
     }
   }, [currentUser, isAdmin, toast]); 
@@ -720,25 +721,52 @@ export default function DashboardPage() {
               <ChartContainer config={stockHistoryChartConfig} className="h-full w-full">
                 <RechartsLineChart data={stockHistory} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" tickFormatter={(value) => {
-                      if (value === null || typeof value === 'undefined') return "Data Indisponível";
-                      const dateToFormat = value instanceof Date ? value : new Date(value);
-                      if (isDateValid(dateToFormat)) return formatDateFns(dateToFormat, "dd/MM/yy", { locale: ptBR });
-                      console.warn("ChartTooltip: Invalid date label encountered in stock history chart (XAxis):", value);
-                      return "Data Inválida";
-                  }} />
+                  <XAxis 
+                    dataKey="date" 
+                    tickFormatter={(value) => {
+                        if (value === null || typeof value === 'undefined') return "N/A";
+                        const dateToFormat = value instanceof Date ? value : new Date(value);
+                        if (isDateValid(dateToFormat)) return formatDateFns(dateToFormat, "dd/MM/yy", { locale: ptBR });
+                        return "Inválida";
+                    }} 
+                  />
                   <YAxis yAxisId="left" stroke="hsl(var(--chart-1))" label={{ value: 'Unidades Totais', angle: -90, position: 'insideLeft', style: {textAnchor: 'middle', fill: 'hsl(var(--chart-1))'} }} />
                   <YAxis yAxisId="right" orientation="right" stroke="hsl(var(--chart-2))" label={{ value: 'SKUs c/ Estoque', angle: 90, position: 'insideRight', style: {textAnchor: 'middle', fill: 'hsl(var(--chart-2))'} }} />
                   <Tooltip
                     content={<ChartTooltipContent
                         labelFormatter={(label) => {
-                          if (label === null || typeof label === 'undefined') return "Data Indisponível";
-                          const dateToFormat = label instanceof Date ? label : new Date(label);
-                          if (isDateValid(dateToFormat)) return formatDateFns(dateToFormat, "dd/MM/yyyy", { locale: ptBR });
-                          console.warn("ChartTooltip: Invalid date label encountered in stock history chart (Tooltip):", label);
-                          return "Data Inválida";
+                           if (label === null || typeof label === 'undefined') {
+                            console.warn("ChartTooltip (History): labelFormatter received null or undefined label.");
+                            return "Data Indisponível";
+                          }
+                          let dateToFormat: Date;
+                          if (label instanceof Date) {
+                            dateToFormat = label;
+                          } else {
+                            const parsedDate = new Date(label);
+                            if (isDateValid(parsedDate)) {
+                              dateToFormat = parsedDate;
+                            } else {
+                              console.warn("ChartTooltip (History): labelFormatter could not parse label into a valid date. Label:", label, "Type:", typeof label);
+                              return "Data Inválida";
+                            }
+                          }
+                          if (isDateValid(dateToFormat)) {
+                            return formatDateFns(dateToFormat, "dd/MM/yyyy", { locale: ptBR });
+                          } else {
+                            console.error("ChartTooltip (History): dateToFormat became invalid unexpectedly. Original Label:", label);
+                            return "Data Inválida";
+                          }
                         }} 
-                        formatter={(value, name) => [`${(value as number).toLocaleString()} ${name === 'totalStockUnits' ? 'unid.' : 'SKUs'}`, name === 'totalStockUnits' ? 'Unidades Totais' : 'SKUs c/ Estoque']}
+                        formatter={(value, name) => {
+                          const valStr = (value as number).toLocaleString();
+                          if (name === 'totalStockUnits') {
+                            return [`${valStr} Peças em Estoque`, 'Unidades Totais'];
+                          } else if (name === 'totalSkusWithStock') {
+                            return [`${valStr} SKUs com Estoque`, 'SKUs c/ Estoque'];
+                          }
+                          return [valStr, name as string]; 
+                        }}
                     />}
                   />
                   <RechartsLegend />
@@ -822,3 +850,5 @@ export default function DashboardPage() {
   );
 }
 
+
+    
