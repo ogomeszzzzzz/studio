@@ -106,7 +106,8 @@ export function PillowStackColumn({
             )}
             {isGenerallyLowStock && (
                 <Badge variant="outline" className="text-xs font-semibold border-yellow-500 text-yellow-600">
-                    <AlertCircle className="mr-1 h-3 w-3" /> Baixo Estoque
+                    <AlertCircle className="mr-1 h-3 w-3" />
+                    {openOrders && openOrders > 0 ? `Baixo (Chegando: ${openOrders})` : "Baixo Estoque"}
                 </Badge>
             )}
             
