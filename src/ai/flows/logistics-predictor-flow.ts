@@ -29,7 +29,7 @@ const LogisticsPredictionOutputSchema = z.object({
   productName: z.string(),
   daysToRupture: z.number().nullable().describe(
     "Estimated number of days until the current stock runs out based on 30-day sales velocity. " +
-    "Returns Infinity (which may be represented as null in JSON) if no sales."
+    "Returns null if no sales."
   ),
   riskStatus: z.enum(['Crítico', 'Alto', 'Médio', 'Baixo', 'N/A']).describe(
     "Risk level of stockout: Crítico (ruptured with sales), Alto (<=7 days cover), " +
@@ -66,7 +66,7 @@ const logisticsPredictorFlow = ai.defineFlow(
     } = input;
 
     const dailySales = sales30d > 0 ? sales30d / 30 : 0;
-    let daysToRupture: number;
+    let daysToRupture: number | null;
     let riskStatus: LogisticsPredictionOutput['riskStatus'];
     let suggestedRestockUnits = 0;
     const alerts: string[] = [];
@@ -98,7 +98,7 @@ const logisticsPredictorFlow = ai.defineFlow(
 
 
     } else { // No sales in the last 30 days
-      daysToRupture = Infinity;
+      daysToRupture = null; // Explicitly return null for Zod validation
       riskStatus = currentStock > 0 ? 'N/A' : 'Crítico'; // If no sales & no stock, still critical from a presence POV
       if (currentStock > 50) { // Arbitrary threshold for "parado"
           alerts.push("Estoque parado: Sem vendas nos últimos 30 dias.");
@@ -112,8 +112,8 @@ const logisticsPredictorFlow = ai.defineFlow(
     if (dailySales > 0 && openOrders > 0) {
         const daysToRuptureWithOpenOrders = (currentStock + openOrders) / dailySales;
         if (riskStatus === 'Alto' || riskStatus === 'Crítico') {
-            if (daysToRuptureWithOpenOrders > 15) riskStatus = 'Médio'; // With open orders, risk might be lower
-            else if (daysToRuptureWithOpenOrders > 7) riskStatus = 'Médio'; // Note: This was 'Médio' twice, check if intended. Assuming first > 15 meant 'Baixo' or less severe 'Médio'
+            if (daysToRuptureWithOpenOrders > 15) riskStatus = 'Médio'; 
+            else if (daysToRuptureWithOpenOrders > 7) riskStatus = 'Médio'; 
         }
         if (riskStatus === 'Crítico' && currentStock === 0 && openOrders > 0) {
             alerts.push("Ruptura atual, mas há pedidos em aberto.");
@@ -156,7 +156,7 @@ const prompt = ai.definePrompt({
   - Pedidos em Aberto: {{openOrders}}
 
   Calcule:
-  1.  **daysToRupture**: Estimativa de dias até a ruptura do estoque atual. Se não houver vendas, retorne Infinity.
+  1.  **daysToRupture**: Estimativa de dias até a ruptura do estoque atual. Se não houver vendas, retorne null.
   2.  **riskStatus**: Classifique o risco de ruptura como 'Crítico' (sem estoque, mas vende E sem pedidos em aberto), 'Alto' (cobertura <= 7 dias), 'Médio' (cobertura 8-15 dias), 'Baixo' (cobertura > 15 dias), ou 'N/A' (sem vendas ou sem estoque e sem vendas). Considere pedidos em aberto para mitigar o risco se o estoque atual for baixo.
   3.  **suggestedRestockUnits**: Sugira uma quantidade para reposição para atingir 30 dias de cobertura, considerando o estoque atual e os pedidos em aberto. Deve ser 0 se a cobertura atual + pedidos em aberto for >= 30 dias.
   4.  **alerts**: Forneça alertas relevantes em um array de strings, como:
@@ -170,3 +170,4 @@ const prompt = ai.definePrompt({
   `,
 });
 */
+
