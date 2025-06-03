@@ -5,7 +5,7 @@ export interface Product {
   productId?: string | number;
   derivation?: string | number;
   productDerivation?: string;
-  stock: number;
+  stock: number; // Total stock
   readyToShip: number;
   regulatorStock: number;
   openOrders: number;
@@ -27,9 +27,9 @@ export interface Product {
 
   price?: number;
   sales30d?: number;
-  revenue30d?: number;
-  abcCurve?: 'A' | 'B' | 'C' | 'N/A';
-  cumulativeRevenuePercentage?: number;
+  revenue30d?: number; // For ABC Analysis
+  abcCurve?: 'A' | 'B' | 'C' | 'N/A'; // For ABC Analysis
+  cumulativeRevenuePercentage?: number; // For ABC Analysis
 }
 
 export interface FilterState {
@@ -81,20 +81,26 @@ export interface StockHistoryEntry {
 export interface LogisticsPredictionInput {
   productId: string;
   productName: string;
-  currentStock: number;
-  sales30d: number;
-  price: number;
+  currentStock: number; // Total stock
   readyToShipStock: number;
-  regulatorStock: number;
-  openOrders: number;
+  regulatorStock?: number;
+  sales30d: number;
+  price?: number;
+  openOrders?: number;
 }
 
 export interface LogisticsPredictionOutput {
   productId: string;
   productName: string;
-  daysToRupture: number; // Can be Infinity if no sales
-  riskStatus: 'Baixo' | 'Médio' | 'Alto' | 'Crítico' | 'N/A';
-  suggestedRestockUnits: number;
+  daysToRupturePE: number | null; 
+  riskStatusPE: 'Ruptura Iminente' | 'Atenção' | 'Estável' | 'N/A';
+  suggestedRestockUnitsPE: number;
   alerts?: string[];
+  dailyAverageSales: number;
 }
 
+// For enhanced product data on the frontend Intelligence Panel
+export interface EnhancedProductForIntelligence extends Product {
+  dailyAverageSales: number;
+  prediction?: LogisticsPredictionOutput;
+}

@@ -4,15 +4,14 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { AlertTriangle, ArrowUpDown, BarChart3, Brain, CalendarDays, AlertCircle, Clock, DollarSign, Download, Filter as FilterIcon, HelpCircle, TrendingDown, TrendingUp, PackageSearch, PieChart, ListFilter, CheckSquare, Lightbulb, Settings, Eye, Info, LineChart, ShoppingCart } from 'lucide-react';
+import { AlertTriangle, ArrowUpDown, BarChart3, Brain, CalendarDays, Clock, Download, Filter as FilterIcon, HelpCircle, TrendingDown, TrendingUp, PackageSearch, ListChecks, CheckSquare, Lightbulb, Settings, Eye, Info, LineChart, ShoppingCart, ChevronLeft, ChevronRight, AlertCircleIcon, PackageIcon, CircleIcon } from 'lucide-react';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import type { Product } from '@/types';
+import type { Product, EnhancedProductForIntelligence } from '@/types';
 import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
 import { collection, getDocs, doc, Timestamp, query, getDoc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
@@ -22,11 +21,8 @@ import * as XLSX from 'xlsx';
 import { predictLogistics, type LogisticsPredictionInput, type LogisticsPredictionOutput } from '@/ai/flows/logistics-predictor-flow';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Skeleton } from '@/components/ui/skeleton';
-
-
-const ALL_COLLECTIONS_VALUE = "_ALL_COLLECTIONS_INTEL_";
-const ALL_PRODUCT_TYPES_VALUE = "_ALL_PRODUCT_TYPES_INTEL_";
-const ALL_RISK_STATUS_VALUE = "_ALL_RISK_STATUS_INTEL_";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { cn } from '@/lib/utils';
 
 const productFromFirestore = (data: any): Product => {
   return {
@@ -36,21 +32,25 @@ const productFromFirestore = (data: any): Product => {
   } as Product;
 };
 
-interface EnhancedProduct extends Product {
-  prediction?: LogisticsPredictionOutput;
-  sales7d?: number;
-  sales15d?: number;
-  scoreGiroCobertura?: number; // Placeholder
-}
+const ALL_RISK_STATUS_VALUE = "_ALL_RISK_STATUS_INTEL_";
 
 const formatDaysToRuptureForDisplay = (days: number | null | undefined): string => {
-  if (days === Infinity || days === null || days === undefined) {
-    return 'N/A (Sem Venda)';
+  if (days === null || days === undefined || !isFinite(days)) {
+    return 'N/A';
   }
-  if (typeof days === 'number') {
-    return days.toFixed(0);
+  if (days === 0) return '0 (Hoje)';
+  return days.toFixed(0);
+};
+
+const getRiskStatusIcon = (status: LogisticsPredictionOutput['riskStatusPE'] | undefined) => {
+  if (!status) return <HelpCircle className="h-4 w-4 text-muted-foreground" />;
+  switch (status) {
+    case 'Ruptura Iminente': return <AlertTriangle className="h-4 w-4 text-red-500" />;
+    case 'Atenção': return <AlertCircleIcon className="h-4 w-4 text-yellow-500" />;
+    case 'Estável': return <CircleIcon className="h-4 w-4 text-green-500 fill-green-500" />;
+    case 'N/A': return <HelpCircle className="h-4 w-4 text-muted-foreground" />;
+    default: return <HelpCircle className="h-4 w-4 text-muted-foreground" />;
   }
-  return '...';
 };
 
 
@@ -59,21 +59,18 @@ export default function IntelligencePanelPage() {
   const { toast } = useToast();
 
   const [allProducts, setAllProducts] = useState<Product[]>([]);
-  const [enhancedProducts, setEnhancedProducts] = useState<EnhancedProduct[]>([]);
+  const [enhancedProducts, setEnhancedProducts] = useState<EnhancedProductForIntelligence[]>([]);
   const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
   const [isLoadingPredictions, setIsLoadingPredictions] = useState(false);
   const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
-
-  const [selectedCollection, setSelectedCollection] = useState<string>(ALL_COLLECTIONS_VALUE);
-  const [selectedProductType, setSelectedProductType] = useState<string>(ALL_PRODUCT_TYPES_VALUE);
-  const [selectedRiskStatus, setSelectedRiskStatus] = useState<string>(ALL_RISK_STATUS_VALUE);
-  const [searchTerm, setSearchTerm] = useState('');
   
-  const [sortKey, setSortKey] = useState<keyof EnhancedProduct | 'daysToRupture' | ''>('name');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedRiskStatus, setSelectedRiskStatus] = useState<string>(ALL_RISK_STATUS_VALUE);
+  
+  const [sortKey, setSortKey] = useState<keyof EnhancedProductForIntelligence | 'daysToRupturePE' | ''>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 15;
-
 
   useEffect(() => {
     if (isAuthLoading) return;
@@ -118,32 +115,41 @@ export default function IntelligencePanelPage() {
     }
     setIsLoadingPredictions(true);
     const predictionsPromises = productsToPredict.map(async (p) => {
+      const dailyAvgSales = (p.sales30d || 0) / 30;
       try {
         const predictionInput: LogisticsPredictionInput = {
           productId: String(p.vtexId) || p.name,
-          currentStock: p.stock,
-          sales30d: p.sales30d || 0,
-          price: p.price || 0,
           productName: p.name,
+          currentStock: p.stock,
           readyToShipStock: p.readyToShip,
           regulatorStock: p.regulatorStock,
-          openOrders: p.openOrders,
+          sales30d: p.sales30d || 0,
+          price: p.price || 0,
+          openOrders: p.openOrders || 0,
         };
         const predictionResult = await predictLogistics(predictionInput);
-        return { ...p, prediction: predictionResult };
+        return { ...p, dailyAverageSales: dailyAvgSales, prediction: predictionResult };
       } catch (error) {
         console.error(`Error fetching prediction for ${p.name}:`, error);
-        return { ...p, prediction: undefined }; // Handle individual errors
+        // Return a default/error state for the prediction part
+        return { 
+          ...p, 
+          dailyAverageSales: dailyAvgSales,
+          prediction: {
+            productId: String(p.vtexId) || p.name,
+            productName: p.name,
+            daysToRupturePE: null,
+            riskStatusPE: 'N/A',
+            suggestedRestockUnitsPE: 0,
+            alerts: [`Erro ao buscar predição: ${(error as Error).message}`],
+            dailyAverageSales: dailyAvgSales
+          } as LogisticsPredictionOutput
+        };
       }
     });
 
     const results = await Promise.all(predictionsPromises);
-    setEnhancedProducts(results.map(ep => ({
-      ...ep,
-      sales7d: ep.sales30d ? parseFloat((ep.sales30d / 30 * 7).toFixed(1)) : 0, // Simplified
-      sales15d: ep.sales30d ? parseFloat((ep.sales30d / 30 * 15).toFixed(1)) : 0, // Simplified
-      scoreGiroCobertura: Math.floor(Math.random() * 30) + 70, // Placeholder score
-    })));
+    setEnhancedProducts(results);
     setIsLoadingPredictions(false);
   }, []);
 
@@ -155,36 +161,27 @@ export default function IntelligencePanelPage() {
     }
   }, [allProducts, fetchPredictionsForProducts]);
 
-
   const filteredAndSortedProducts = useMemo(() => {
     let tempProducts = [...enhancedProducts];
-
-    if (selectedCollection !== ALL_COLLECTIONS_VALUE) {
-      tempProducts = tempProducts.filter(p => p.collection === selectedCollection);
-    }
-    if (selectedProductType !== ALL_PRODUCT_TYPES_VALUE) {
-      tempProducts = tempProducts.filter(p => p.productType === selectedProductType);
-    }
-    if (selectedRiskStatus !== ALL_RISK_STATUS_VALUE) {
-      tempProducts = tempProducts.filter(p => p.prediction?.riskStatus === selectedRiskStatus);
-    }
     if (searchTerm) {
       tempProducts = tempProducts.filter(p =>
         p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         String(p.vtexId).toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
+    if (selectedRiskStatus !== ALL_RISK_STATUS_VALUE) {
+      tempProducts = tempProducts.filter(p => p.prediction?.riskStatusPE === selectedRiskStatus);
+    }
     
     if (sortKey) {
         tempProducts.sort((a, b) => {
-            let valA, valB;
-            if (sortKey === 'daysToRupture') {
-                // Handle null by treating it like Infinity for sorting purposes
-                valA = a.prediction?.daysToRupture === null ? Infinity : a.prediction?.daysToRupture ?? Infinity;
-                valB = b.prediction?.daysToRupture === null ? Infinity : b.prediction?.daysToRupture ?? Infinity;
+            let valA: any, valB: any;
+            if (sortKey === 'daysToRupturePE') {
+                valA = a.prediction?.daysToRupturePE === null ? Infinity : a.prediction?.daysToRupturePE ?? Infinity;
+                valB = b.prediction?.daysToRupturePE === null ? Infinity : b.prediction?.daysToRupturePE ?? Infinity;
             } else {
-                valA = a[sortKey as keyof EnhancedProduct];
-                valB = b[sortKey as keyof EnhancedProduct];
+                valA = (a as any)[sortKey];
+                valB = (b as any)[sortKey];
             }
 
             let comparison = 0;
@@ -193,16 +190,15 @@ export default function IntelligencePanelPage() {
             } else if (typeof valA === 'string' && typeof valB === 'string') {
                 comparison = valA.localeCompare(valB);
             } else if (valA === null || valA === undefined) {
-                comparison = 1;
+                comparison = 1; 
             } else if (valB === null || valB === undefined) {
                 comparison = -1;
             }
             return sortOrder === 'asc' ? comparison : -comparison;
         });
     }
-
     return tempProducts;
-  }, [enhancedProducts, selectedCollection, selectedProductType, selectedRiskStatus, searchTerm, sortKey, sortOrder]);
+  }, [enhancedProducts, searchTerm, selectedRiskStatus, sortKey, sortOrder]);
 
   const paginatedProducts = useMemo(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
@@ -211,7 +207,7 @@ export default function IntelligencePanelPage() {
 
   const totalPages = Math.ceil(filteredAndSortedProducts.length / itemsPerPage);
 
-  const handleSort = (key: keyof EnhancedProduct | 'daysToRupture') => {
+  const handleSort = (key: keyof EnhancedProductForIntelligence | 'daysToRupturePE') => {
     if (sortKey === key) {
       setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
     } else {
@@ -220,66 +216,95 @@ export default function IntelligencePanelPage() {
     }
     setCurrentPage(1);
   };
-
-  const renderSortIcon = (key: keyof EnhancedProduct | 'daysToRupture') => {
+  
+  const renderSortIcon = (key: keyof EnhancedProductForIntelligence | 'daysToRupturePE') => {
     if (sortKey === key) {
       return sortOrder === 'asc' ? <ArrowUpDown className="h-3 w-3 inline ml-1 transform rotate-180" /> : <ArrowUpDown className="h-3 w-3 inline ml-1" />;
     }
     return <ArrowUpDown className="h-3 w-3 inline ml-1 opacity-30" />;
   };
 
+  const riskStatusOptions: LogisticsPredictionOutput['riskStatusPE'][] = ['Ruptura Iminente', 'Atenção', 'Estável', 'N/A'];
 
-  const availableCollections = useMemo(() => Array.from(new Set(allProducts.map(p => p.collection).filter(Boolean))).sort(), [allProducts]);
-  const availableProductTypes = useMemo(() => Array.from(new Set(allProducts.map(p => p.productType).filter(Boolean))).sort(), [allProducts]);
-  const riskStatusOptions = ['Baixo', 'Médio', 'Alto', 'Crítico', 'N/A'];
-
-  // --- Component 1: Dashboard Analítico com IA ---
-  const analyticalDashboardData = useMemo(() => {
+  // Component 2: Alertas e Insights Automatizados
+  const automatedAlerts = useMemo(() => {
     if (isLoadingPredictions || enhancedProducts.length === 0) {
-      return {
-        ruptura3d: { count: 0, icon: <Loader2 className="h-5 w-5 animate-spin" /> },
-        ruptura7d: { count: 0, icon: <Loader2 className="h-5 w-5 animate-spin" /> },
-        ruptura15d: { count: 0, icon: <Loader2 className="h-5 w-5 animate-spin" /> },
-        volumeRisco: { value: 0, icon: <Loader2 className="h-5 w-5 animate-spin" /> },
-        altoGiroBaixaCobertura: { count: 0, icon: <Loader2 className="h-5 w-5 animate-spin" /> },
-        superestoque: { count: 0, icon: <Loader2 className="h-5 w-5 animate-spin" /> },
-        coberturaMediaDias: { value: 0, icon: <Loader2 className="h-5 w-5 animate-spin" /> },
-        indiceExecucaoPedidos: { value: 0, icon: <Loader2 className="h-5 w-5 animate-spin" /> },
-      };
+      return { ruptureLessThan7Days: [], stockParado: [], dailySalesExceedsPE: [] };
     }
+    const ruptureLessThan7Days = enhancedProducts.filter(p => p.prediction?.daysToRupturePE !== null && p.prediction!.daysToRupturePE < 7);
+    const stockParado = enhancedProducts.filter(p => p.stock > 100 && p.sales30d < 5); // Total stock vs total sales
+    const dailySalesExceedsPE = enhancedProducts.filter(p => p.dailyAverageSales > p.readyToShip && p.readyToShip > 0);
 
-    const productsWithSalesAndPrediction = enhancedProducts.filter(p => (p.sales30d || 0) > 0 && p.prediction && (p.prediction.daysToRupture !== null && p.prediction.daysToRupture !== Infinity));
-    const coberturaMediaDias = productsWithSalesAndPrediction.length > 0
-        ? productsWithSalesAndPrediction.reduce((sum, p) => sum + (p.prediction!.daysToRupture!), 0) / productsWithSalesAndPrediction.length
-        : 0;
-
-    const getRuptureCount = (days: number) => enhancedProducts.filter(p => p.prediction && p.prediction.daysToRupture !== null && p.prediction.daysToRupture !== Infinity && p.prediction.daysToRupture <= days).length;
-
-    const volumeRisco = enhancedProducts.filter(p => p.prediction?.riskStatus === 'Alto' || p.prediction?.riskStatus === 'Crítico')
-                           .reduce((sum, p) => sum + ((p.price || 0) * (p.sales30d || 0)),0);
-    const altoGiroBaixaCobertura = enhancedProducts.filter(p => (p.sales30d || 0) > 20 && p.prediction && p.prediction.daysToRupture !== null && p.prediction.daysToRupture !== Infinity && p.prediction.daysToRupture < 7).length;
-    const superestoque = enhancedProducts.filter(p => p.stock > 100 && (p.sales30d || 0) < 5).length;
-    const indiceExecucaoPedidos = "95%"; // Placeholder
-
-    return {
-      ruptura3d: { count: getRuptureCount(3), icon: <AlertTriangle className="h-5 w-5 text-red-500" />, color: 'text-red-600' },
-      ruptura7d: { count: getRuptureCount(7), icon: <AlertCircle className="h-5 w-5 text-orange-500" />, color: 'text-orange-600' },
-      ruptura15d: { count: getRuptureCount(15), icon: <TrendingDown className="h-5 w-5 text-yellow-500" />, color: 'text-yellow-600' },
-      volumeRisco: { value: volumeRisco, icon: <DollarSign className="h-5 w-5 text-red-500" />, color: 'text-red-600', isCurrency: true },
-      altoGiroBaixaCobertura: { count: altoGiroBaixaCobertura, icon: <TrendingUp className="h-5 w-5 text-orange-500" />, color: 'text-orange-600' },
-      superestoque: { count: superestoque, icon: <PackageSearch className="h-5 w-5 text-blue-500" />, color: 'text-blue-600' },
-      coberturaMediaDias: { value: coberturaMediaDias, icon: <CalendarDays className="h-5 w-5 text-green-500" />, color: 'text-green-600', isDays: true },
-      indiceExecucaoPedidos: { value: indiceExecucaoPedidos, icon: <CheckSquare className="h-5 w-5 text-green-500" />, color: 'text-green-600' },
-    };
+    return { ruptureLessThan7Days, stockParado, dailySalesExceedsPE };
   }, [enhancedProducts, isLoadingPredictions]);
 
-  const formatCurrency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  const handleExportSuggestions = () => {
+    if (isLoadingPredictions) {
+        toast({title: "Aguarde", description: "As previsões ainda estão carregando.", variant: "default"});
+        return;
+    }
+    const productsToExport = filteredAndSortedProducts.filter(p => 
+        p.prediction?.riskStatusPE === 'Ruptura Iminente' || p.prediction?.riskStatusPE === 'Atenção'
+    );
+
+    if (productsToExport.length === 0) {
+        toast({title: "Sem Sugestões Críticas", description: "Nenhum produto com risco 'Ruptura Iminente' ou 'Atenção' nos filtros atuais para exportar.", variant: "default"});
+        return;
+    }
+
+    toast({ title: "Exportando Sugestões...", description: "Gerando arquivo Excel." });
+
+    const dataToExport = productsToExport.map(p => {
+        const dailySales = p.dailyAverageSales;
+        const targetStock15d = dailySales * 15;
+        // Suggestion for Pronta Entrega based on 15 days, considering what's already in PE
+        const suggestedForPE15d = Math.max(0, Math.ceil(targetStock15d - p.readyToShip)); 
+        
+        return {
+            "Produto": p.name,
+            "ID VTEX": String(p.vtexId || ''),
+            "Status Risco (PE)": p.prediction?.riskStatusPE || 'N/A',
+            "Estoque Pronta Entrega": p.readyToShip,
+            "Média Venda Diária": p.dailyAverageSales.toFixed(2),
+            "Projeção Ruptura PE (dias)": formatDaysToRuptureForDisplay(p.prediction?.daysToRupturePE),
+            "Sugestão para 15d Cobertura (PE)": suggestedForPE15d,
+            "Prioridade": p.prediction?.riskStatusPE === 'Ruptura Iminente' ? 'Alta' : 'Média',
+            "Alertas Gerais (Produto)": p.prediction?.alerts?.join('; ') || ''
+        };
+    });
+
+    try {
+        const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "SugestoesReposicao");
+        XLSX.writeFile(workbook, `Sugestoes_Reposicao_Inteligencia_${new Date().toISOString().split('T')[0]}.xlsx`);
+        toast({ title: "Exportação Concluída", description: "As sugestões de reposição foram exportadas." });
+    } catch (error) {
+        console.error("Erro ao exportar para Excel (Sugestões Inteligência):", error);
+        toast({ title: "Erro na Exportação", description: "Não foi possível gerar o arquivo Excel.", variant: "destructive" });
+    }
+  };
+
 
   const displayGlobalLoader = (isLoadingFirestore || isAuthLoading) && allProducts.length === 0;
 
   if (displayGlobalLoader) {
     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Carregando dados iniciais...</p></div>;
   }
+  
+  const renderAlertList = (alertProducts: EnhancedProductForIntelligence[], title: string, emptyMessage: string) => (
+    <div>
+      <h4 className="font-semibold text-sm mb-1 text-primary">{title} ({alertProducts.length})</h4>
+      {alertProducts.length > 0 ? (
+        <ul className="list-disc pl-5 text-xs space-y-0.5 max-h-32 overflow-y-auto">
+          {alertProducts.map(p => <li key={`alert-${title}-${p.vtexId}`}>{p.name}</li>)}
+        </ul>
+      ) : (
+        <p className="text-xs text-muted-foreground">{emptyMessage}</p>
+      )}
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -290,7 +315,7 @@ export default function IntelligencePanelPage() {
             Painel de Inteligência Logística e Comercial
           </h1>
           <p className="text-muted-foreground">
-            Previsões, alertas e sugestões para otimizar estoque e decisões comerciais.
+            Previsões, alertas e sugestões para otimizar o estoque de Pronta Entrega e apoiar decisões.
           </p>
         </div>
       </div>
@@ -301,69 +326,47 @@ export default function IntelligencePanelPage() {
         </div>
       )}
 
-      {/* Component 1: Dashboard Analítico com IA */}
-      <Card className="shadow-lg border-l-4 border-primary">
+      {/* Component 2: Alertas e Insights Automatizados */}
+      <Card className="shadow-md border-l-4 border-primary">
         <CardHeader>
-          <CardTitle className="flex items-center"><BarChart3 className="mr-2 h-5 w-5 text-primary" />Dashboard Analítico com IA</CardTitle>
+          <CardTitle className="flex items-center"><Lightbulb className="mr-2 h-5 w-5 text-primary" />Alertas e Insights Chave</CardTitle>
+          <CardDescription>Destaques baseados na análise dos dados atuais.</CardDescription>
         </CardHeader>
-        <CardContent className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {Object.entries(analyticalDashboardData).map(([key, item]) => (
-            <Card key={key} className="shadow-sm hover:shadow-md transition-shadow">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1 pt-3 px-4">
-                <CardTitle className="text-xs font-medium uppercase text-muted-foreground">
-                  {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
-                </CardTitle>
-                {isLoadingPredictions && !item.icon.type.displayName?.includes("Loader2") ? <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" /> : item.icon}
-              </CardHeader>
-              <CardContent className="px-4 pb-3">
-                <div className={`text-2xl font-bold ${item.color || 'text-foreground'}`}>
-                  {isLoadingPredictions && !item.icon.type.displayName?.includes("Loader2") ? <Skeleton className="h-8 w-20" /> : (
-                    item.isCurrency ? formatCurrency(item.value as number) : 
-                    (item.isDays ? `${(item.value as number).toFixed(1)} dias` : (item.value || item.count || 0).toLocaleString())
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+        <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {isLoadingPredictions && enhancedProducts.length > 0 ? (
+            <>
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-24 w-full" />
+            </>
+          ) : enhancedProducts.length === 0 && !isLoadingPredictions ? (
+            <p className="col-span-full text-center text-muted-foreground">Nenhum dado de produto para gerar alertas.</p>
+          ) : (
+            <>
+             {renderAlertList(automatedAlerts.ruptureLessThan7Days, "Ruptura PE < 7 Dias", "Nenhum produto com ruptura PE iminente (< 7 dias).")}
+             {renderAlertList(automatedAlerts.stockParado, "Estoque Total Parado (Exemplo: >100un, <5 vendas/30d)", "Nenhum produto identificado como estoque total parado com os critérios atuais.")}
+             {renderAlertList(automatedAlerts.dailySalesExceedsPE, "Venda Diária > Estoque Pronta Entrega", "Nenhum produto com venda diária superando o estoque de pronta entrega.")}
+            </>
+          )}
         </CardContent>
       </Card>
       
-      {/* Filtros Avançados e Busca */}
-      <Card className="shadow-md">
+      {/* Filtros Avançados */}
+      <Card className="shadow-sm">
         <CardHeader>
-            <CardTitle className="flex items-center"><FilterIcon className="mr-2 h-5 w-5 text-primary"/>Filtros Avançados e Busca</CardTitle>
+            <CardTitle className="flex items-center text-lg"><FilterIcon className="mr-2 h-5 w-5 text-primary"/>Filtros da Tabela</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-                <Label htmlFor="intelSearch">Busca por Nome/ID</Label>
-                <Input id="intelSearch" placeholder="Nome ou ID VTEX..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="mt-1"/>
+                <Label htmlFor="intelSearchTable">Busca por Nome/ID do Produto</Label>
+                <Input id="intelSearchTable" placeholder="Digite nome ou ID VTEX..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="mt-1"/>
             </div>
             <div>
-                <Label htmlFor="intelCollection">Coleção</Label>
-                <Select value={selectedCollection} onValueChange={setSelectedCollection}>
-                    <SelectTrigger id="intelCollection" className="mt-1"><SelectValue/></SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value={ALL_COLLECTIONS_VALUE}>Todas Coleções</SelectItem>
-                        {availableCollections.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                    </SelectContent>
-                </Select>
-            </div>
-            <div>
-                <Label htmlFor="intelProductType">Tipo Produto</Label>
-                <Select value={selectedProductType} onValueChange={setSelectedProductType}>
-                    <SelectTrigger id="intelProductType" className="mt-1"><SelectValue/></SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value={ALL_PRODUCT_TYPES_VALUE}>Todos Tipos</SelectItem>
-                        {availableProductTypes.map(pt => <SelectItem key={pt} value={pt}>{pt}</SelectItem>)}
-                    </SelectContent>
-                </Select>
-            </div>
-            <div>
-                <Label htmlFor="intelRiskStatus">Status de Risco (IA)</Label>
+                <Label htmlFor="intelRiskStatusTable">Status de Risco (Pronta Entrega)</Label>
                 <Select value={selectedRiskStatus} onValueChange={setSelectedRiskStatus}>
-                    <SelectTrigger id="intelRiskStatus" className="mt-1"><SelectValue/></SelectTrigger>
+                    <SelectTrigger id="intelRiskStatusTable" className="mt-1"><SelectValue/></SelectTrigger>
                     <SelectContent>
-                        <SelectItem value={ALL_RISK_STATUS_VALUE}>Todos Status</SelectItem>
+                        <SelectItem value={ALL_RISK_STATUS_VALUE}>Todos os Status</SelectItem>
                         {riskStatusOptions.map(rs => <SelectItem key={rs} value={rs}>{rs}</SelectItem>)}
                     </SelectContent>
                 </Select>
@@ -372,21 +375,21 @@ export default function IntelligencePanelPage() {
       </Card>
 
 
-      {/* Component 2: Tabela Dinâmica com Lógica Avançada */}
+      {/* Component 1: Tabela Central com Lógica de Projeção */}
       <Card className="shadow-lg">
         <CardHeader>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
             <div className="flex-grow">
-                <CardTitle className="flex items-center"><ListFilter className="mr-2 h-5 w-5 text-primary"/>Tabela Dinâmica com Lógica Avançada</CardTitle>
-                <CardDescription>Produtos com projeções, status de risco e ações sugeridas.</CardDescription>
+                <CardTitle className="flex items-center"><ListChecks className="mr-2 h-5 w-5 text-primary"/>Visão Detalhada de Produtos e Projeções</CardTitle>
+                <CardDescription>Análise de cada produto com foco no estoque de Pronta Entrega.</CardDescription>
             </div>
-            <Button onClick={() => alert("Exportar para Excel (funcionalidade futura)")} size="sm" variant="outline" disabled={isLoadingPredictions || paginatedProducts.length === 0}>
-                <Download className="mr-2 h-4 w-4" /> Exportar para Excel
+            <Button onClick={handleExportSuggestions} size="sm" variant="default" disabled={isLoadingPredictions || filteredAndSortedProducts.length === 0}>
+                <Download className="mr-2 h-4 w-4" /> Exportar Sugestões (Excel)
             </Button>
            </div>
         </CardHeader>
         <CardContent>
-          {(isLoadingPredictions && paginatedProducts.length === 0 && allProducts.length > 0) ? (
+          {(isLoadingPredictions && enhancedProducts.length === 0 && allProducts.length > 0) ? (
             <div className="flex items-center justify-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-3">Carregando previsões e dados da tabela...</p></div>
           ) : paginatedProducts.length === 0 ? (
             <p className="text-center text-muted-foreground py-6">Nenhum produto corresponde aos filtros atuais.</p>
@@ -396,75 +399,51 @@ export default function IntelligencePanelPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead onClick={() => handleSort('name')} className="cursor-pointer hover:bg-muted/50 text-xs">Nome Produto {renderSortIcon('name')}</TableHead>
-                  <TableHead onClick={() => handleSort('stock')} className="cursor-pointer hover:bg-muted/50 text-xs text-right">Est. Total {renderSortIcon('stock')}</TableHead>
-                  <TableHead className="text-xs text-right">PE / Regulador</TableHead>
-                  <TableHead onClick={() => handleSort('sales30d')} className="cursor-pointer hover:bg-muted/50 text-xs text-right">Vendas (7/15/30d) {renderSortIcon('sales30d')}</TableHead>
-                  <TableHead onClick={() => handleSort('daysToRupture')} className="cursor-pointer hover:bg-muted/50 text-xs text-right">Ruptura (dias) {renderSortIcon('daysToRupture')}</TableHead>
-                  <TableHead className="text-xs text-center">Status Risco</TableHead>
-                  <TableHead className="text-xs text-right">Score Giro/Cob.</TableHead>
-                  <TableHead className="text-xs">Ações Sugeridas (IA)</TableHead>
-                  <TableHead className="text-xs text-center">Detalhar</TableHead>
+                  <TableHead onClick={() => handleSort('name')} className="cursor-pointer hover:bg-muted/50 text-xs py-2 px-2 whitespace-nowrap sticky left-0 bg-card z-10">Produto {renderSortIcon('name')}</TableHead>
+                  <TableHead onClick={() => handleSort('stock')} className="cursor-pointer hover:bg-muted/50 text-xs py-2 px-2 text-right whitespace-nowrap">Est. Total {renderSortIcon('stock')}</TableHead>
+                  <TableHead onClick={() => handleSort('readyToShip')} className="cursor-pointer hover:bg-muted/50 text-xs py-2 px-2 text-right whitespace-nowrap font-semibold text-green-600">Est. PE {renderSortIcon('readyToShip')}</TableHead>
+                  <TableHead onClick={() => handleSort('regulatorStock')} className="cursor-pointer hover:bg-muted/50 text-xs py-2 px-2 text-right whitespace-nowrap">Est. Regulador {renderSortIcon('regulatorStock')}</TableHead>
+                  <TableHead onClick={() => handleSort('price')} className="cursor-pointer hover:bg-muted/50 text-xs py-2 px-2 text-right whitespace-nowrap">Preço {renderSortIcon('price')}</TableHead>
+                  <TableHead onClick={() => handleSort('sales30d')} className="cursor-pointer hover:bg-muted/50 text-xs py-2 px-2 text-right whitespace-nowrap">Vendas 30d {renderSortIcon('sales30d')}</TableHead>
+                  <TableHead onClick={() => handleSort('dailyAverageSales')} className="cursor-pointer hover:bg-muted/50 text-xs py-2 px-2 text-right whitespace-nowrap">Média Venda/Dia {renderSortIcon('dailyAverageSales')}</TableHead>
+                  <TableHead onClick={() => handleSort('daysToRupturePE')} className="cursor-pointer hover:bg-muted/50 text-xs py-2 px-2 text-right whitespace-nowrap font-semibold">Ruptura PE (dias) {renderSortIcon('daysToRupturePE')}</TableHead>
+                  <TableHead className="text-xs text-center py-2 px-2 whitespace-nowrap font-semibold">Status Risco (PE)</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {paginatedProducts.map(p => (
                   <TableRow key={String(p.vtexId) + p.name}>
-                    <TableCell className="font-medium text-xs max-w-xs truncate" title={p.name}>{p.name}</TableCell>
-                    <TableCell className="text-right text-xs">{p.stock.toLocaleString()}</TableCell>
-                    <TableCell className="text-right text-xs">
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                             <span className="cursor-help">{p.readyToShip.toLocaleString()} / {p.regulatorStock.toLocaleString()}</span>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>Pronta Entrega: {p.readyToShip.toLocaleString()}</p>
-                            <p>Regulador: {p.regulatorStock.toLocaleString()}</p>
-                            <p>Utilizável: {(p.readyToShip + p.regulatorStock).toLocaleString()}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
+                    <TableCell className="font-medium text-xs max-w-xs truncate py-1.5 px-2 sticky left-0 bg-card z-10" title={p.name}>
+                        <TooltipProvider delayDuration={300}>
+                            <Tooltip>
+                                <TooltipTrigger asChild><span className="cursor-default">{p.name}</span></TooltipTrigger>
+                                <TooltipContent className="max-w-md"><p>{p.name} (VTEX ID: {String(p.vtexId)})</p></TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
                     </TableCell>
-                    <TableCell className="text-right text-xs">
-                       {p.sales7d?.toLocaleString()} / {p.sales15d?.toLocaleString()} / {(p.sales30d || 0).toLocaleString()}
+                    <TableCell className="text-right text-xs py-1.5 px-2">{p.stock.toLocaleString()}</TableCell>
+                    <TableCell className="text-right text-xs py-1.5 px-2 font-semibold text-green-700">{p.readyToShip.toLocaleString()}</TableCell>
+                    <TableCell className="text-right text-xs py-1.5 px-2">{p.regulatorStock.toLocaleString()}</TableCell>
+                    <TableCell className="text-right text-xs py-1.5 px-2">{p.price?.toLocaleString('pt-BR', {style:'currency', currency:'BRL'}) || 'N/A'}</TableCell>
+                    <TableCell className="text-right text-xs py-1.5 px-2">{(p.sales30d || 0).toLocaleString()}</TableCell>
+                    <TableCell className="text-right text-xs py-1.5 px-2">{p.dailyAverageSales.toFixed(2)}</TableCell>
+                    <TableCell className={cn("text-right text-xs py-1.5 px-2 font-semibold", 
+                        p.prediction?.riskStatusPE === 'Ruptura Iminente' ? 'text-red-600' :
+                        p.prediction?.riskStatusPE === 'Atenção' ? 'text-yellow-600' : ''
+                    )}>
+                      {p.prediction ? formatDaysToRuptureForDisplay(p.prediction.daysToRupturePE) : <Skeleton className="h-4 w-8 float-right" />}
                     </TableCell>
-                    <TableCell className={`text-right text-xs font-semibold ${
-                        p.prediction?.daysToRupture !== undefined && p.prediction.daysToRupture !== null && p.prediction.daysToRupture <= 7 && p.prediction.daysToRupture !== Infinity ? 'text-red-600' :
-                        p.prediction?.daysToRupture !== undefined && p.prediction.daysToRupture !== null && p.prediction.daysToRupture <= 15 && p.prediction.daysToRupture !== Infinity ? 'text-orange-600' : 'text-foreground'
-                    }`}>
-                      {p.prediction ? formatDaysToRuptureForDisplay(p.prediction.daysToRupture) : '...'}
-                    </TableCell>
-                    <TableCell className="text-center text-xs">
+                    <TableCell className="text-center text-xs py-1.5 px-2">
                       {p.prediction ? (
-                        <Badge variant={
-                            p.prediction.riskStatus === 'Crítico' ? 'destructive' :
-                            p.prediction.riskStatus === 'Alto' ? 'destructive' :
-                            p.prediction.riskStatus === 'Médio' ? 'default' : 
-                            p.prediction.riskStatus === 'N/A' ? 'outline' : 'outline' // Default to outline for N/A and Baixo
-                        } className={
-                            p.prediction.riskStatus === 'Médio' ? 'bg-orange-500 text-white border-orange-500' :
-                            p.prediction.riskStatus === 'Baixo' ? 'bg-green-500 text-white border-green-500' : 
-                            p.prediction.riskStatus === 'N/A' ? 'border-gray-400 text-gray-500' : ''
-                        }>
-                          {p.prediction.riskStatus}
-                        </Badge>
+                        <TooltipProvider delayDuration={300}>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <span className="flex items-center justify-center">{getRiskStatusIcon(p.prediction.riskStatusPE)}</span>
+                                </TooltipTrigger>
+                                <TooltipContent><p>{p.prediction.riskStatusPE}</p></TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
                       ) : <Skeleton className="h-5 w-12 mx-auto" />}
-                    </TableCell>
-                    <TableCell className="text-right text-xs">{p.scoreGiroCobertura?.toFixed(0) ?? '...'}%</TableCell>
-                    <TableCell className="text-xs max-w-md truncate">
-                      <ul className="list-disc list-inside">
-                        {p.prediction?.suggestedRestockUnits && p.prediction.suggestedRestockUnits > 0 && (
-                            <li className="text-green-600">Repor {p.prediction.suggestedRestockUnits.toLocaleString()} unid.</li>
-                        )}
-                        {p.prediction?.alerts?.map((alert, i) => <li key={i} className={alert.includes("Crítico") || alert.includes("Alto Risco") ? "text-red-600" : alert.includes("Atenção") || alert.includes("parado") ? "text-orange-600" : ""}>{alert}</li>)}
-                        {(p.prediction?.suggestedRestockUnits === 0 || !p.prediction?.suggestedRestockUnits) && (!p.prediction?.alerts || p.prediction.alerts.length === 0) && <span className="text-muted-foreground">Nenhuma ação imediata.</span>}
-                      </ul>
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Button variant="ghost" size="icon" onClick={() => alert(`Detalhar ${p.name} (futuro)`)} className="h-7 w-7">
-                        <Eye className="h-4 w-4" />
-                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -473,9 +452,9 @@ export default function IntelligencePanelPage() {
             </div>
             {totalPages > 1 && (
               <div className="flex items-center justify-between pt-4">
-                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>Anterior</Button>
+                <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1}><ChevronLeft className="mr-1 h-4 w-4"/>Anterior</Button>
                 <span className="text-sm text-muted-foreground">Página {currentPage} de {totalPages}</span>
-                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>Próxima</Button>
+                <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages}>Próxima<ChevronRight className="ml-1 h-4 w-4"/></Button>
               </div>
             )}
             </>
@@ -486,36 +465,24 @@ export default function IntelligencePanelPage() {
       {/* Component 3: Gráfico Preditivo com Linha do Tempo */}
       <Card className="shadow-md">
         <CardHeader>
-          <CardTitle className="flex items-center"><LineChart className="mr-2 h-5 w-5 text-primary"/>Gráfico Preditivo com Linha do Tempo</CardTitle>
-          <CardDescription>Previsão visual de estoque x venda para os próximos 30 dias. (Funcionalidade Futura)</CardDescription>
+          <CardTitle className="flex items-center"><LineChart className="mr-2 h-5 w-5 text-primary"/>Gráfico de Tendência por Produto</CardTitle>
+          <CardDescription>Visualização da projeção de estoque vs. venda. (Em Desenvolvimento)</CardDescription>
         </CardHeader>
         <CardContent className="h-60 flex items-center justify-center text-muted-foreground">
-            <Info className="mr-2 h-5 w-5"/> Em Desenvolvimento
+            <Info className="mr-2 h-5 w-5"/> Funcionalidade futura.
         </CardContent>
       </Card>
 
-      {/* Component 4: Módulo de Ações Inteligentes */}
+      {/* Component 4: Ferramenta de Simulação de Reposição */}
       <Card className="shadow-md">
         <CardHeader>
-          <CardTitle className="flex items-center"><Lightbulb className="mr-2 h-5 w-5 text-primary"/>Módulo de Ações Inteligentes</CardTitle>
-          <CardDescription>Ações geradas automaticamente para otimizar a logística. (Funcionalidade Futura)</CardDescription>
+          <CardTitle className="flex items-center"><Settings className="mr-2 h-5 w-5 text-primary"/>Ferramenta de Simulação de Reposição</CardTitle>
+          <CardDescription>Calcule o impacto de novas reposições. (Em Desenvolvimento)</CardDescription>
         </CardHeader>
         <CardContent className="h-40 flex items-center justify-center text-muted-foreground">
-            <Info className="mr-2 h-5 w-5"/> Em Desenvolvimento
+            <Info className="mr-2 h-5 w-5"/> Funcionalidade futura.
         </CardContent>
       </Card>
-
-      {/* Component 5: Simulador de Cenário */}
-      <Card className="shadow-md">
-        <CardHeader>
-          <CardTitle className="flex items-center"><Settings className="mr-2 h-5 w-5 text-primary"/>Simulador de Cenário</CardTitle>
-          <CardDescription>Avalie impactos de diferentes cenários logísticos e comerciais. (Funcionalidade Futura)</CardDescription>
-        </CardHeader>
-        <CardContent className="h-40 flex items-center justify-center text-muted-foreground">
-            <Info className="mr-2 h-5 w-5"/> Em Desenvolvimento
-        </CardContent>
-      </Card>
-
     </div>
   );
 }
