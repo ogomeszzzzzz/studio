@@ -8,14 +8,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { AlertTriangle, ArrowUpDown, BarChart3, Brain, CalendarDays, Clock, Download, Filter as FilterIcon, HelpCircle, TrendingDown, TrendingUp, PackageSearch, ListChecks, CheckSquare, Lightbulb, Settings, Eye, Info, LineChart, ShoppingCart, ChevronLeft, ChevronRight, AlertCircleIcon, PackageIcon, CircleIcon } from 'lucide-react';
+import { AlertTriangle, ArrowUpDown, BarChart3, Brain, CalendarDays, Clock, Download, Filter as FilterIcon, HelpCircle, TrendingDown, TrendingUp, PackageSearch, ListChecks, CheckSquare, Lightbulb, Settings, Eye, Info, LineChart, ShoppingCart, ChevronLeft, ChevronRight, AlertCircleIcon, PackageIcon, CircleIcon, UploadCloud, FileSpreadsheet } from 'lucide-react';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import type { Product, EnhancedProductForIntelligence } from '@/types';
+import type { Product, EnhancedProductForIntelligence, SalesRecord } from '@/types';
 import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
 import { collection, getDocs, doc, Timestamp, query, getDoc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
-import { format as formatDateFns, isValid as isDateValid } from 'date-fns';
+import { format as formatDateFns, isValid as isDateValid, subDays, isAfter } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import * as XLSX from 'xlsx';
 import { predictLogistics, type LogisticsPredictionInput, type LogisticsPredictionOutput } from '@/ai/flows/logistics-predictor-flow';
@@ -23,6 +23,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { ExcelUploadSection } from '@/components/domain/ExcelUploadSection'; // Assuming this can be reused or adapted
+import { parseSalesData } from '@/lib/excel-parser';
+
 
 const productFromFirestore = (data: any): Product => {
   return {
@@ -35,7 +38,7 @@ const productFromFirestore = (data: any): Product => {
 const ALL_RISK_STATUS_VALUE = "_ALL_RISK_STATUS_INTEL_";
 
 const formatDaysToRuptureForDisplay = (days: number | null | undefined): string => {
-  if (days === null || days === undefined || !isFinite(days)) {
+  if (days === null || days === undefined || !isFinite(days) || isNaN(days)) {
     return 'N/A';
   }
   if (days === 0) return '0 (Hoje)';
@@ -58,11 +61,16 @@ export default function IntelligencePanelPage() {
   const { currentUser, isLoading: isAuthLoading } = useAuth();
   const { toast } = useToast();
 
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [allProducts, setAllProducts] = useState<Product[]>([]); // Stock data from Firestore
+  const [salesRecords, setSalesRecords] = useState<SalesRecord[]>([]); // Sales data from local Excel upload
   const [enhancedProducts, setEnhancedProducts] = useState<EnhancedProductForIntelligence[]>([]);
-  const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
+  
+  const [isLoadingFirestore, setIsLoadingFirestore] = useState(true); // For stock data
+  const [isLoadingSalesExcel, setIsLoadingSalesExcel] = useState(false); // For sales data upload
+  const [isProcessingSalesData, setIsProcessingSalesData] = useState(false); // For parsing sales data
   const [isLoadingPredictions, setIsLoadingPredictions] = useState(false);
-  const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
+  const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null); // For stock data
+  const [lastSalesUploadTimestamp, setLastSalesUploadTimestamp] = useState<Date | null>(null);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRiskStatus, setSelectedRiskStatus] = useState<string>(ALL_RISK_STATUS_VALUE);
@@ -72,16 +80,17 @@ export default function IntelligencePanelPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 15;
 
+  // Fetch stock data from Firestore
   useEffect(() => {
     if (isAuthLoading) return;
     if (firestoreClientInitializationError || !firestore) {
-      toast({ title: "Erro de Conexão", description: firestoreClientInitializationError || "Firestore não disponível.", variant: "destructive" });
+      toast({ title: "Erro de Conexão com Firestore", description: firestoreClientInitializationError || "Firestore não disponível.", variant: "destructive" });
       setIsLoadingFirestore(false);
       return;
     }
     if (currentUser && allProducts.length === 0) {
       setIsLoadingFirestore(true);
-      const fetchProducts = async () => {
+      const fetchStockProducts = async () => {
         try {
           const productsQuery = query(collection(firestore, "shared_products"));
           const snapshot = await getDocs(productsQuery);
@@ -94,27 +103,61 @@ export default function IntelligencePanelPage() {
             const data = metadataDocSnap.data();
             if (data.lastUpdatedAt instanceof Timestamp) setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
           }
+          if (productsFromDb.length === 0) {
+            toast({ title: "Sem Dados de Estoque", description: "Nenhum produto de estoque encontrado no sistema. Faça upload no Dashboard.", variant: "default" });
+          }
         } catch (error) {
-          toast({ title: "Erro ao Carregar Produtos", description: (error as Error).message, variant: "destructive" });
+          toast({ title: "Erro ao Carregar Estoque", description: (error as Error).message, variant: "destructive" });
         } finally {
           setIsLoadingFirestore(false);
         }
       };
-      fetchProducts();
+      fetchStockProducts();
     } else if (!currentUser) {
       setAllProducts([]);
       setEnhancedProducts([]);
       setIsLoadingFirestore(false);
+    } else if (allProducts.length > 0) {
+        setIsLoadingFirestore(false); // Already loaded
     }
   }, [currentUser, isAuthLoading, allProducts.length, toast]);
 
-  const fetchPredictionsForProducts = useCallback(async (productsToPredict: Product[]) => {
-    if (productsToPredict.length === 0) {
+  const handleSalesDataParsed = useCallback((parsedSales: SalesRecord[]) => {
+    setSalesRecords(parsedSales);
+    setLastSalesUploadTimestamp(new Date());
+    toast({ title: "Planilha de Vendas Processada", description: `${parsedSales.length} registros de venda carregados.` });
+    setIsProcessingSalesData(false);
+  }, [toast]);
+  
+  const handleSalesProcessingStart = useCallback(() => setIsProcessingSalesData(true), []);
+  const handleSalesProcessingEnd = useCallback(() => setIsProcessingSalesData(false), []);
+
+
+  // Process combined data and fetch AI predictions
+  const processDataAndFetchPredictions = useCallback(async () => {
+    if (allProducts.length === 0) {
+      // toast({ title: "Aguardando Dados de Estoque", description: "Carregue os dados de estoque no Dashboard primeiro.", variant: "default" });
       setEnhancedProducts([]);
       return;
     }
+     if (salesRecords.length === 0) {
+      // toast({ title: "Aguardando Dados de Vendas", description: "Faça upload da planilha de vendas detalhadas.", variant: "default" });
+      // If no sales data, still process products but sales30d will be 0 for predictions
+    }
+
     setIsLoadingPredictions(true);
-    const predictionsPromises = productsToPredict.map(async (p) => {
+
+    const thirtyDaysAgo = subDays(new Date(), 30);
+    const productsForPrediction = allProducts.map(p => {
+      const relevantSales = salesRecords.filter(sr => 
+        sr.date && isAfter(sr.date, thirtyDaysAgo) &&
+        (String(sr.reference).trim() === String(p.vtexId).trim() || String(sr.reference).trim() === String(p.productDerivation).trim())
+      );
+      const dynamicSales30d = relevantSales.reduce((sum, sr) => sum + sr.quantity, 0);
+      return { ...p, sales30d: dynamicSales30d, dynamicSales30d }; // Override sales30d for this panel
+    });
+    
+    const predictionsPromises = productsForPrediction.map(async (p) => {
       const dailyAvgSales = (p.sales30d || 0) / 30;
       try {
         const predictionInput: LogisticsPredictionInput = {
@@ -123,7 +166,7 @@ export default function IntelligencePanelPage() {
           currentStock: p.stock,
           readyToShipStock: p.readyToShip,
           regulatorStock: p.regulatorStock,
-          sales30d: p.sales30d || 0,
+          sales30d: p.sales30d || 0, // Use dynamically calculated sales
           price: p.price || 0,
           openOrders: p.openOrders || 0,
         };
@@ -131,7 +174,6 @@ export default function IntelligencePanelPage() {
         return { ...p, dailyAverageSales: dailyAvgSales, prediction: predictionResult };
       } catch (error) {
         console.error(`Error fetching prediction for ${p.name}:`, error);
-        // Return a default/error state for the prediction part
         return { 
           ...p, 
           dailyAverageSales: dailyAvgSales,
@@ -151,15 +193,15 @@ export default function IntelligencePanelPage() {
     const results = await Promise.all(predictionsPromises);
     setEnhancedProducts(results);
     setIsLoadingPredictions(false);
-  }, []);
+  }, [allProducts, salesRecords]);
 
   useEffect(() => {
-    if (allProducts.length > 0) {
-      fetchPredictionsForProducts(allProducts);
-    } else {
-      setEnhancedProducts([]);
+    // Trigger predictions when both stock and sales data are available (or if sales data is intentionally empty)
+    if (!isLoadingFirestore) { // Ensure stock data is loaded or attempted
+        processDataAndFetchPredictions();
     }
-  }, [allProducts, fetchPredictionsForProducts]);
+  }, [allProducts, salesRecords, isLoadingFirestore, processDataAndFetchPredictions]);
+
 
   const filteredAndSortedProducts = useMemo(() => {
     let tempProducts = [...enhancedProducts];
@@ -179,7 +221,11 @@ export default function IntelligencePanelPage() {
             if (sortKey === 'daysToRupturePE') {
                 valA = a.prediction?.daysToRupturePE === null ? Infinity : a.prediction?.daysToRupturePE ?? Infinity;
                 valB = b.prediction?.daysToRupturePE === null ? Infinity : b.prediction?.daysToRupturePE ?? Infinity;
-            } else {
+            } else if (sortKey === 'sales30d') { // Sort by dynamicSales30d if available
+                valA = a.dynamicSales30d ?? (a as any)[sortKey];
+                valB = b.dynamicSales30d ?? (b as any)[sortKey];
+            }
+             else {
                 valA = (a as any)[sortKey];
                 valB = (b as any)[sortKey];
             }
@@ -226,13 +272,12 @@ export default function IntelligencePanelPage() {
 
   const riskStatusOptions: LogisticsPredictionOutput['riskStatusPE'][] = ['Ruptura Iminente', 'Atenção', 'Estável', 'N/A'];
 
-  // Component 2: Alertas e Insights Automatizados
   const automatedAlerts = useMemo(() => {
     if (isLoadingPredictions || enhancedProducts.length === 0) {
       return { ruptureLessThan7Days: [], stockParado: [], dailySalesExceedsPE: [] };
     }
     const ruptureLessThan7Days = enhancedProducts.filter(p => p.prediction?.daysToRupturePE !== null && p.prediction!.daysToRupturePE < 7);
-    const stockParado = enhancedProducts.filter(p => p.stock > 100 && p.sales30d < 5); // Total stock vs total sales
+    const stockParado = enhancedProducts.filter(p => p.stock > 100 && (p.dynamicSales30d ?? p.sales30d ?? 0) < 5);
     const dailySalesExceedsPE = enhancedProducts.filter(p => p.dailyAverageSales > p.readyToShip && p.readyToShip > 0);
 
     return { ruptureLessThan7Days, stockParado, dailySalesExceedsPE };
@@ -240,7 +285,7 @@ export default function IntelligencePanelPage() {
 
 
   const handleExportSuggestions = () => {
-    if (isLoadingPredictions) {
+    if (isLoadingPredictions && enhancedProducts.length === 0) {
         toast({title: "Aguarde", description: "As previsões ainda estão carregando.", variant: "default"});
         return;
     }
@@ -257,13 +302,13 @@ export default function IntelligencePanelPage() {
 
     const dataToExport = productsToExport.map(p => {
         const dailySales = p.dailyAverageSales;
-        const targetStock15d = dailySales * 15;
         // Suggestion for Pronta Entrega based on 15 days, considering what's already in PE
-        const suggestedForPE15d = Math.max(0, Math.ceil(targetStock15d - p.readyToShip)); 
+        const targetStockPE15d = dailySales * 15;
+        const suggestedForPE15d = Math.max(0, Math.ceil(targetStockPE15d - p.readyToShip)); 
         
         return {
             "Produto": p.name,
-            "ID VTEX": String(p.vtexId || ''),
+            "ID VTEX/Ref.": String(p.vtexId || p.productDerivation || ''),
             "Status Risco (PE)": p.prediction?.riskStatusPE || 'N/A',
             "Estoque Pronta Entrega": p.readyToShip,
             "Média Venda Diária": p.dailyAverageSales.toFixed(2),
@@ -290,7 +335,7 @@ export default function IntelligencePanelPage() {
   const displayGlobalLoader = (isLoadingFirestore || isAuthLoading) && allProducts.length === 0;
 
   if (displayGlobalLoader) {
-    return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Carregando dados iniciais...</p></div>;
+    return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Carregando dados de estoque...</p></div>;
   }
   
   const renderAlertList = (alertProducts: EnhancedProductForIntelligence[], title: string, emptyMessage: string) => (
@@ -306,6 +351,8 @@ export default function IntelligencePanelPage() {
     </div>
   );
 
+  const isReadyForAnalysis = allProducts.length > 0; // Analysis can run even without sales data (sales30d will be 0)
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -315,36 +362,63 @@ export default function IntelligencePanelPage() {
             Painel de Inteligência Logística e Comercial
           </h1>
           <p className="text-muted-foreground">
-            Previsões, alertas e sugestões para otimizar o estoque de Pronta Entrega e apoiar decisões.
+            Combine dados de estoque (do Dashboard) com vendas detalhadas (upload abaixo) para previsões e alertas.
           </p>
         </div>
       </div>
        {lastDataUpdateTimestamp && (
         <div className="text-sm text-muted-foreground flex items-center">
-            <Clock className="mr-2 h-4 w-4" />
-            Dados dos produtos atualizados em: {formatDateFns(lastDataUpdateTimestamp, 'dd/MM/yyyy HH:mm:ss', { locale: ptBR })}
+            <Clock className="mr-1 h-4 w-4" />
+            Dados de estoque atualizados em: {formatDateFns(lastDataUpdateTimestamp, 'dd/MM/yyyy HH:mm:ss', { locale: ptBR })}.
         </div>
       )}
+      {lastSalesUploadTimestamp && (
+        <div className="text-sm text-muted-foreground flex items-center">
+            <FileSpreadsheet className="mr-1 h-4 w-4" />
+            Planilha de vendas carregada em: {formatDateFns(lastSalesUploadTimestamp, 'dd/MM/yyyy HH:mm:ss', { locale: ptBR })}.
+        </div>
+      )}
+       {!lastSalesUploadTimestamp && !isProcessingSalesData && allProducts.length > 0 && (
+          <Card className="shadow-sm border-l-4 border-blue-500">
+            <CardHeader><CardTitle className="text-blue-700">Ação Necessária</CardTitle></CardHeader>
+            <CardContent><p className="text-blue-600">Faça o upload da planilha de vendas detalhadas para calcular a Venda 30d dinamicamente e refinar as previsões.</p></CardContent>
+          </Card>
+        )}
+
+
+      {/* Sales Excel Upload Section */}
+      <ExcelUploadSection
+          onDataParsed={(data) => handleSalesDataParsed(data as unknown as SalesRecord[])} // Cast needed due to generic ExcelUploadSection
+          onProcessingStart={handleSalesProcessingStart}
+          onProcessingEnd={handleSalesProcessingEnd}
+          cardTitle="Upload Planilha de Vendas Detalhadas"
+          cardDescription="Carregue o Excel com as colunas: Data, Pedido, Referencia, Nome, Valor de venda, Quantidade, Valor total. Cada linha deve ser um item de pedido."
+          isProcessingParent={isProcessingSalesData || isLoadingSalesExcel} // isLoadingSalesExcel can be a general upload lock
+          passwordProtected={false} // Or true if you want password for this specific upload
+          collectionColumnKey="Referencia" // Not strictly used for collection, but a key for parseExcelData if it were reused; parseSalesData is custom.
+      />
 
       {/* Component 2: Alertas e Insights Automatizados */}
       <Card className="shadow-md border-l-4 border-primary">
         <CardHeader>
           <CardTitle className="flex items-center"><Lightbulb className="mr-2 h-5 w-5 text-primary" />Alertas e Insights Chave</CardTitle>
-          <CardDescription>Destaques baseados na análise dos dados atuais.</CardDescription>
+          <CardDescription>Destaques baseados na análise dos dados atuais (com base nas vendas da planilha carregada acima e estoque do Dashboard).</CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {isLoadingPredictions && enhancedProducts.length > 0 ? (
+          {(isLoadingPredictions && enhancedProducts.length === 0 && isReadyForAnalysis) || (isLoadingFirestore && allProducts.length === 0) ? (
             <>
               <Skeleton className="h-24 w-full" />
               <Skeleton className="h-24 w-full" />
               <Skeleton className="h-24 w-full" />
             </>
-          ) : enhancedProducts.length === 0 && !isLoadingPredictions ? (
-            <p className="col-span-full text-center text-muted-foreground">Nenhum dado de produto para gerar alertas.</p>
+          ) : !isReadyForAnalysis && !isLoadingFirestore ? (
+             <p className="col-span-full text-center text-muted-foreground">Carregue os dados de estoque no Dashboard para iniciar a análise.</p>
+          ) : enhancedProducts.length === 0 && !isLoadingPredictions && salesRecords.length > 0 ? (
+            <p className="col-span-full text-center text-muted-foreground">Nenhum produto para exibir após processamento. Verifique os dados carregados.</p>
           ) : (
             <>
              {renderAlertList(automatedAlerts.ruptureLessThan7Days, "Ruptura PE < 7 Dias", "Nenhum produto com ruptura PE iminente (< 7 dias).")}
-             {renderAlertList(automatedAlerts.stockParado, "Estoque Total Parado (Exemplo: >100un, <5 vendas/30d)", "Nenhum produto identificado como estoque total parado com os critérios atuais.")}
+             {renderAlertList(automatedAlerts.stockParado, "Estoque Total Parado (Ex: >100un, <5 vendas/30d)", "Nenhum produto identificado como estoque total parado com os critérios atuais.")}
              {renderAlertList(automatedAlerts.dailySalesExceedsPE, "Venda Diária > Estoque Pronta Entrega", "Nenhum produto com venda diária superando o estoque de pronta entrega.")}
             </>
           )}
@@ -359,7 +433,7 @@ export default function IntelligencePanelPage() {
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
                 <Label htmlFor="intelSearchTable">Busca por Nome/ID do Produto</Label>
-                <Input id="intelSearchTable" placeholder="Digite nome ou ID VTEX..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="mt-1"/>
+                <Input id="intelSearchTable" placeholder="Digite nome ou ID VTEX/Referência..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="mt-1"/>
             </div>
             <div>
                 <Label htmlFor="intelRiskStatusTable">Status de Risco (Pronta Entrega)</Label>
@@ -381,18 +455,22 @@ export default function IntelligencePanelPage() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
             <div className="flex-grow">
                 <CardTitle className="flex items-center"><ListChecks className="mr-2 h-5 w-5 text-primary"/>Visão Detalhada de Produtos e Projeções</CardTitle>
-                <CardDescription>Análise de cada produto com foco no estoque de Pronta Entrega.</CardDescription>
+                <CardDescription>Análise de cada produto com foco no estoque de Pronta Entrega, usando Venda 30d da planilha de vendas carregada.</CardDescription>
             </div>
-            <Button onClick={handleExportSuggestions} size="sm" variant="default" disabled={isLoadingPredictions || filteredAndSortedProducts.length === 0}>
+            <Button onClick={handleExportSuggestions} size="sm" variant="default" disabled={(isLoadingPredictions && enhancedProducts.length === 0) || filteredAndSortedProducts.length === 0}>
                 <Download className="mr-2 h-4 w-4" /> Exportar Sugestões (Excel)
             </Button>
            </div>
         </CardHeader>
         <CardContent>
-          {(isLoadingPredictions && enhancedProducts.length === 0 && allProducts.length > 0) ? (
-            <div className="flex items-center justify-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-3">Carregando previsões e dados da tabela...</p></div>
+          {(isLoadingPredictions && enhancedProducts.length === 0 && isReadyForAnalysis) || (isLoadingFirestore && allProducts.length === 0) ? (
+            <div className="flex items-center justify-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-3">Carregando e processando dados para análise...</p></div>
+          ) : !isReadyForAnalysis && !isLoadingFirestore ? (
+            <p className="text-center text-muted-foreground py-6">Carregue os dados de estoque no Dashboard para habilitar a análise.</p>
+          ) : paginatedProducts.length === 0 && salesRecords.length === 0 && !isLoadingSalesExcel && !isProcessingSalesData ? (
+            <p className="text-center text-muted-foreground py-6">Faça o upload da planilha de vendas para calcular dinamicamente a "Venda 30 dias" e gerar as previsões.</p>
           ) : paginatedProducts.length === 0 ? (
-            <p className="text-center text-muted-foreground py-6">Nenhum produto corresponde aos filtros atuais.</p>
+             <p className="text-center text-muted-foreground py-6">Nenhum produto corresponde aos filtros atuais.</p>
           ) : (
             <>
             <div className="rounded-md border overflow-x-auto">
@@ -404,7 +482,7 @@ export default function IntelligencePanelPage() {
                   <TableHead onClick={() => handleSort('readyToShip')} className="cursor-pointer hover:bg-muted/50 text-xs py-2 px-2 text-right whitespace-nowrap font-semibold text-green-600">Est. PE {renderSortIcon('readyToShip')}</TableHead>
                   <TableHead onClick={() => handleSort('regulatorStock')} className="cursor-pointer hover:bg-muted/50 text-xs py-2 px-2 text-right whitespace-nowrap">Est. Regulador {renderSortIcon('regulatorStock')}</TableHead>
                   <TableHead onClick={() => handleSort('price')} className="cursor-pointer hover:bg-muted/50 text-xs py-2 px-2 text-right whitespace-nowrap">Preço {renderSortIcon('price')}</TableHead>
-                  <TableHead onClick={() => handleSort('sales30d')} className="cursor-pointer hover:bg-muted/50 text-xs py-2 px-2 text-right whitespace-nowrap">Vendas 30d {renderSortIcon('sales30d')}</TableHead>
+                  <TableHead onClick={() => handleSort('sales30d')} className="cursor-pointer hover:bg-muted/50 text-xs py-2 px-2 text-right whitespace-nowrap font-semibold text-blue-600">Vendas 30d (Planilha) {renderSortIcon('sales30d')}</TableHead>
                   <TableHead onClick={() => handleSort('dailyAverageSales')} className="cursor-pointer hover:bg-muted/50 text-xs py-2 px-2 text-right whitespace-nowrap">Média Venda/Dia {renderSortIcon('dailyAverageSales')}</TableHead>
                   <TableHead onClick={() => handleSort('daysToRupturePE')} className="cursor-pointer hover:bg-muted/50 text-xs py-2 px-2 text-right whitespace-nowrap font-semibold">Ruptura PE (dias) {renderSortIcon('daysToRupturePE')}</TableHead>
                   <TableHead className="text-xs text-center py-2 px-2 whitespace-nowrap font-semibold">Status Risco (PE)</TableHead>
@@ -417,7 +495,7 @@ export default function IntelligencePanelPage() {
                         <TooltipProvider delayDuration={300}>
                             <Tooltip>
                                 <TooltipTrigger asChild><span className="cursor-default">{p.name}</span></TooltipTrigger>
-                                <TooltipContent className="max-w-md"><p>{p.name} (VTEX ID: {String(p.vtexId)})</p></TooltipContent>
+                                <TooltipContent className="max-w-md"><p>{p.name} (VTEX ID: {String(p.vtexId || p.productDerivation)})</p></TooltipContent>
                             </Tooltip>
                         </TooltipProvider>
                     </TableCell>
@@ -425,7 +503,7 @@ export default function IntelligencePanelPage() {
                     <TableCell className="text-right text-xs py-1.5 px-2 font-semibold text-green-700">{p.readyToShip.toLocaleString()}</TableCell>
                     <TableCell className="text-right text-xs py-1.5 px-2">{p.regulatorStock.toLocaleString()}</TableCell>
                     <TableCell className="text-right text-xs py-1.5 px-2">{p.price?.toLocaleString('pt-BR', {style:'currency', currency:'BRL'}) || 'N/A'}</TableCell>
-                    <TableCell className="text-right text-xs py-1.5 px-2">{(p.sales30d || 0).toLocaleString()}</TableCell>
+                    <TableCell className="text-right text-xs py-1.5 px-2 font-semibold text-blue-700">{(p.dynamicSales30d ?? p.sales30d ?? 0).toLocaleString()}</TableCell>
                     <TableCell className="text-right text-xs py-1.5 px-2">{p.dailyAverageSales.toFixed(2)}</TableCell>
                     <TableCell className={cn("text-right text-xs py-1.5 px-2 font-semibold", 
                         p.prediction?.riskStatusPE === 'Ruptura Iminente' ? 'text-red-600' :
@@ -486,3 +564,4 @@ export default function IntelligencePanelPage() {
     </div>
   );
 }
+

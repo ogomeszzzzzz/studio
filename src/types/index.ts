@@ -26,7 +26,7 @@ export interface Product {
   canRestockAmount?: number;
 
   price?: number;
-  sales30d?: number;
+  sales30d?: number; // This might be from the main sheet OR calculated dynamically
   revenue30d?: number; // For ABC Analysis
   abcCurve?: 'A' | 'B' | 'C' | 'N/A'; // For ABC Analysis
   cumulativeRevenuePercentage?: number; // For ABC Analysis
@@ -83,8 +83,8 @@ export interface LogisticsPredictionInput {
   productName: string;
   currentStock: number; // Total stock
   readyToShipStock: number;
-  regulatorStock?: number;
-  sales30d: number;
+  regulatorStock: number; // Optional in flow, but good to have
+  sales30d: number; // Crucial input for prediction
   price?: number;
   openOrders?: number;
 }
@@ -103,4 +103,18 @@ export interface LogisticsPredictionOutput {
 export interface EnhancedProductForIntelligence extends Product {
   dailyAverageSales: number;
   prediction?: LogisticsPredictionOutput;
+  dynamicSales30d?: number; // To store sales calculated from sales Excel
 }
+
+// For Sales Excel Data
+export interface SalesRecord {
+  date: Date | null;
+  orderId: string;
+  reference: string; // SKU or product ID to match with Product.vtexId or Product.productDerivation
+  productName: string;
+  saleValue: number;
+  quantity: number;
+  totalValue: number;
+  rawDate?: string; // Store original date string for parsing robustness
+}
+
