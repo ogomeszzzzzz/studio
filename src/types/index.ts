@@ -77,44 +77,42 @@ export interface StockHistoryEntry {
   totalSkusWithStock: number;
 }
 
-// For Intelligence Panel AI Flow
-export interface LogisticsPredictionInput {
-  productId: string;
-  productName: string;
-  currentStock: number; // Total stock
-  readyToShipStock: number;
-  regulatorStock: number; // Optional in flow, but good to have
-  sales30d: number; // Crucial input for prediction
-  price?: number;
-  openOrders?: number;
-}
+// Types below were for the now-deleted Intelligence Panel
+// export interface LogisticsPredictionInput {
+//   productId: string;
+//   productName: string;
+//   currentStock: number; 
+//   readyToShipStock: number;
+//   regulatorStock: number; 
+//   sales30d: number; 
+//   price?: number;
+//   openOrders?: number;
+// }
 
-export interface LogisticsPredictionOutput {
-  productId: string;
-  productName: string;
-  daysToRupturePE: number | null; 
-  riskStatusPE: 'Ruptura Iminente' | 'Atenção' | 'Estável' | 'N/A';
-  suggestedRestockUnitsPE: number;
-  alerts?: string[];
-  dailyAverageSales: number;
-}
+// export interface LogisticsPredictionOutput {
+//   productId: string;
+//   productName: string;
+//   daysToRupturePE: number | null; 
+//   riskStatusPE: 'Ruptura Iminente' | 'Atenção' | 'Estável' | 'N/A';
+//   suggestedRestockUnitsPE: number;
+//   alerts?: string[];
+//   dailyAverageSales: number;
+// }
 
-// For enhanced product data on the frontend Intelligence Panel
-export interface EnhancedProductForIntelligence extends Product {
-  dailyAverageSales: number;
-  prediction?: LogisticsPredictionOutput;
-  dynamicSales30d?: number; // To store sales calculated from sales Excel
-}
+// export interface EnhancedProductForIntelligence extends Product {
+//   dailyAverageSales: number;
+//   prediction?: LogisticsPredictionOutput;
+//   dynamicSales30d?: number; 
+// }
 
-// For Sales Excel Data
-export interface SalesRecord {
-  date: Date | null;
-  orderId: string;
-  reference: string; // SKU or product ID to match with Product.vtexId or Product.productDerivation
-  productName: string;
-  saleValue: number;
-  quantity: number;
-  totalValue: number;
-  rawDate?: string; // Store original date string for parsing robustness
-}
+// export interface SalesRecord {
+//   date: Date | null;
+//   orderId: string;
+//   reference: string; 
+//   productName: string;
+//   saleValue: number;
+//   quantity: number;
+//   totalValue: number;
+//   rawDate?: string; 
+// }
 

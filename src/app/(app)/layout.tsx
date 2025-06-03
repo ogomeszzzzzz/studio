@@ -6,7 +6,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, LogOut, LayoutDashboard, UserCircle, ShieldCheck, Store, Building, TrendingUp, BarChart, BedDouble, Lock, Settings, Users as UsersIcon, Brain } from 'lucide-react';
+import { Loader2, LogOut, LayoutDashboard, UserCircle, ShieldCheck, Store, Building, TrendingUp, BarChart, BedDouble, Lock, Settings, Users as UsersIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
@@ -128,7 +128,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   useEffect(() => {
     if (pathname?.startsWith('/admin')) {
       setActiveAccordionItem("admin-category");
-    } else if (pathname?.startsWith('/dashboard') || pathname?.startsWith('/restock-opportunities') || pathname?.startsWith('/pillow-stock') || pathname?.startsWith('/abc-analysis') || pathname?.startsWith('/intelligence-panel')) {
+    } else if (pathname?.startsWith('/dashboard') || pathname?.startsWith('/restock-opportunities') || pathname?.startsWith('/pillow-stock') || pathname?.startsWith('/abc-analysis')) {
       setActiveAccordionItem("ecommerce-category");
     } else if (pathname?.startsWith('/retail')) {
       setActiveAccordionItem("retail-category");
@@ -335,10 +335,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 <Link href="/abc-analysis" className={cn("flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors pl-5", pathname === "/abc-analysis" && "bg-muted text-primary font-semibold")}>
                     <BarChart className="h-5 w-5" />
                     <span className="font-medium text-sm">Análise Curva ABC</span>
-                </Link>
-                <Link href="/intelligence-panel" className={cn("flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors pl-5", pathname === "/intelligence-panel" && "bg-muted text-primary font-semibold")}>
-                    <Brain className="h-5 w-5" />
-                    <span className="font-medium text-sm">Painel Inteligência</span>
                 </Link>
                 </AccordionContent>
             </AccordionItem>

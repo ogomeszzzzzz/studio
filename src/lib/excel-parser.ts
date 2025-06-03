@@ -1,7 +1,7 @@
 
 import * as XLSX from 'xlsx';
 import { parse, isValid, subDays } from 'date-fns';
-import type { Product, SalesRecord } from '@/types';
+import type { Product } from '@/types'; // Removed SalesRecord
 
 const robustParseDate = (dateStr: string | number | undefined): Date | null => {
   if (dateStr === null || dateStr === undefined) return null;
@@ -140,52 +140,5 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
   });
 };
 
-
-export const parseSalesData = (file: File): Promise<SalesRecord[]> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const arrayBuffer = event.target?.result;
-        if (!arrayBuffer) {
-          reject(new Error('Could not read sales file content.'));
-          return;
-        }
-        const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: false });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json<any>(worksheet, { raw: false, defval: null });
-
-        const salesRecords: SalesRecord[] = jsonData.map((row: any, index: number) => {
-          const rawDateValue = getRowValue(row, 'Data', [], null);
-          const parsedDate = robustParseDate(rawDateValue);
-          
-          if (parsedDate === null && rawDateValue !== null) {
-            console.warn(`Row ${index + 2}: Could not parse date "${rawDateValue}". Storing as null.`);
-          }
-
-          const saleValueStr = String(getRowValue(row, 'Valor de venda', ['Valor de Venda', 'Valor Venda'], 0));
-          const quantityStr = String(getRowValue(row, 'Quantidade', ['Qtd', 'Qtd.'], 0));
-          const totalValueStr = String(getRowValue(row, 'Valor total', ['Valor Total'], 0));
-
-          return {
-            date: parsedDate,
-            orderId: String(getRowValue(row, 'Pedido', [], `ORD-${index}`)),
-            reference: String(getRowValue(row, 'Referencia', ['Ref', 'Ref.', 'SKU'], `REF-${index}`)),
-            productName: String(getRowValue(row, 'Nome', ['Nome Produto', 'Produto'], `Produto ${index}`)),
-            saleValue: parseFloat(saleValueStr.replace(',', '.')) || 0,
-            quantity: parseInt(quantityStr, 10) || 0,
-            totalValue: parseFloat(totalValueStr.replace(',', '.')) || 0,
-            rawDate: rawDateValue !== null ? String(rawDateValue) : undefined,
-          };
-        }).filter(sr => sr.reference && sr.reference.trim() !== ''); // Filter out rows with no reference
-        resolve(salesRecords);
-      } catch (error) {
-        console.error("Error parsing Sales Excel:", error);
-        reject(new Error('Failed to parse Sales Excel file. Ensure columns are Data, Pedido, Referencia, Nome, Valor de venda, Quantidade, Valor total. Error: ' + (error instanceof Error ? error.message : String(error)) ));
-      }
-    };
-    reader.onerror = (error) => reject(error);
-    reader.readAsArrayBuffer(file);
-  });
-};
+// Removed parseSalesData function as it was specific to the deleted Intelligence Panel
+// export const parseSalesData = (file: File): Promise<SalesRecord[]> => { ... };
