@@ -1,4 +1,5 @@
 
+
 export interface Product {
   vtexId: string | number;
   name: string;
@@ -26,10 +27,10 @@ export interface Product {
   canRestockAmount?: number;
 
   price?: number;
-  sales30d?: number; // This might be from the main sheet OR calculated dynamically
-  revenue30d?: number; // For ABC Analysis
-  abcCurve?: 'A' | 'B' | 'C' | 'N/A'; // For ABC Analysis
-  cumulativeRevenuePercentage?: number; // For ABC Analysis
+  sales30d?: number; 
+  revenue30d?: number; 
+  abcCurve?: 'A' | 'B' | 'C' | 'N/A'; 
+  cumulativeRevenuePercentage?: number; 
 }
 
 export interface FilterState {
@@ -37,11 +38,12 @@ export interface FilterState {
   stockMin: string;
   stockMax: string;
   productType: string;
+  riskStatus?: StockRiskStatus; // Added for new page
 }
 
 // UserProfile for Firestore-based custom auth
 export interface UserProfile {
-  uid: string; // Will be the user's email for doc ID
+  uid: string; 
   email: string;
   name: string;
   password?: string; 
@@ -65,7 +67,7 @@ export interface AggregatedPillow {
   isUrgent?: boolean;
 }
 
-export type SortCriteria = 'name' | 'stock' | 'fillPercentage' | 'sales30d' | 'openOrders'; 
+export type SortCriteria = 'name' | 'stock' | 'fillPercentage' | 'sales30d' | 'openOrders' | 'dailyAverageSales' | 'estimatedCoverageDays'; // Added for new page
 export type SortOrder = 'asc' | 'desc';
 export type StockStatusFilter = 'all' | 'critical' | 'empty' | 'low' | 'medium' | 'good' | 'overstocked';
 
@@ -77,42 +79,23 @@ export interface StockHistoryEntry {
   totalSkusWithStock: number;
 }
 
-// Types below were for the now-deleted Intelligence Panel
-// export interface LogisticsPredictionInput {
-//   productId: string;
-//   productName: string;
-//   currentStock: number; 
-//   readyToShipStock: number;
-//   regulatorStock: number; 
-//   sales30d: number; 
-//   price?: number;
-//   openOrders?: number;
-// }
+// For Collection Stock Intelligence Page
+export type StockRiskStatus = 'Alerta Crítico' | 'Risco Moderado' | 'Estável' | 'N/A';
 
-// export interface LogisticsPredictionOutput {
-//   productId: string;
-//   productName: string;
-//   daysToRupturePE: number | null; 
-//   riskStatusPE: 'Ruptura Iminente' | 'Atenção' | 'Estável' | 'N/A';
-//   suggestedRestockUnitsPE: number;
-//   alerts?: string[];
-//   dailyAverageSales: number;
-// }
+export interface EnhancedProductForStockIntelligence extends Product {
+  dailyAverageSales: number;
+  estimatedCoverageDays: number | null; // Can be null if no sales
+  dailyDepletionRate: number | null; // Can be null if no stock or no sales
+  stockRiskStatus: StockRiskStatus;
+  recommendedReplenishment: number;
+  // For insights
+  isHighDemandLowCoverage?: boolean;
+  isZeroSalesWithStock?: boolean;
+  isRecentCollectionFastDepletion?: boolean;
+  // For actions table
+  priority?: 1 | 2 | 3;
+  automatedJustification?: string;
+}
 
-// export interface EnhancedProductForIntelligence extends Product {
-//   dailyAverageSales: number;
-//   prediction?: LogisticsPredictionOutput;
-//   dynamicSales30d?: number; 
-// }
-
-// export interface SalesRecord {
-//   date: Date | null;
-//   orderId: string;
-//   reference: string; 
-//   productName: string;
-//   saleValue: number;
-//   quantity: number;
-//   totalValue: number;
-//   rawDate?: string; 
-// }
-
+// SalesRecord type was removed as the related panel was deleted.
+// If Component 6 (daily sales upload) is fully implemented later, this might be revived.
