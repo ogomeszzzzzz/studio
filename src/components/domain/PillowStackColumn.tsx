@@ -3,7 +3,7 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { TrendingUp, AlertCircle, PackageX, Zap, Inbox, Repeat, MinusCircle, PlusCircle, ThumbsUp, AlertOctagon, ShoppingBag, TrendingDown, HelpCircle, AlertTriangle } from "lucide-react"; // Added AlertTriangle
+import { TrendingUp, AlertCircle, PackageX, Zap, Inbox, Repeat, MinusCircle, PlusCircle, ThumbsUp, AlertOctagon, HelpCircle, AlertTriangle, ShoppingBag, TrendingDown } from "lucide-react";
 import type { SalesBasedPillowStatus } from "@/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -48,13 +48,13 @@ export function PillowStackColumn({
       statusIcon = <PackageX className="mr-1 h-3 w-3" />;
       statusText = "CRÍTICO";
       statusColorClass = "bg-red-600 text-white";
-      statusTooltip = "Ruptura de estoque iminente (sem estoque, com vendas, sem pedidos em aberto).";
+      statusTooltip = "Ruptura de estoque com VENDA RELEVANTE e sem pedidos em aberto.";
       break;
     case 'Urgent':
       statusIcon = <Zap className="mr-1 h-3 w-3" />;
       statusText = "URGENTE";
       statusColorClass = "bg-orange-500 text-white";
-      statusTooltip = `Venda alta e cobertura de estoque < ${daysOfStock?.toFixed(0) ?? 'X'} dias.`;
+      statusTooltip = `VENDA ALTA e cobertura de estoque < ${daysOfStock?.toFixed(0) ?? '7'} dias.`;
       break;
     case 'Low':
       statusIcon = <TrendingDown className="mr-1 h-3 w-3" />;
@@ -78,13 +78,13 @@ export function PillowStackColumn({
       statusIcon = <MinusCircle className="mr-1 h-3 w-3" />;
       statusText = "ESTAGNADO";
       statusColorClass = "bg-slate-500 text-white";
-      statusTooltip = "Produto com estoque, mas sem vendas recentes (30d).";
+      statusTooltip = "Produto com estoque, mas sem vendas significativas nos últimos 30 dias.";
       break;
     default: // N/A or undefined
       statusIcon = <HelpCircle className="mr-1 h-3 w-3" />;
       statusText = "N/A";
       statusColorClass = "bg-gray-400 text-white";
-      statusTooltip = "Status de vendas não aplicável ou dados insuficientes.";
+      statusTooltip = "Estoque zerado e sem vendas significativas recentes.";
   }
   
   // Determine fill color for the visual stack based on sales status if available,
@@ -96,10 +96,10 @@ export function PillowStackColumn({
   else if (salesBasedStatus === 'Healthy') visualFillColor = 'bg-green-600';
   else if (salesBasedStatus === 'Overstocked') visualFillColor = 'bg-blue-600';
   else if (salesBasedStatus === 'NoSales') visualFillColor = 'bg-slate-400';
-  else if (currentStock === 0) visualFillColor = 'bg-muted'; // Empty based on visual
-  else if (stockPercentageVisual < 25) visualFillColor = 'bg-yellow-400'; // Visual low
-  else if (stockPercentageVisual < 75) visualFillColor = 'bg-sky-500'; // Visual medium
-  else visualFillColor = 'bg-green-500'; // Visual good
+  else if (salesBasedStatus === 'N/A' || currentStock === 0) visualFillColor = 'bg-muted'; // Empty based on visual or N/A status
+  else if (stockPercentageVisual < 25) visualFillColor = 'bg-yellow-400'; // Visual low (fallback)
+  else if (stockPercentageVisual < 75) visualFillColor = 'bg-sky-500'; // Visual medium (fallback)
+  else visualFillColor = 'bg-green-500'; // Visual good (fallback)
 
 
   return (
@@ -154,9 +154,9 @@ export function PillowStackColumn({
                     Cob: {daysOfStock.toFixed(0)} dias (VMD: {dailyAverageSales.toFixed(1)})
                 </p>
             )}
-            {dailyAverageSales === 0 && currentStock > 0 && (
+            {dailyAverageSales !== undefined && dailyAverageSales < 0.1 && currentStock > 0 && ( // Specifically for NoSales and N/A with stock
                  <p className="text-xxs text-muted-foreground">
-                    Sem vendas (30d)
+                    Venda 30d Irrelevante
                 </p>
             )}
             {daysOfStock === Infinity && currentStock > 0 && dailyAverageSales === 0 && (

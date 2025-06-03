@@ -29,8 +29,9 @@ const GOOD_STOCK_THRESHOLD_PERCENTAGE = 0.75; // For visual representation in co
 // New constants for sales-based analysis
 const PILLOW_TARGET_COVERAGE_DAYS = 30;
 const PILLOW_SALES_BASED_LOW_STOCK_DAYS = 7;
-const PILLOW_SALES_BASED_HIGH_SALES_THRESHOLD = 10; // sales30d units
+const PILLOW_SALES_BASED_HIGH_SALES_THRESHOLD = 10; // sales30d units for "Urgent" classification
 const PILLOW_OVERSTOCK_FACTOR = 1.5; // 150% of ideal stock for sales
+const MIN_SIGNIFICANT_DAILY_SALES = 0.2; // Approx 6 sales in 30 days
 
 
 const productFromFirestore = (data: any): Product => {
@@ -166,25 +167,31 @@ export default function PillowStockPage() {
         const stockVsIdealFactor = idealStockForSales > 0 ? currentStock / idealStockForSales : (currentStock > 0 ? Infinity : 0);
         const replenishmentSuggestionForSales = dailyAverageSales > 0 ? Math.max(0, Math.round(idealStockForSales - currentStock - openOrders)) : 0;
         
-        let salesBasedStatus: SalesBasedPillowStatus = 'N/A';
-        if (currentStock === 0 && dailyAverageSales > 0 && openOrders === 0) {
-            salesBasedStatus = 'Critical';
-        } else if (daysOfStock < PILLOW_SALES_BASED_LOW_STOCK_DAYS && dailyAverageSales > 0 && sales30d > PILLOW_SALES_BASED_HIGH_SALES_THRESHOLD) {
-            salesBasedStatus = 'Urgent';
-        } else if (dailyAverageSales === 0 && currentStock > 0) {
-            salesBasedStatus = 'NoSales';
-        } else if (dailyAverageSales > 0 && stockVsIdealFactor > PILLOW_OVERSTOCK_FACTOR) {
-            salesBasedStatus = 'Overstocked';
-        } else if (dailyAverageSales > 0 && daysOfStock < PILLOW_TARGET_COVERAGE_DAYS / 2 && daysOfStock >= PILLOW_SALES_BASED_LOW_STOCK_DAYS) { // Low but not urgent
-            salesBasedStatus = 'Low';
-        } else if (dailyAverageSales > 0) {
-            salesBasedStatus = 'Healthy';
+        let salesBasedStatus: SalesBasedPillowStatus = 'N/A'; // Default
+        if (dailyAverageSales < MIN_SIGNIFICANT_DAILY_SALES) {
+            if (currentStock > 0) {
+                salesBasedStatus = 'NoSales';
+            } else { // currentStock === 0
+                salesBasedStatus = 'N/A'; // Zero stock, negligible sales
+            }
+        } else { // dailyAverageSales >= MIN_SIGNIFICANT_DAILY_SALES
+            if (currentStock === 0 && (openOrders || 0) === 0) {
+                salesBasedStatus = 'Critical';
+            } else if (daysOfStock < PILLOW_SALES_BASED_LOW_STOCK_DAYS && (sales30d || 0) > PILLOW_SALES_BASED_HIGH_SALES_THRESHOLD) {
+                 salesBasedStatus = 'Urgent';
+            } else if (daysOfStock < (PILLOW_TARGET_COVERAGE_DAYS / 2)) {
+                 salesBasedStatus = 'Low';
+            } else if (stockVsIdealFactor > PILLOW_OVERSTOCK_FACTOR) {
+                 salesBasedStatus = 'Overstocked';
+            } else {
+                 salesBasedStatus = 'Healthy';
+            }
         }
 
 
         const fillPercentage = (currentStock / MAX_STOCK_PER_PILLOW_COLUMN) * 100;
         // Original critical/urgent flags (can be kept for visual column emphasis if needed, or removed if salesBasedStatus is primary)
-        const isCriticalOriginal = currentStock === 0 && openOrders === 0 && sales30d > 0; // Matches salesBasedStatus 'Critical'
+        const isCriticalOriginal = currentStock === 0 && openOrders === 0 && sales30d > 0; 
         const isUrgentOriginal = currentStock > 0 && 
                          (currentStock + openOrders) < (MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE) &&
                          currentStock < (MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE) && 
@@ -199,8 +206,8 @@ export default function PillowStockPage() {
           fillPercentage,
           sales30d,
           openOrders,
-          isCritical: isCriticalOriginal, // keep for now, or align with salesBasedStatus
-          isUrgent: isUrgentOriginal,   // keep for now, or align with salesBasedStatus
+          isCritical: isCriticalOriginal, 
+          isUrgent: isUrgentOriginal,   
           dailyAverageSales,
           idealStockForSales,
           daysOfStock,
@@ -243,7 +250,7 @@ export default function PillowStockPage() {
       const valB = b[sortCriteria as keyof AggregatedPillow];
 
       if (sortCriteria === 'salesBasedStatus') {
-          const order: SalesBasedPillowStatus[] = ['Critical', 'Urgent', 'Low', 'N/A', 'Healthy', 'NoSales', 'Overstocked'];
+          const order: SalesBasedPillowStatus[] = ['Critical', 'Urgent', 'Low', 'Healthy', 'Overstocked', 'NoSales', 'N/A'];
           comparison = order.indexOf(a.salesBasedStatus || 'N/A') - order.indexOf(b.salesBasedStatus || 'N/A');
       } else if (typeof valA === 'number' && typeof valB === 'number') {
         comparison = (valA || 0) - (valB || 0);
@@ -264,18 +271,17 @@ export default function PillowStockPage() {
 
 
   const pillowKPIs = useMemo(() => {
-    if (aggregatedPillowStockState.length === 0 && pillowProducts.length > 0) { // Use aggregated state if available
-        // Fallback if aggregated is empty but pillowProducts exist (e.g. initial load before agg calculation)
+    if (aggregatedPillowStockState.length === 0 && pillowProducts.length > 0) { 
         const tempAgg = pillowProducts.map(p => ({ name: derivePillowDisplayName(p.name), stock: p.stock, sales30d: p.sales30d || 0, openOrders: p.openOrders || 0 }));
         const uniquePillowsForKPIFallback = Array.from(new Map(tempAgg.map(p => [p.name, p])).values());
          return { 
             totalPillowSKUs: uniquePillowsForKPIFallback.length, 
             totalPillowUnits: uniquePillowsForKPIFallback.reduce((sum, p) => sum + p.stock, 0),
             totalOpenOrdersPillows: uniquePillowsForKPIFallback.reduce((sum,p)=> sum + p.openOrders, 0),
-            criticalSalesCount: 0, urgentSalesCount: 0, overstockedSalesCount: 0, noSalesCount: 0, totalReplenishmentSuggestion: 0
+            criticalSalesCount: 0, urgentSalesCount: 0, overstockedSalesCount: 0, noSalesCount: 0, totalReplenishmentSuggestion: 0, lowSalesCount: 0, healthySalesCount:0, naSalesCount:0
         };
     }
-    if (aggregatedPillowStockState.length === 0) return { totalPillowSKUs: 0, totalPillowUnits: 0, totalOpenOrdersPillows: 0, criticalSalesCount: 0, urgentSalesCount: 0, overstockedSalesCount: 0, noSalesCount: 0, totalReplenishmentSuggestion: 0 };
+    if (aggregatedPillowStockState.length === 0) return { totalPillowSKUs: 0, totalPillowUnits: 0, totalOpenOrdersPillows: 0, criticalSalesCount: 0, urgentSalesCount: 0, overstockedSalesCount: 0, noSalesCount: 0, totalReplenishmentSuggestion: 0, lowSalesCount: 0, healthySalesCount:0, naSalesCount:0 };
 
     return {
       totalPillowSKUs: aggregatedPillowStockState.length,
@@ -283,8 +289,11 @@ export default function PillowStockPage() {
       totalOpenOrdersPillows: aggregatedPillowStockState.reduce((sum, p) => sum + (p.openOrders || 0), 0),
       criticalSalesCount: aggregatedPillowStockState.filter(p => p.salesBasedStatus === 'Critical').length,
       urgentSalesCount: aggregatedPillowStockState.filter(p => p.salesBasedStatus === 'Urgent').length,
+      lowSalesCount: aggregatedPillowStockState.filter(p => p.salesBasedStatus === 'Low').length,
+      healthySalesCount: aggregatedPillowStockState.filter(p => p.salesBasedStatus === 'Healthy').length,
       overstockedSalesCount: aggregatedPillowStockState.filter(p => p.salesBasedStatus === 'Overstocked').length,
       noSalesCount: aggregatedPillowStockState.filter(p => p.salesBasedStatus === 'NoSales').length,
+      naSalesCount: aggregatedPillowStockState.filter(p => p.salesBasedStatus === 'N/A').length,
       totalReplenishmentSuggestion: aggregatedPillowStockState.reduce((sum,p) => sum + (p.replenishmentSuggestionForSales || 0),0)
     };
   }, [aggregatedPillowStockState, pillowProducts]); 
@@ -297,12 +306,13 @@ export default function PillowStockPage() {
   
   const salesStatusFilterOptions: { value: StockStatusFilter; label: string; icon?: React.ElementType }[] = [
     { value: 'all', label: 'Todos Status (Vendas)' },
-    { value: 'salesCritical', label: 'Crítico (Ruptura Venda)', icon: PackageX },
+    { value: 'salesCritical', label: 'Crítico (Venda Relevante)', icon: PackageX },
     { value: 'salesUrgent', label: 'Urgente (Venda Alta, Baixa Cob.)', icon: Zap },
     { value: 'salesLow', label: 'Baixo (vs Vendas)', icon: TrendingDown },
     { value: 'salesHealthy', label: 'Saudável (vs Vendas)', icon: ThumbsUp },
     { value: 'salesOverstocked', label: 'Superestocado (vs Vendas)', icon: Repeat },
-    { value: 'salesNoSales', label: 'Estagnado (Estoque s/ Venda)', icon: MinusCircle },
+    { value: 'salesNoSales', label: 'Estagnado (Estoque s/ Venda Sig.)', icon: MinusCircle },
+    { value: 'salesN/A', label: 'N/A (Estoque Zerado, Venda Irrel.)', icon: HelpCircle },
   ];
 
 
@@ -351,12 +361,15 @@ export default function PillowStockPage() {
                         <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-medium">Total em Estoque</CardTitle><ShoppingBag className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-xl font-bold">{pillowKPIs.totalPillowUnits.toLocaleString()}</div></CardContent></Card>
                         <Card className="shadow-sm hover:shadow-md transition-shadow"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-medium">Pedidos em Aberto</CardTitle><Inbox className="h-4 w-4 text-blue-500" /></CardHeader><CardContent><div className="text-xl font-bold text-blue-600">{pillowKPIs.totalOpenOrdersPillows.toLocaleString()}</div></CardContent></Card>
                         
-                        <Card className="shadow-sm hover:shadow-md transition-shadow bg-red-500/10 border-red-600"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-medium text-red-700">Críticos (Ruptura Venda)</CardTitle><PackageX className="h-4 w-4 text-red-600" /></CardHeader><CardContent><div className="text-xl font-bold text-red-700">{pillowKPIs.criticalSalesCount}</div></CardContent></Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow bg-red-500/10 border-red-600"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-medium text-red-700">Críticos (Venda Relevante)</CardTitle><PackageX className="h-4 w-4 text-red-600" /></CardHeader><CardContent><div className="text-xl font-bold text-red-700">{pillowKPIs.criticalSalesCount}</div></CardContent></Card>
                         <Card className="shadow-sm hover:shadow-md transition-shadow bg-orange-500/10 border-orange-600"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-medium text-orange-700">Urgentes (Venda Alta)</CardTitle><Zap className="h-4 w-4 text-orange-600" /></CardHeader><CardContent><div className="text-xl font-bold text-orange-700">{pillowKPIs.urgentSalesCount}</div></CardContent></Card>
-                        <Card className="shadow-sm hover:shadow-md transition-shadow bg-blue-500/10 border-blue-600"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-medium text-blue-700">Superestocados (vs Vendas)</CardTitle><Repeat className="h-4 w-4 text-blue-600" /></CardHeader><CardContent><div className="text-xl font-bold text-blue-700">{pillowKPIs.overstockedSalesCount}</div></CardContent></Card>
-                        <Card className="shadow-sm hover:shadow-md transition-shadow bg-gray-500/10 border-gray-600"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-medium text-gray-700">Estagnados (s/ Venda)</CardTitle><MinusCircle className="h-4 w-4 text-gray-600" /></CardHeader><CardContent><div className="text-xl font-bold text-gray-700">{pillowKPIs.noSalesCount}</div></CardContent></Card>
-                        <Card className="shadow-sm hover:shadow-md transition-shadow col-span-full sm:col-span-1 bg-green-500/10 border-green-600"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-medium text-green-700">Total Reposição Sugerida</CardTitle><PlusCircle className="h-4 w-4 text-green-600" /></CardHeader><CardContent><div className="text-xl font-bold text-green-700">{pillowKPIs.totalReplenishmentSuggestion.toLocaleString()} un.</div></CardContent></Card>
-                         <Card className="shadow-sm hover:shadow-md transition-shadow col-span-full sm:col-span-2"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-medium">Cobertura Alvo (Vendas)</CardTitle><HelpCircle className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-md font-semibold">{PILLOW_TARGET_COVERAGE_DAYS} dias</div><p className="text-xs text-muted-foreground">Ideal para estoque baseado em vendas 30d.</p></CardContent></Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow bg-yellow-400/20 border-yellow-500"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-medium text-yellow-700">Baixo (vs Vendas)</CardTitle><TrendingDown className="h-4 w-4 text-yellow-600" /></CardHeader><CardContent><div className="text-xl font-bold text-yellow-700">{pillowKPIs.lowSalesCount}</div></CardContent></Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow bg-green-500/10 border-green-600"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-medium text-green-700">Saudáveis (vs Vendas)</CardTitle><ThumbsUp className="h-4 w-4 text-green-600" /></CardHeader><CardContent><div className="text-xl font-bold text-green-700">{pillowKPIs.healthySalesCount}</div></CardContent></Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow bg-blue-500/10 border-blue-600"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-medium text-blue-700">Superestocados</CardTitle><Repeat className="h-4 w-4 text-blue-600" /></CardHeader><CardContent><div className="text-xl font-bold text-blue-700">{pillowKPIs.overstockedSalesCount}</div></CardContent></Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow bg-slate-500/10 border-slate-600"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-medium text-slate-700">Estagnados (s/ Venda Sig.)</CardTitle><MinusCircle className="h-4 w-4 text-slate-600" /></CardHeader><CardContent><div className="text-xl font-bold text-slate-700">{pillowKPIs.noSalesCount}</div></CardContent></Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow bg-gray-400/10 border-gray-500"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-medium text-gray-600">N/A (Est. Zero, Venda Irrel.)</CardTitle><HelpCircle className="h-4 w-4 text-gray-500" /></CardHeader><CardContent><div className="text-xl font-bold text-gray-600">{pillowKPIs.naSalesCount}</div></CardContent></Card>
+                        <Card className="shadow-sm hover:shadow-md transition-shadow col-span-full sm:col-span-1 bg-teal-500/10 border-teal-600"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-medium text-teal-700">Total Reposição Sugerida</CardTitle><PlusCircle className="h-4 w-4 text-teal-600" /></CardHeader><CardContent><div className="text-xl font-bold text-teal-700">{pillowKPIs.totalReplenishmentSuggestion.toLocaleString()} un.</div></CardContent></Card>
+                         <Card className="shadow-sm hover:shadow-md transition-shadow col-span-full sm:col-span-2"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-medium">Cobertura Alvo (Vendas)</CardTitle><HelpCircle className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-md font-semibold">{PILLOW_TARGET_COVERAGE_DAYS} dias</div><p className="text-xs text-muted-foreground">Ideal para estoque baseado em vendas 30d (VMD ≥ {MIN_SIGNIFICANT_DAILY_SALES}).</p></CardContent></Card>
 
                     </div>
                 )}
@@ -433,7 +446,7 @@ export default function PillowStockPage() {
             <Card className="shadow-lg">
                 <CardHeader>
                     <CardTitle className="flex items-center"><BedDouble className="mr-2 h-5 w-5 text-primary" /> Colunas de Estoque de Travesseiros (Análise de Vendas)</CardTitle>
-                    <CardDescription>Visualização com base no desempenho de vendas. Máx. visual: {MAX_STOCK_PER_PILLOW_COLUMN} un./coluna. Cobertura alvo: {PILLOW_TARGET_COVERAGE_DAYS} dias.</CardDescription>
+                    <CardDescription>Visualização com base no desempenho de vendas. Máx. visual: {MAX_STOCK_PER_PILLOW_COLUMN} un./coluna. Cobertura alvo: {PILLOW_TARGET_COVERAGE_DAYS} dias (para VMD ≥ {MIN_SIGNIFICANT_DAILY_SALES}).</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4 p-4 rounded-lg bg-muted/20">
