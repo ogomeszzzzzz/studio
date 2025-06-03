@@ -43,6 +43,17 @@ interface EnhancedProduct extends Product {
   scoreGiroCobertura?: number; // Placeholder
 }
 
+const formatDaysToRuptureForDisplay = (days: number | null | undefined): string => {
+  if (days === Infinity || days === null || days === undefined) {
+    return 'N/A (Sem Venda)';
+  }
+  if (typeof days === 'number') {
+    return days.toFixed(0);
+  }
+  return '...';
+};
+
+
 export default function IntelligencePanelPage() {
   const { currentUser, isLoading: isAuthLoading } = useAuth();
   const { toast } = useToast();
@@ -168,8 +179,9 @@ export default function IntelligencePanelPage() {
         tempProducts.sort((a, b) => {
             let valA, valB;
             if (sortKey === 'daysToRupture') {
-                valA = a.prediction?.daysToRupture ?? Infinity;
-                valB = b.prediction?.daysToRupture ?? Infinity;
+                // Handle null by treating it like Infinity for sorting purposes
+                valA = a.prediction?.daysToRupture === null ? Infinity : a.prediction?.daysToRupture ?? Infinity;
+                valB = b.prediction?.daysToRupture === null ? Infinity : b.prediction?.daysToRupture ?? Infinity;
             } else {
                 valA = a[sortKey as keyof EnhancedProduct];
                 valB = b[sortKey as keyof EnhancedProduct];
@@ -219,7 +231,7 @@ export default function IntelligencePanelPage() {
 
   const availableCollections = useMemo(() => Array.from(new Set(allProducts.map(p => p.collection).filter(Boolean))).sort(), [allProducts]);
   const availableProductTypes = useMemo(() => Array.from(new Set(allProducts.map(p => p.productType).filter(Boolean))).sort(), [allProducts]);
-  const riskStatusOptions = ['Baixo', 'Médio', 'Alto', 'Crítico'];
+  const riskStatusOptions = ['Baixo', 'Médio', 'Alto', 'Crítico', 'N/A'];
 
   // --- Component 1: Dashboard Analítico com IA ---
   const analyticalDashboardData = useMemo(() => {
@@ -236,18 +248,17 @@ export default function IntelligencePanelPage() {
       };
     }
 
-    const productsWithSales = enhancedProducts.filter(p => (p.sales30d || 0) > 0 && p.prediction);
-    const coberturaMediaDias = productsWithSales.length > 0
-        ? productsWithSales.reduce((sum, p) => sum + (p.prediction?.daysToRupture === Infinity ? 90 : p.prediction!.daysToRupture), 0) / productsWithSales.length
+    const productsWithSalesAndPrediction = enhancedProducts.filter(p => (p.sales30d || 0) > 0 && p.prediction && (p.prediction.daysToRupture !== null && p.prediction.daysToRupture !== Infinity));
+    const coberturaMediaDias = productsWithSalesAndPrediction.length > 0
+        ? productsWithSalesAndPrediction.reduce((sum, p) => sum + (p.prediction!.daysToRupture!), 0) / productsWithSalesAndPrediction.length
         : 0;
 
-    const getRuptureCount = (days: number) => enhancedProducts.filter(p => p.prediction && p.prediction.daysToRupture <= days && p.prediction.daysToRupture !== Infinity).length;
+    const getRuptureCount = (days: number) => enhancedProducts.filter(p => p.prediction && p.prediction.daysToRupture !== null && p.prediction.daysToRupture !== Infinity && p.prediction.daysToRupture <= days).length;
 
-    // Simplified placeholders for complex metrics
     const volumeRisco = enhancedProducts.filter(p => p.prediction?.riskStatus === 'Alto' || p.prediction?.riskStatus === 'Crítico')
-                           .reduce((sum, p) => sum + ((p.price || 0) * (p.sales30d || 0)),0); // Example: sum of revenue for high risk items
-    const altoGiroBaixaCobertura = enhancedProducts.filter(p => (p.sales30d || 0) > 20 && p.prediction && p.prediction.daysToRupture < 7).length;
-    const superestoque = enhancedProducts.filter(p => p.stock > 100 && (p.sales30d || 0) < 5).length; // Example criteria
+                           .reduce((sum, p) => sum + ((p.price || 0) * (p.sales30d || 0)),0);
+    const altoGiroBaixaCobertura = enhancedProducts.filter(p => (p.sales30d || 0) > 20 && p.prediction && p.prediction.daysToRupture !== null && p.prediction.daysToRupture !== Infinity && p.prediction.daysToRupture < 7).length;
+    const superestoque = enhancedProducts.filter(p => p.stock > 100 && (p.sales30d || 0) < 5).length;
     const indiceExecucaoPedidos = "95%"; // Placeholder
 
     return {
@@ -419,24 +430,26 @@ export default function IntelligencePanelPage() {
                        {p.sales7d?.toLocaleString()} / {p.sales15d?.toLocaleString()} / {(p.sales30d || 0).toLocaleString()}
                     </TableCell>
                     <TableCell className={`text-right text-xs font-semibold ${
-                        p.prediction?.daysToRupture !== undefined && p.prediction.daysToRupture <= 7 && p.prediction.daysToRupture !== Infinity ? 'text-red-600' :
-                        p.prediction?.daysToRupture !== undefined && p.prediction.daysToRupture <= 15 && p.prediction.daysToRupture !== Infinity ? 'text-orange-600' : 'text-foreground'
+                        p.prediction?.daysToRupture !== undefined && p.prediction.daysToRupture !== null && p.prediction.daysToRupture <= 7 && p.prediction.daysToRupture !== Infinity ? 'text-red-600' :
+                        p.prediction?.daysToRupture !== undefined && p.prediction.daysToRupture !== null && p.prediction.daysToRupture <= 15 && p.prediction.daysToRupture !== Infinity ? 'text-orange-600' : 'text-foreground'
                     }`}>
-                      {p.prediction?.daysToRupture === Infinity ? 'N/A (Sem Venda)' : (p.prediction?.daysToRupture?.toFixed(0) ?? '...')}
+                      {p.prediction ? formatDaysToRuptureForDisplay(p.prediction.daysToRupture) : '...'}
                     </TableCell>
                     <TableCell className="text-center text-xs">
                       {p.prediction ? (
                         <Badge variant={
                             p.prediction.riskStatus === 'Crítico' ? 'destructive' :
                             p.prediction.riskStatus === 'Alto' ? 'destructive' :
-                            p.prediction.riskStatus === 'Médio' ? 'default' : 'outline'
+                            p.prediction.riskStatus === 'Médio' ? 'default' : 
+                            p.prediction.riskStatus === 'N/A' ? 'outline' : 'outline' // Default to outline for N/A and Baixo
                         } className={
                             p.prediction.riskStatus === 'Médio' ? 'bg-orange-500 text-white border-orange-500' :
-                            p.prediction.riskStatus === 'Baixo' ? 'bg-green-500 text-white border-green-500' : ''
+                            p.prediction.riskStatus === 'Baixo' ? 'bg-green-500 text-white border-green-500' : 
+                            p.prediction.riskStatus === 'N/A' ? 'border-gray-400 text-gray-500' : ''
                         }>
                           {p.prediction.riskStatus}
                         </Badge>
-                      ) : '...'}
+                      ) : <Skeleton className="h-5 w-12 mx-auto" />}
                     </TableCell>
                     <TableCell className="text-right text-xs">{p.scoreGiroCobertura?.toFixed(0) ?? '...'}%</TableCell>
                     <TableCell className="text-xs max-w-md truncate">
@@ -444,8 +457,8 @@ export default function IntelligencePanelPage() {
                         {p.prediction?.suggestedRestockUnits && p.prediction.suggestedRestockUnits > 0 && (
                             <li className="text-green-600">Repor {p.prediction.suggestedRestockUnits.toLocaleString()} unid.</li>
                         )}
-                        {p.prediction?.alerts?.map((alert, i) => <li key={i} className={alert.includes("Crítico") || alert.includes("Alto Risco") ? "text-red-600" : alert.includes("Atenção") ? "text-orange-600" : ""}>{alert}</li>)}
-                        {(p.prediction?.suggestedRestockUnits === 0 || !p.prediction?.suggestedRestockUnits) && p.prediction?.alerts?.length === 0 && <span className="text-muted-foreground">Nenhuma ação imediata.</span>}
+                        {p.prediction?.alerts?.map((alert, i) => <li key={i} className={alert.includes("Crítico") || alert.includes("Alto Risco") ? "text-red-600" : alert.includes("Atenção") || alert.includes("parado") ? "text-orange-600" : ""}>{alert}</li>)}
+                        {(p.prediction?.suggestedRestockUnits === 0 || !p.prediction?.suggestedRestockUnits) && (!p.prediction?.alerts || p.prediction.alerts.length === 0) && <span className="text-muted-foreground">Nenhuma ação imediata.</span>}
                       </ul>
                     </TableCell>
                     <TableCell className="text-center">
@@ -506,5 +519,3 @@ export default function IntelligencePanelPage() {
     </div>
   );
 }
-
-    

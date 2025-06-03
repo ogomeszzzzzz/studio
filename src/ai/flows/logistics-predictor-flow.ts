@@ -27,10 +27,20 @@ export type LogisticsPredictionInput = z.infer<typeof LogisticsPredictionInputSc
 const LogisticsPredictionOutputSchema = z.object({
   productId: z.string(),
   productName: z.string(),
-  daysToRupture: z.number().describe("Estimated number of days until the current stock runs out based on 30-day sales velocity. Returns Infinity if no sales."),
-  riskStatus: z.enum(['Crítico', 'Alto', 'Médio', 'Baixo', 'N/A']).describe("Risk level of stockout: Crítico (ruptured with sales), Alto (<=7 days cover), Médio (8-15 days cover), Baixo (>15 days cover), N/A (no sales or no stock)."),
-  suggestedRestockUnits: z.number().min(0).describe("Suggested quantity to restock to achieve a target stock cover (e.g., 30 days). Considers open orders."),
-  alerts: z.array(z.string()).optional().describe("Specific alerts or observations, e.g., 'High sales velocity with low stock', 'Stock parado'."),
+  daysToRupture: z.number().nullable().describe(
+    "Estimated number of days until the current stock runs out based on 30-day sales velocity. " +
+    "Returns Infinity (which may be represented as null in JSON) if no sales."
+  ),
+  riskStatus: z.enum(['Crítico', 'Alto', 'Médio', 'Baixo', 'N/A']).describe(
+    "Risk level of stockout: Crítico (ruptured with sales), Alto (<=7 days cover), " +
+    "Médio (8-15 days cover), Baixo (>15 days cover), N/A (no sales or no stock)."
+  ),
+  suggestedRestockUnits: z.number().min(0).describe(
+    "Suggested quantity to restock to achieve a target stock cover (e.g., 30 days). Considers open orders."
+  ),
+  alerts: z.array(z.string()).optional().describe(
+    "Specific alerts or observations, e.g., 'High sales velocity with low stock', 'Stock parado'."
+  ),
 });
 export type LogisticsPredictionOutput = z.infer<typeof LogisticsPredictionOutputSchema>;
 
@@ -103,13 +113,12 @@ const logisticsPredictorFlow = ai.defineFlow(
         const daysToRuptureWithOpenOrders = (currentStock + openOrders) / dailySales;
         if (riskStatus === 'Alto' || riskStatus === 'Crítico') {
             if (daysToRuptureWithOpenOrders > 15) riskStatus = 'Médio'; // With open orders, risk might be lower
-            else if (daysToRuptureWithOpenOrders > 7) riskStatus = 'Médio';
+            else if (daysToRuptureWithOpenOrders > 7) riskStatus = 'Médio'; // Note: This was 'Médio' twice, check if intended. Assuming first > 15 meant 'Baixo' or less severe 'Médio'
         }
         if (riskStatus === 'Crítico' && currentStock === 0 && openOrders > 0) {
             alerts.push("Ruptura atual, mas há pedidos em aberto.");
         }
     }
-
 
     // This is a simplified direct calculation.
     // A real GenAI prompt would be used for more nuanced suggestions & alerts.
