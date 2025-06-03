@@ -136,7 +136,7 @@ export default function CollectionStockIntelligencePage() {
       const isZeroSalesWithStock = dailyAverageSales === 0 && p.stock > 0;
       
       let isRecentCollectionFastDepletion = false;
-      if (p.collectionStartDate && isValid(p.collectionStartDate)) {
+      if (p.collectionStartDate && isDateValid(p.collectionStartDate)) {
           const daysSinceStart = differenceInDays(today, p.collectionStartDate);
           if (daysSinceStart >= 0 && daysSinceStart <= 15 && dailyDepletionRate !== null && dailyDepletionRate > 5) {
               isRecentCollectionFastDepletion = true;
@@ -553,3 +553,6 @@ export default function CollectionStockIntelligencePage() {
 const formatCurrency = (value: number) => {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
+
+
+    
