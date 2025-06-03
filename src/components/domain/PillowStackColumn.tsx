@@ -3,126 +3,188 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { TrendingUp, AlertCircle, PackageX, Zap, Inbox } from "lucide-react";
+import { TrendingUp, AlertCircle, PackageX, Zap, Inbox, Repeat, MinusCircle, PlusCircle, ThumbsUp, AlertOctagon, ShoppingBag } from "lucide-react";
+import type { SalesBasedPillowStatus } from "@/types";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface PillowStackColumnProps {
   pillowName: string;
   productDerivation?: string;
   currentStock: number;
-  maxStock?: number;
+  maxStock?: number; // Visual max for column fill
   sales30d?: number;
   openOrders?: number;
-  isCritical?: boolean;
-  isUrgent?: boolean;
+  // New sales-based analysis props
+  dailyAverageSales?: number;
+  daysOfStock?: number;
+  replenishmentSuggestionForSales?: number;
+  salesBasedStatus?: SalesBasedPillowStatus;
 }
 
-const DEFAULT_MAX_STOCK = 75;
-const LOW_STOCK_WARNING_THRESHOLD_PERCENTAGE = 0.25; // For "Baixo Estoque" general warning
+const DEFAULT_MAX_STOCK_VISUAL = 75; // For visual column fill
 
 export function PillowStackColumn({
   pillowName,
   productDerivation,
   currentStock,
-  maxStock = DEFAULT_MAX_STOCK,
+  maxStock = DEFAULT_MAX_STOCK_VISUAL,
   sales30d,
   openOrders,
-  isCritical,
-  isUrgent,
+  dailyAverageSales,
+  daysOfStock,
+  replenishmentSuggestionForSales,
+  salesBasedStatus,
 }: PillowStackColumnProps) {
-  const stockPercentage = Math.min(Math.max((currentStock / maxStock) * 100, 0), 100);
-  const isEmpty = currentStock <= 0;
-  const isFull = currentStock >= maxStock && currentStock > 0;
-  const isOverStocked = currentStock > maxStock;
-  
-  const lowStockThresholdValue = maxStock * LOW_STOCK_WARNING_THRESHOLD_PERCENTAGE;
-  const isGenerallyLowStock = currentStock > 0 && (currentStock + (openOrders || 0)) < lowStockThresholdValue && !isCritical && !isUrgent;
+  const stockPercentageVisual = Math.min(Math.max((currentStock / maxStock) * 100, 0), 100);
+  const isOverStockedVisual = currentStock > maxStock;
 
+  let statusIcon: React.ReactNode = null;
+  let statusText = "";
+  let statusColorClass = "bg-gray-500 text-white"; // Default
+  let statusTooltip = "";
 
-  let fillColor = 'bg-primary'; // Default color
-  if (isCritical) {
-    fillColor = 'bg-red-700'; // Most critical color
-  } else if (isUrgent) {
-    fillColor = 'bg-orange-500'; // Urgent color
-  } else if (isEmpty && (openOrders || 0) === 0) { // Only truly empty if no open orders
-    fillColor = 'bg-muted';
-  } else if (isGenerallyLowStock) {
-    fillColor = 'bg-yellow-500';
-  } else if (stockPercentage < 75) {
-    fillColor = 'bg-sky-500'; 
-  } else {
-    fillColor = 'bg-green-500'; // Good stock
+  switch (salesBasedStatus) {
+    case 'Critical':
+      statusIcon = <PackageX className="mr-1 h-3 w-3" />;
+      statusText = "CRÍTICO";
+      statusColorClass = "bg-red-600 text-white";
+      statusTooltip = "Ruptura de estoque iminente (sem estoque, com vendas, sem pedidos em aberto).";
+      break;
+    case 'Urgent':
+      statusIcon = <Zap className="mr-1 h-3 w-3" />;
+      statusText = "URGENTE";
+      statusColorClass = "bg-orange-500 text-white";
+      statusTooltip = `Venda alta e cobertura de estoque < ${daysOfStock?.toFixed(0) ?? 'X'} dias.`;
+      break;
+    case 'Low':
+      statusIcon = <TrendingDown className="mr-1 h-3 w-3" />;
+      statusText = "BAIXO";
+      statusColorClass = "bg-yellow-500 text-black";
+      statusTooltip = `Estoque baixo em relação à meta de cobertura de vendas.`;
+      break;
+    case 'Healthy':
+      statusIcon = <ThumbsUp className="mr-1 h-3 w-3" />;
+      statusText = "SAUDÁVEL";
+      statusColorClass = "bg-green-500 text-white";
+      statusTooltip = "Estoque alinhado com a demanda de vendas.";
+      break;
+    case 'Overstocked':
+      statusIcon = <Repeat className="mr-1 h-3 w-3" />;
+      statusText = "EXCESSO";
+      statusColorClass = "bg-blue-500 text-white";
+      statusTooltip = "Estoque significativamente acima do ideal para a demanda atual.";
+      break;
+    case 'NoSales':
+      statusIcon = <MinusCircle className="mr-1 h-3 w-3" />;
+      statusText = "ESTAGNADO";
+      statusColorClass = "bg-slate-500 text-white";
+      statusTooltip = "Produto com estoque, mas sem vendas recentes (30d).";
+      break;
+    default: // N/A or undefined
+      statusIcon = <AlertOctagon className="mr-1 h-3 w-3" />;
+      statusText = "N/A";
+      statusColorClass = "bg-gray-400 text-white";
+      statusTooltip = "Status de vendas não aplicável ou dados insuficientes.";
   }
+  
+  // Determine fill color for the visual stack based on sales status if available,
+  // otherwise fall back to simple stock percentage
+  let visualFillColor = 'bg-primary'; // Default
+  if (salesBasedStatus === 'Critical') visualFillColor = 'bg-red-700';
+  else if (salesBasedStatus === 'Urgent') visualFillColor = 'bg-orange-500';
+  else if (salesBasedStatus === 'Low') visualFillColor = 'bg-yellow-500';
+  else if (salesBasedStatus === 'Healthy') visualFillColor = 'bg-green-600';
+  else if (salesBasedStatus === 'Overstocked') visualFillColor = 'bg-blue-600';
+  else if (salesBasedStatus === 'NoSales') visualFillColor = 'bg-slate-400';
+  else if (currentStock === 0) visualFillColor = 'bg-muted'; // Empty based on visual
+  else if (stockPercentageVisual < 25) visualFillColor = 'bg-yellow-400'; // Visual low
+  else if (stockPercentageVisual < 75) visualFillColor = 'bg-sky-500'; // Visual medium
+  else visualFillColor = 'bg-green-500'; // Visual good
 
 
   return (
-    <Card className="w-32 md:w-40 shadow-lg hover:shadow-xl transition-shadow flex flex-col">
-      <CardHeader className="p-3 text-center space-y-0.5">
-        <CardTitle className="text-sm font-semibold leading-tight break-words" title={pillowName}>
+    <Card className="w-36 md:w-44 shadow-lg hover:shadow-xl transition-shadow flex flex-col">
+      <CardHeader className="p-2.5 text-center space-y-0.5">
+        <CardTitle className="text-xs font-semibold leading-tight break-words" title={pillowName}>
           {pillowName}
         </CardTitle>
         {productDerivation && (
-          <p className="text-xs text-muted-foreground leading-tight break-words" title={productDerivation}>
-            {productDerivation}
+          <p className="text-xxs text-muted-foreground leading-tight break-words truncate" title={productDerivation}>
+            ID: {productDerivation}
           </p>
         )}
       </CardHeader>
-      <CardContent className="p-3 flex flex-col items-center flex-grow justify-between">
-        <div className="h-64 w-16 md:w-20 bg-muted rounded-md border border-border overflow-hidden flex flex-col justify-end relative shadow-inner">
+      <CardContent className="p-2.5 flex flex-col items-center flex-grow justify-between">
+        <div className="h-56 w-16 md:w-20 bg-muted rounded-md border border-border overflow-hidden flex flex-col justify-end relative shadow-inner">
           <div
-            className={`w-full ${fillColor} transition-all duration-500 ease-in-out`}
-            style={{ height: `${stockPercentage}%` }}
-            aria-label={`Estoque: ${currentStock} de ${maxStock}`}
+            className={`w-full ${visualFillColor} transition-all duration-500 ease-in-out`}
+            style={{ height: `${stockPercentageVisual}%` }}
+            aria-label={`Estoque Visual: ${currentStock} de ${maxStock}`}
           ></div>
-          {!isFull && !isEmpty && currentStock < maxStock && (
+          {currentStock < maxStock && currentStock > 0 && (
              <div
-                className="absolute left-0 w-full border-t-2 border-dashed border-muted-foreground opacity-50"
-                style={{bottom: `${stockPercentage}%`, height: `${100-stockPercentage}%` }}
-                title={`Capacidade: ${maxStock}`}
+                className="absolute left-0 w-full border-t-2 border-dashed border-muted-foreground opacity-30"
+                style={{bottom: `${stockPercentageVisual}%`, height: `${100-stockPercentageVisual}%` }}
+                title={`Capacidade Visual Coluna: ${maxStock}`}
               ></div>
           )}
+           {isOverStockedVisual && (
+             <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center">
+                <AlertTriangle className="h-6 w-6 text-red-300 opacity-50" title={`Estoque (${currentStock}) excede máx. visual (${maxStock})`} />
+             </div>
+           )}
         </div>
-        <div className="mt-2 text-center w-full space-y-1">
-            <p className="text-xs text-muted-foreground">
-            {isFull && !isOverStocked && <span className="font-bold text-green-600">CHEIO</span>}
-            {isEmpty && (openOrders || 0) === 0 && !isCritical && <span className="font-bold text-destructive">VAZIO (Sem Venda/Pedido)</span>}
-            {!isFull && !(isEmpty && (openOrders || 0) === 0) && !isOverStocked && `${currentStock} / ${maxStock}`}
-            {isOverStocked && (
-                <>
-                <span className="font-bold text-red-700">{currentStock} / {maxStock}</span>
-                <br />
-                <span className="text-xs font-semibold text-red-700">(+{currentStock - maxStock} Acima)</span>
-                </>
-            )}
-            </p>
-            {isCritical && (
-                <Badge variant="destructive" className="text-xs font-bold bg-red-700 hover:bg-red-800">
-                    <PackageX className="mr-1 h-3 w-3" /> RUPTURA
+        <div className="mt-1.5 text-center w-full space-y-0.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className={`text-xxs font-bold w-full justify-center cursor-help ${statusColorClass}`}>
+                    {statusIcon} {statusText}
                 </Badge>
-            )}
-            {isUrgent && (
-                 <Badge variant="destructive" className="text-xs font-bold bg-orange-500 hover:bg-orange-600 text-white">
-                    <Zap className="mr-1 h-3 w-3" /> URGENTE
-                </Badge>
-            )}
-            {isGenerallyLowStock && (
-                <Badge variant="outline" className="text-xs font-semibold border-yellow-500 text-yellow-600">
-                    <AlertCircle className="mr-1 h-3 w-3" />
-                    {openOrders && openOrders > 0 ? `Baixo (Chegando: ${openOrders})` : "Baixo Estoque"}
-                </Badge>
-            )}
-            
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs text-center">
+                <p>{statusTooltip}</p>
+              </TooltipContent>
+            </Tooltip>
+
             <p className="text-xs font-medium text-foreground">
-              Preenchimento: {stockPercentage.toFixed(0)}%
+              Est: {currentStock.toLocaleString()} / Col: {maxStock}
             </p>
+             {typeof daysOfStock === 'number' && daysOfStock !== Infinity && dailyAverageSales && dailyAverageSales > 0 && (
+                <p className="text-xxs text-muted-foreground">
+                    Cob: {daysOfStock.toFixed(0)} dias (VMD: {dailyAverageSales.toFixed(1)})
+                </p>
+            )}
+            {dailyAverageSales === 0 && currentStock > 0 && (
+                 <p className="text-xxs text-muted-foreground">
+                    Sem vendas (30d)
+                </p>
+            )}
+            {daysOfStock === Infinity && currentStock > 0 && dailyAverageSales === 0 && (
+                <p className="text-xxs text-muted-foreground">
+                    Cob: <span className="text-xl">∞</span> dias
+                </p>
+            )}
+
+
             {typeof sales30d === 'number' && (
-                <p className="text-xs text-muted-foreground flex items-center justify-center">
-                    <TrendingUp className="mr-1 h-3 w-3 text-blue-500" /> Vendas 30d: {sales30d}
+                <p className="text-xxs text-muted-foreground flex items-center justify-center gap-1">
+                    <ShoppingBag className="h-3 w-3 text-blue-500" /> V30d: {sales30d}
                 </p>
             )}
             {typeof openOrders === 'number' && openOrders > 0 && (
-                <p className="text-xs text-muted-foreground flex items-center justify-center">
-                    <Inbox className="mr-1 h-3 w-3 text-sky-600" /> Ped. Aberto: {openOrders}
+                <p className="text-xxs text-muted-foreground flex items-center justify-center gap-1">
+                    <Inbox className="h-3 w-3 text-sky-600" /> Aberto: {openOrders}
                 </p>
+            )}
+            {typeof replenishmentSuggestionForSales === 'number' && replenishmentSuggestionForSales > 0 && (
+                 <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Badge variant="default" className="text-xxs bg-green-600 hover:bg-green-700 text-white mt-0.5 w-full justify-center cursor-default">
+                            <PlusCircle className="mr-1 h-3 w-3" /> Sug. Repor: {replenishmentSuggestionForSales}
+                        </Badge>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom"><p>Para atingir cobertura de vendas ideal.</p></TooltipContent>
+                 </Tooltip>
             )}
         </div>
       </CardContent>

@@ -55,21 +55,31 @@ export interface UserProfile {
 }
 
 // For Pillow Stock Page
+export type SalesBasedPillowStatus = 'Critical' | 'Urgent' | 'Low' | 'Healthy' | 'Overstocked' | 'NoSales' | 'N/A';
 export interface AggregatedPillow {
   name: string;
   stock: number;
-  fillPercentage: number;
+  fillPercentage: number; // Based on visual max_stock_per_column
   derivation?: string;
   vtexId?: string | number;
   sales30d: number;
   openOrders: number; 
-  isCritical?: boolean;
-  isUrgent?: boolean;
+  isCritical?: boolean; // Original visual/urgent critical flag
+  isUrgent?: boolean;   // Original visual/urgent flag
+
+  // New sales-based analysis fields
+  dailyAverageSales?: number;
+  idealStockForSales?: number; // Stock needed for PILLOW_TARGET_COVERAGE_DAYS
+  daysOfStock?: number; // Current stock / dailyAverageSales
+  stockVsIdealFactor?: number; // currentStock / idealStockForSales
+  replenishmentSuggestionForSales?: number; // To reach idealStockForSales, considering openOrders
+  salesBasedStatus?: SalesBasedPillowStatus;
 }
 
-export type SortCriteria = 'name' | 'stock' | 'fillPercentage' | 'sales30d' | 'openOrders' | 'dailyAverageSales' | 'estimatedCoverageDays'; // Added for new page
+export type SortCriteria = 'name' | 'stock' | 'fillPercentage' | 'sales30d' | 'openOrders' | 'dailyAverageSales' | 'estimatedCoverageDays' | 'daysOfStock' | 'stockVsIdealFactor'; // Added for new page
 export type SortOrder = 'asc' | 'desc';
-export type StockStatusFilter = 'all' | 'critical' | 'empty' | 'low' | 'medium' | 'good' | 'overstocked';
+export type StockStatusFilter = 'all' | 'critical' | 'empty' | 'low' | 'medium' | 'good' | 'overstocked' | 'salesCritical' | 'salesUrgent' | 'salesLow' | 'salesHealthy' | 'salesOverstocked' | 'salesNoSales';
+
 
 // For Stock History Chart
 export interface StockHistoryEntry {
@@ -95,7 +105,9 @@ export interface EnhancedProductForStockIntelligence extends Product {
   // For actions table
   priority?: 1 | 2 | 3;
   automatedJustification?: string;
+  isDailySalesExceedsTotalStock?: boolean;
 }
 
 // SalesRecord type was removed as the related panel was deleted.
 // If Component 6 (daily sales upload) is fully implemented later, this might be revived.
+
