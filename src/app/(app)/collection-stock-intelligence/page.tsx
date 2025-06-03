@@ -3,7 +3,8 @@
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import type { Product, FilterState, EnhancedProductForStockIntelligence, StockRiskStatus } from '@/types';
-import { ProductDataTableSection } from '@/components/domain/ProductDataTableSection'; // Re-using this, might need adjustments
+// ProductDataTableSection is no longer used directly for the main table in this version
+// import { ProductDataTableSection } from '@/components/domain/ProductDataTableSection'; 
 import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
 import { collection, getDocs, doc, Timestamp, query, getDoc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
@@ -16,15 +17,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import {
-  Loader2, Database, Brain, TrendingUp, AlertTriangle, PackageSearch, BarChart2, Settings2, Download, Filter as FilterIcon, ListFilter, Clock, AlertCircle, ShoppingBag, PackageX, ArrowUpRightSquare, PlusCircle
+  Loader2, Database, Brain, TrendingUp, AlertTriangle, PackageSearch, BarChart2, Settings2, Download, Filter as FilterIcon, ListFilter, Clock, AlertCircle, ShoppingBag, PackageX, ArrowUpRightSquare, PlusCircle, LineChart
 } from 'lucide-react';
-import { format as formatDateFns, isValid as isDateValid, differenceInDays, isAfter } from 'date-fns';
+import { format as formatDateFns, isValid as isDateValid, differenceInDays, isAfter, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import * as XLSX from 'xlsx';
+import { ResponsiveContainer, LineChart as RechartsLineChart, Line as RechartsLineElement, CartesianGrid, XAxis, YAxis, Tooltip as RechartsTooltip, Legend as RechartsLegend, ReferenceLine } from 'recharts';
+import { ChartContainer, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
+import { Skeleton } from '@/components/ui/skeleton';
+
 
 const ALL_COLLECTIONS_VALUE = "_ALL_COLLECTIONS_";
 const ALL_RISK_STATUS_VALUE = "_ALL_RISK_STATUS_";
-const COVERAGE_TARGET_DAYS = 21; // For replenishment calculation
+const COVERAGE_TARGET_DAYS_REPLENISHMENT = 21; 
+const ACTION_LIST_COVERAGE_TARGET_DAYS = 15; // For export suggestion
 
 const productFromFirestore = (data: any): Product => {
   return {
@@ -33,6 +39,21 @@ const productFromFirestore = (data: any): Product => {
     collectionEndDate: data.collectionEndDate instanceof Timestamp ? data.collectionEndDate.toDate() : null,
   } as Product;
 };
+
+interface ProjectedChartDataPoint {
+  dayLabel: string;
+  dayNumber: number;
+  stock: number | null;
+  hasReplenishment?: boolean;
+}
+
+const chartConfig = {
+  stock: {
+    label: "Estoque Projetado (PE)",
+    color: "hsl(var(--chart-1))",
+  },
+} satisfies ChartConfig;
+
 
 export default function CollectionStockIntelligencePage() {
   const { currentUser, isLoading: isAuthLoading } = useAuth();
@@ -46,11 +67,21 @@ export default function CollectionStockIntelligencePage() {
   const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCollection, setSelectedCollection] = useState<string>(ALL_COLLECTIONS_VALUE);
-  const [selectedRiskStatus, setSelectedRiskStatus] = useState<StockRiskStatus | typeof ALL_RISK_STATUS_VALUE>(ALL_RISK_STATUS_VALUE);
+  const [selectedCollectionFilter, setSelectedCollectionFilter] = useState<string>(ALL_COLLECTIONS_VALUE);
+  const [selectedRiskStatusFilter, setSelectedRiskStatusFilter] = useState<StockRiskStatus | typeof ALL_RISK_STATUS_VALUE>(ALL_RISK_STATUS_VALUE);
   const [isExporting, setIsExporting] = useState(false);
 
-  // Fetch products from Firestore
+  // State for Trend Chart and Simulation
+  const [selectedProductForChart, setSelectedProductForChart] = useState<EnhancedProductForStockIntelligence | null>(null);
+  const [simulationParams, setSimulationParams] = useState({
+    salesAdjustment: 0,
+    replenishmentAmount: 0,
+    replenishmentDay: 0, // Days from today
+  });
+  const [projectedChartData, setProjectedChartData] = useState<ProjectedChartDataPoint[]>([]);
+  const [projectedRuptureDayIndex, setProjectedRuptureDayIndex] = useState<number | null>(null);
+
+
   useEffect(() => {
     if (isAuthLoading) {
       setIsLoadingPageData(true);
@@ -101,7 +132,6 @@ export default function CollectionStockIntelligencePage() {
     }
   }, [currentUser, isAuthLoading, allProducts.length, toast]);
 
-  // Calculate indicators and insights
   useEffect(() => {
     if (allProducts.length === 0) {
       setEnhancedProducts([]);
@@ -121,17 +151,15 @@ export default function CollectionStockIntelligencePage() {
         else if (estimatedCoverageDays <= 14) stockRiskStatus = 'Risco Moderado';
         else stockRiskStatus = 'Estável';
       } else if (dailyAverageSales === 0 && p.stock > 0) {
-        stockRiskStatus = 'Estável'; // No sales, so stable from rupture PoV
+        stockRiskStatus = 'Estável'; 
       }
-
 
       let recommendedReplenishment = 0;
       if (dailyAverageSales > 0) {
-        const targetStock = dailyAverageSales * COVERAGE_TARGET_DAYS;
+        const targetStock = dailyAverageSales * COVERAGE_TARGET_DAYS_REPLENISHMENT;
         recommendedReplenishment = Math.max(0, Math.round(targetStock - availableStockForCoverage - (p.openOrders || 0) ));
       }
       
-      // Insights
       const isHighDemandLowCoverage = dailyAverageSales > 5 && (estimatedCoverageDays !== null && estimatedCoverageDays < 3);
       const isZeroSalesWithStock = dailyAverageSales === 0 && p.stock > 0;
       
@@ -143,7 +171,6 @@ export default function CollectionStockIntelligencePage() {
           }
       }
 
-      // Priority for actions list
       let priority: 1 | 2 | 3 | undefined;
       let automatedJustification = '';
       if (estimatedCoverageDays !== null) {
@@ -162,7 +189,6 @@ export default function CollectionStockIntelligencePage() {
           automatedJustification = 'Estoque parado (sem vendas recentes).';
       }
 
-
       return {
         ...p,
         dailyAverageSales,
@@ -180,7 +206,6 @@ export default function CollectionStockIntelligencePage() {
     setEnhancedProducts(processed);
   }, [allProducts]);
 
-  // Apply filters
   useEffect(() => {
     let tempFiltered = [...enhancedProducts];
     if (searchTerm) {
@@ -189,14 +214,14 @@ export default function CollectionStockIntelligencePage() {
         String(p.vtexId).toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
-    if (selectedCollection !== ALL_COLLECTIONS_VALUE) {
-      tempFiltered = tempFiltered.filter(p => p.collection === selectedCollection);
+    if (selectedCollectionFilter !== ALL_COLLECTIONS_VALUE) {
+      tempFiltered = tempFiltered.filter(p => p.collection === selectedCollectionFilter);
     }
-    if (selectedRiskStatus !== ALL_RISK_STATUS_VALUE) {
-      tempFiltered = tempFiltered.filter(p => p.stockRiskStatus === selectedRiskStatus);
+    if (selectedRiskStatusFilter !== ALL_RISK_STATUS_VALUE) {
+      tempFiltered = tempFiltered.filter(p => p.stockRiskStatus === selectedRiskStatusFilter);
     }
     setFilteredEnhancedProducts(tempFiltered);
-  }, [searchTerm, selectedCollection, selectedRiskStatus, enhancedProducts]);
+  }, [searchTerm, selectedCollectionFilter, selectedRiskStatusFilter, enhancedProducts]);
 
   const availableCollections = useMemo(() => Array.from(new Set(allProducts.map(p => p.collection).filter(Boolean))).sort(), [allProducts]);
   const riskStatuses: StockRiskStatus[] = ['Alerta Crítico', 'Risco Moderado', 'Estável', 'N/A'];
@@ -216,6 +241,70 @@ export default function CollectionStockIntelligencePage() {
       .sort((a, b) => (a.priority || 3) - (b.priority || 3) || (a.estimatedCoverageDays || Infinity) - (b.estimatedCoverageDays || Infinity));
   }, [enhancedProducts]);
 
+  // Logic for Trend Chart & Simulation
+  useEffect(() => {
+    if (!selectedProductForChart) {
+      setProjectedChartData([]);
+      setProjectedRuptureDayIndex(null);
+      return;
+    }
+
+    const projectionDays = 60;
+    const data: ProjectedChartDataPoint[] = [];
+    let currentSimulatedStock = selectedProductForChart.readyToShip || 0;
+    const effectiveDailySales = (selectedProductForChart.dailyAverageSales || 0) + (simulationParams.salesAdjustment || 0);
+    let ruptureDay: number | null = null;
+
+    for (let i = 0; i <= projectionDays; i++) {
+      let dayStock = currentSimulatedStock;
+      let hasReplenishment = false;
+
+      if (i > 0) { // Apply sales from day 1 onwards
+        dayStock -= effectiveDailySales;
+      }
+
+      if (simulationParams.replenishmentAmount > 0 && i === simulationParams.replenishmentDay && i > 0) {
+        dayStock += simulationParams.replenishmentAmount;
+        hasReplenishment = true;
+      }
+      
+      dayStock = Math.max(0, dayStock); // Stock cannot go below zero
+      currentSimulatedStock = dayStock; // Update for next iteration's start
+
+      data.push({
+        dayLabel: `D${i}`,
+        dayNumber: i,
+        stock: dayStock,
+        hasReplenishment,
+      });
+
+      if (dayStock === 0 && ruptureDay === null && effectiveDailySales > 0) {
+        ruptureDay = i;
+      }
+    }
+    setProjectedChartData(data);
+    setProjectedRuptureDayIndex(ruptureDay);
+  }, [selectedProductForChart, simulationParams]);
+
+  const productsForChartSelection = useMemo(() => {
+    return enhancedProducts.filter(p => (p.dailyAverageSales || 0) > 0 || (p.readyToShip || 0) > 0).sort((a,b) => a.name.localeCompare(b.name));
+  }, [enhancedProducts]);
+
+  const backofficeMetrics = useMemo(() => {
+    if (filteredEnhancedProducts.length === 0) {
+      return { avgCoverageDays: 0, criticalSkus: 0, moderateSkus: 0 };
+    }
+    const productsWithCoverage = filteredEnhancedProducts.filter(p => p.estimatedCoverageDays !== null && Number.isFinite(p.estimatedCoverageDays));
+    const totalCoverageDays = productsWithCoverage.reduce((sum, p) => sum + (p.estimatedCoverageDays || 0), 0);
+    
+    return {
+      avgCoverageDays: productsWithCoverage.length > 0 ? totalCoverageDays / productsWithCoverage.length : 0,
+      criticalSkus: filteredEnhancedProducts.filter(p => p.stockRiskStatus === 'Alerta Crítico').length,
+      moderateSkus: filteredEnhancedProducts.filter(p => p.stockRiskStatus === 'Risco Moderado').length,
+    };
+  }, [filteredEnhancedProducts]);
+
+
   const handleExportReplenishment = () => {
      if (actionListProducts.length === 0) {
       toast({ title: "Nenhum Dado para Exportar", description: "Não há produtos na lista de ações para exportar.", variant: "default" });
@@ -225,8 +314,11 @@ export default function CollectionStockIntelligencePage() {
     toast({ title: "Exportando...", description: "Gerando sugestão de reposição." });
 
     const dataToExport = actionListProducts
-        .filter(p => p.priority === 1 || p.priority === 2) // Export P1 and P2
-        .map(p => ({
+        .filter(p => p.priority === 1 || p.priority === 2)
+        .map(p => {
+          const targetStockFor15dPE = (p.dailyAverageSales || 0) * ACTION_LIST_COVERAGE_TARGET_DAYS;
+          const replenishmentSuggestion15d = Math.max(0, Math.round(targetStockFor15dPE - (p.readyToShip || 0) - (p.openOrders || 0)));
+          return {
             "Produto": p.name,
             "ID VTEX": String(p.vtexId ?? ''),
             "Prioridade": p.priority,
@@ -237,10 +329,10 @@ export default function CollectionStockIntelligencePage() {
             "Regulador": p.regulatorStock,
             "Pedidos em Aberto": p.openOrders,
             "Média Venda Diária": p.dailyAverageSales.toFixed(2),
-            "Reposição Sugerida (para 21d)": p.recommendedReplenishment,
+            "Reposição Sugerida (p/ 15d PE)": replenishmentSuggestion15d,
             "Justificativa": p.automatedJustification,
             "Coleção": p.collection,
-    }));
+        }});
 
     try {
       const worksheet = XLSX.utils.json_to_sheet(dataToExport);
@@ -254,6 +346,14 @@ export default function CollectionStockIntelligencePage() {
     } finally {
       setIsExporting(false);
     }
+  };
+
+  const handleSimulationParamChange = (param: keyof typeof simulationParams, value: string) => {
+    const numValue = parseInt(value, 10);
+    setSimulationParams(prev => ({
+      ...prev,
+      [param]: isNaN(numValue) ? 0 : numValue,
+    }));
   };
 
   if (isLoadingPageData && allProducts.length === 0) {
@@ -288,21 +388,19 @@ export default function CollectionStockIntelligencePage() {
 
       {allProducts.length > 0 && (
         <>
-          {/* Component 6: Placeholder for Specific Data Import */}
           <Card className="shadow-sm border-dashed border-blue-500">
             <CardHeader>
                 <CardTitle className="flex items-center text-blue-700"><Settings2 className="mr-2 h-5 w-5"/>Configurações e Importação Avançada de Dados</CardTitle>
             </CardHeader>
             <CardContent>
                 <p className="text-sm text-muted-foreground">
-                    Esta seção será futuramente utilizada para importação regular de dados de vendas diárias e outras configurações específicas para esta tela de inteligência.
+                    Esta seção será futuramente utilizada para importação regular de dados de vendas diárias (Componente 6) e outras configurações específicas para esta tela de inteligência.
                     <br />
                     Atualmente, os cálculos (como Média Diária de Venda) são baseados no campo "Venda nos Últimos 30 Dias" da planilha principal carregada no Dashboard.
                 </p>
             </CardContent>
           </Card>
 
-          {/* Component 3: Insights Automatizados */}
           <Card className="shadow-md">
             <CardHeader>
               <CardTitle className="flex items-center"><AlertTriangle className="mr-2 h-5 w-5 text-amber-500" />Alertas e Insights Chave</CardTitle>
@@ -331,7 +429,7 @@ export default function CollectionStockIntelligencePage() {
               )}
               {insights.dailySalesExceedsPE.length > 0 && (
                 <div className="p-3 border border-orange-500 rounded-md bg-orange-500/5">
-                  <h4 className="font-semibold text-orange-600 flex items-center"><AlertCircle className="mr-2 h-5 w-5"/>Venda Diária > Pronta Entrega: {insights.dailySalesExceedsPE.length} SKU(s)</h4>
+                  <h4 className="font-semibold text-orange-600 flex items-center"><AlertCircle className="mr-2 h-5 w-5"/>Venda Diária &gt; Pronta Entrega: {insights.dailySalesExceedsPE.length} SKU(s)</h4>
                   <ul className="list-disc list-inside text-sm text-orange-500/90 max-h-32 overflow-y-auto">
                     {insights.dailySalesExceedsPE.slice(0,5).map(p => <li key={p.vtexId}>{p.name} (VMD: {p.dailyAverageSales.toFixed(1)}, PE: {p.readyToShip})</li>)}
                     {insights.dailySalesExceedsPE.length > 5 && <li>E mais {insights.dailySalesExceedsPE.length - 5}...</li>}
@@ -349,8 +447,132 @@ export default function CollectionStockIntelligencePage() {
               )}
             </CardContent>
           </Card>
+          
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* Component 4: Gráfico de Tendência e Simulação */}
+            <Card className="shadow-lg">
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <LineChart className="mr-2 h-5 w-5 text-primary" />
+                  Gráfico de Tendência de Estoque (Pronta Entrega) e Simulação
+                </CardTitle>
+                <CardDescription>Selecione um produto e simule ajustes para visualizar o impacto no estoque.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label htmlFor="productChartSelect">Selecionar Produto para Gráfico</Label>
+                  <Select
+                    value={selectedProductForChart?.vtexId ? String(selectedProductForChart.vtexId) : ""}
+                    onValueChange={(value) => {
+                      const product = productsForChartSelection.find(p => String(p.vtexId) === value);
+                      setSelectedProductForChart(product || null);
+                    }}
+                  >
+                    <SelectTrigger id="productChartSelect" className="mt-1">
+                      <SelectValue placeholder="Selecione um produto..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {productsForChartSelection.length > 0 ? (
+                        productsForChartSelection.map(p => (
+                          <SelectItem key={String(p.vtexId)} value={String(p.vtexId)}>
+                            {p.name} (PE: {p.readyToShip}, VMD: {p.dailyAverageSales.toFixed(1)})
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="" disabled>Nenhum produto com vendas para projetar</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-          {/* Component 5: Lista de Ações Automatizadas (Simplified) */}
+                {selectedProductForChart && (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                      <div>
+                        <Label htmlFor="salesAdjustment">Ajuste Venda Diária (+/-)</Label>
+                        <Input id="salesAdjustment" type="number" value={simulationParams.salesAdjustment} onChange={(e) => handleSimulationParamChange('salesAdjustment', e.target.value)} placeholder="Ex: 5 ou -2" className="mt-1"/>
+                      </div>
+                      <div>
+                        <Label htmlFor="replenishmentAmount">Reposição (Unidades)</Label>
+                        <Input id="replenishmentAmount" type="number" value={simulationParams.replenishmentAmount} onChange={(e) => handleSimulationParamChange('replenishmentAmount', e.target.value)} placeholder="Ex: 50" className="mt-1" min="0"/>
+                      </div>
+                      <div>
+                        <Label htmlFor="replenishmentDay">Dia Chegada Reposição</Label>
+                        <Input id="replenishmentDay" type="number" value={simulationParams.replenishmentDay} onChange={(e) => handleSimulationParamChange('replenishmentDay', e.target.value)} placeholder="Ex: 10 (dias de hoje)" className="mt-1" min="0" max="60"/>
+                      </div>
+                    </div>
+                    <div className="h-[300px] w-full mt-2">
+                      <ChartContainer config={chartConfig} className="h-full w-full">
+                        <RechartsLineChart data={projectedChartData} margin={{ top: 5, right: 20, bottom: 5, left: -20 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                          <XAxis dataKey="dayLabel" tick={{ fontSize: 10 }} interval={6}/>
+                          <YAxis tickFormatter={(value) => value.toLocaleString()} tick={{ fontSize: 10 }} domain={['auto', 'auto']}/>
+                          <RechartsTooltip
+                            content={<ChartTooltipContent 
+                              indicator="line"
+                              formatter={(value, name, props) => {
+                                const point = props.payload as ProjectedChartDataPoint | undefined;
+                                let label = `${value.toLocaleString()} unidades`;
+                                if (point?.hasReplenishment) {
+                                  label += ` (+${simulationParams.replenishmentAmount} reposição)`;
+                                }
+                                return [label, "Estoque PE Projetado"];
+                              }}
+                            />}
+                          />
+                          <RechartsLineElement type="monotone" dataKey="stock" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={false} name="Estoque PE Projetado"/>
+                          <ReferenceLine y={0} stroke="hsl(var(--destructive))" strokeDasharray="3 3" strokeWidth={1.5} />
+                          {projectedRuptureDayIndex !== null && projectedRuptureDayIndex <= 60 && (
+                             <ReferenceLine 
+                                x={projectedChartData[projectedRuptureDayIndex]?.dayLabel} 
+                                stroke="hsl(var(--destructive))" 
+                                strokeWidth={1.5}
+                                label={{ value: `Ruptura D${projectedRuptureDayIndex}`, position: "insideTopRight", fill: "hsl(var(--destructive))", fontSize: 10, dy: -5 }} 
+                              />
+                          )}
+                        </RechartsLineChart>
+                      </ChartContainer>
+                    </div>
+                  </>
+                )}
+                {!selectedProductForChart && <p className="text-sm text-muted-foreground text-center py-4">Selecione um produto acima para visualizar a projeção de estoque.</p>}
+              </CardContent>
+            </Card>
+
+            {/* Component 7: Backoffice de Cobertura da Coleção */}
+            <Card className="shadow-lg">
+                <CardHeader>
+                    <CardTitle className="flex items-center"><BarChart2 className="mr-2 h-5 w-5 text-primary"/>Visão Geral da Cobertura e Riscos (PE)</CardTitle>
+                    <CardDescription>Métricas agregadas sobre a saúde do estoque de Pronta Entrega com base nos filtros atuais.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                    {isLoadingPageData && filteredEnhancedProducts.length === 0 ? (
+                        <Skeleton className="h-8 w-3/4 my-2" count={3} />
+                    ): filteredEnhancedProducts.length > 0 ? (
+                        <>
+                            <div className="flex justify-between items-center p-3 bg-muted/50 rounded-md">
+                                <span className="font-medium text-sm">Média de Cobertura (PE Geral):</span>
+                                <span className="font-bold text-lg text-primary">{backofficeMetrics.avgCoverageDays.toFixed(1)} dias</span>
+                            </div>
+                            <div className="flex justify-between items-center p-3 bg-destructive/10 rounded-md">
+                                <span className="font-medium text-sm text-destructive">SKUs em Alerta Crítico (PE):</span>
+                                <span className="font-bold text-lg text-destructive">{backofficeMetrics.criticalSkus}</span>
+                            </div>
+                            <div className="flex justify-between items-center p-3 bg-amber-500/10 rounded-md">
+                                <span className="font-medium text-sm text-amber-700">SKUs em Risco Moderado (PE):</span>
+                                <span className="font-bold text-lg text-amber-700">{backofficeMetrics.moderateSkus}</span>
+                            </div>
+                        </>
+                    ) : (
+                         <p className="text-sm text-muted-foreground">Nenhum produto corresponde aos filtros para exibir métricas de cobertura.</p>
+                    )}
+                     <p className="text-xs text-muted-foreground pt-2">
+                        Métricas avançadas como "% vendida da coleção" e "data de esgotamento da coleção" estão em desenvolvimento e exigirão dados de histórico de vendas ou estoque inicial da coleção.
+                    </p>
+                </CardContent>
+            </Card>
+          </div>
+
           <Card className="shadow-md">
             <CardHeader>
                 <CardTitle className="flex items-center"><ListFilter className="mr-2 h-5 w-5 text-primary" />Lista de Ações Priorizadas</CardTitle>
@@ -374,13 +596,13 @@ export default function CollectionStockIntelligencePage() {
                                     <TableHead>Produto</TableHead>
                                     <TableHead className="text-right">Cobertura (PE+REG)</TableHead>
                                     <TableHead>Justificativa</TableHead>
-                                    <TableHead className="text-right">Repor</TableHead>
+                                    <TableHead className="text-right">Repor (p/ {COVERAGE_TARGET_DAYS_REPLENISHMENT}d)</TableHead>
                                     <TableHead className="text-center">Ação</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {actionListProducts.slice(0, 15).map(p => ( // Show top 15 for brevity
-                                    <TableRow key={p.vtexId} className={
+                                {actionListProducts.slice(0, 15).map(p => ( 
+                                    <TableRow key={String(p.vtexId)} className={
                                         p.priority === 1 ? 'bg-red-500/10 hover:bg-red-500/20' :
                                         p.priority === 2 ? 'bg-amber-500/10 hover:bg-amber-500/20' : ''
                                     }>
@@ -402,7 +624,6 @@ export default function CollectionStockIntelligencePage() {
             </CardContent>
           </Card>
           
-          {/* Filters */}
            <Card className="shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center"><FilterIcon className="mr-2 h-5 w-5 text-primary" />Filtrar Análise Detalhada</CardTitle>
@@ -414,7 +635,7 @@ export default function CollectionStockIntelligencePage() {
               </div>
               <div>
                 <Label htmlFor="collectionFilterTable">Filtrar por Coleção</Label>
-                <Select value={selectedCollection} onValueChange={setSelectedCollection}>
+                <Select value={selectedCollectionFilter} onValueChange={setSelectedCollectionFilter}>
                   <SelectTrigger id="collectionFilterTable" className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value={ALL_COLLECTIONS_VALUE}>Todas as Coleções</SelectItem>
@@ -424,7 +645,7 @@ export default function CollectionStockIntelligencePage() {
               </div>
               <div>
                 <Label htmlFor="riskStatusFilterTable">Filtrar por Status de Risco (PE+REG)</Label>
-                <Select value={selectedRiskStatus} onValueChange={(val) => setSelectedRiskStatus(val as any)}>
+                <Select value={selectedRiskStatusFilter} onValueChange={(val) => setSelectedRiskStatusFilter(val as any)}>
                   <SelectTrigger id="riskStatusFilterTable" className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value={ALL_RISK_STATUS_VALUE}>Todos os Status</SelectItem>
@@ -435,48 +656,13 @@ export default function CollectionStockIntelligencePage() {
             </CardContent>
           </Card>
 
-
-          {/* Component 1: Dashboard Estratégico (Main Table) */}
-          <ProductDataTableSection
-            products={filteredEnhancedProducts as unknown as Product[]} // Cast needed due to ProductDataTable expecting Product[]
-            isLoading={isLoadingPageData && enhancedProducts.length === 0}
-            cardIcon={PackageSearch}
-            cardTitle="Dashboard Estratégico de Reposição de Estoque"
-            cardDescription="Análise detalhada de cada produto com indicadores de cobertura e risco (PE+REG)."
-            showVtexIdColumn={true}
-            showNameColumn={true}
-            showStockColumn={true} // Estoque Total
-            showReadyToShipColumn={true}
-            showRegulatorStockColumn={true}
-            showOpenOrdersColumn={true}
-            showPriceColumn={true}
-            showSales30dColumn={true}
-            // Calculated fields for this table
-            showCollectionColumn={true}
-            showStatusColumn={true} // Collection status
-            // Fields specific to this intelligence page, pass them via a new prop or adapt ProductDataTable
-            // For now, I will add specific columns directly to ProductDataTableSection to accept them
-            // This means ProductDataTableSection will need to be enhanced.
-            // Alternatively, create a new specific DataTable component.
-            // Let's assume ProductDataTableSection can handle these if props are passed.
-            // These are handled by 'enhancedProducts' and custom cell rendering:
-            // Média Diária de Venda, Cobertura Estimada (dias), Taxa de Esgotamento Diário, Status de Risco de Estoque, Reposição Recomendada
-            // The ProductDataTableSection will need to be adapted to show these if they aren't direct Product fields.
-            // For now, I will pass a new set of boolean flags to ProductDataTable.
-            // This is becoming complex, maybe a dedicated table component is better long-term.
-            // Let's create a simplified version for the table:
-            // --> The existing ProductDataTableSection is not directly suitable for all these calculated fields
-            // --> without significant modification or making it overly generic.
-            // --> I will render a custom table here.
-          />
-          {/* Simplified custom table for Component 1 */}
           <Card>
             <CardHeader>
                 <CardTitle className="flex items-center"><PackageSearch className="mr-2 h-5 w-5 text-primary"/>Visão Detalhada de Produtos e Projeções (PE+REG)</CardTitle>
                 <CardDescription>Clique nos cabeçalhos para ordenar. Cobertura e Risco baseados em Pronta Entrega + Regulador.</CardDescription>
             </CardHeader>
             <CardContent>
-                {isLoadingPageData && filteredEnhancedProducts.length === 0 && <p><Loader2 className="inline mr-2 h-4 w-4 animate-spin" />Carregando tabela...</p>}
+                {isLoadingPageData && filteredEnhancedProducts.length === 0 && <p className="flex items-center justify-center py-4"><Loader2 className="inline mr-2 h-5 w-5 animate-spin" />Carregando tabela detalhada...</p>}
                 {!isLoadingPageData && filteredEnhancedProducts.length === 0 && <p className="text-muted-foreground text-center py-4">Nenhum produto encontrado para os filtros atuais.</p>}
                 {filteredEnhancedProducts.length > 0 && (
                     <div className="overflow-x-auto rounded-md border">
@@ -493,12 +679,12 @@ export default function CollectionStockIntelligencePage() {
                                     <TableHead className="text-right font-semibold">Média Venda Dia</TableHead>
                                     <TableHead className="text-right font-semibold">Cobertura (PE+REG)</TableHead>
                                     <TableHead className="text-center font-semibold">Status Risco (PE+REG)</TableHead>
-                                    <TableHead className="text-right font-semibold">Repor (p/ 21d)</TableHead>
+                                    <TableHead className="text-right font-semibold">Repor (p/ {COVERAGE_TARGET_DAYS_REPLENISHMENT}d)</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {filteredEnhancedProducts.slice(0,50).map(p => ( // Limiting to 50 for performance in this view, export will have all
-                                    <TableRow key={p.vtexId}>
+                                {filteredEnhancedProducts.slice(0,50).map(p => ( 
+                                    <TableRow key={String(p.vtexId)}>
                                         <TableCell className="font-medium text-xs max-w-xs truncate" title={p.name}>{p.name}</TableCell>
                                         <TableCell className="text-right text-xs">{p.stock.toLocaleString()}</TableCell>
                                         <TableCell className="text-right text-xs text-green-700 font-medium">{p.readyToShip.toLocaleString()}</TableCell>
@@ -511,8 +697,8 @@ export default function CollectionStockIntelligencePage() {
                                         <TableCell className="text-center text-xs">
                                             <Badge variant={
                                                 p.stockRiskStatus === 'Alerta Crítico' ? 'destructive' :
-                                                p.stockRiskStatus === 'Risco Moderado' ? 'default' : // Using 'default' for yellow-ish
-                                                p.stockRiskStatus === 'Estável' ? 'default' : 'outline' // 'default' for green-ish (primary), outline for N/A
+                                                p.stockRiskStatus === 'Risco Moderado' ? 'default' : 
+                                                p.stockRiskStatus === 'Estável' ? 'default' : 'outline' 
                                             } className={
                                                 p.stockRiskStatus === 'Risco Moderado' ? 'bg-amber-500 hover:bg-amber-600 text-white' : 
                                                 p.stockRiskStatus === 'Estável' ? 'bg-green-600 hover:bg-green-700 text-white' : ''
@@ -531,28 +717,8 @@ export default function CollectionStockIntelligencePage() {
                 {filteredEnhancedProducts.length > 50 && <p className="text-xs text-muted-foreground mt-2 text-center">Exibindo os primeiros 50 produtos. Use filtros para refinar ou exporte para ver todos.</p>}
             </CardContent>
           </Card>
-
-          {/* Component 4 & 7: Placeholders */}
-          <div className="grid md:grid-cols-2 gap-6">
-            <Card className="shadow-sm">
-              <CardHeader><CardTitle className="flex items-center"><BarChart2 className="mr-2 h-5 w-5 text-primary"/>Gráfico de Tendência e Simulação</CardTitle></CardHeader>
-              <CardContent><p className="text-muted-foreground">Em desenvolvimento: Visualização gráfica de tendências de venda, estoque projetado e simulador de reposição.</p></CardContent>
-            </Card>
-            <Card className="shadow-sm">
-              <CardHeader><CardTitle className="flex items-center"><PackageSearch className="mr-2 h-5 w-5 text-primary"/>Backoffice de Cobertura da Coleção</CardTitle></CardHeader>
-              <CardContent><p className="text-muted-foreground">Em desenvolvimento: Análise de % vendida da coleção, data estimada de esgotamento e alertas de ritmo de venda vs. reposição.</p></CardContent>
-            </Card>
-          </div>
         </>
       )}
     </div>
   );
 }
-
-// Helper to format currency, can be moved to utils
-const formatCurrency = (value: number) => {
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-};
-
-
-    
