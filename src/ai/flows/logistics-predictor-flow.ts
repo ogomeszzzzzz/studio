@@ -12,7 +12,7 @@ import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 
 // Define Zod Schemas for Input and Output
-export const LogisticsPredictionInputSchema = z.object({
+const LogisticsPredictionInputSchema = z.object({
   productId: z.string().describe("The unique identifier of the product (e.g., VTEX ID or internal SKU)."),
   productName: z.string().describe("The display name of the product."),
   currentStock: z.number().min(0).describe("The current total physical stock quantity of the product."),
@@ -24,7 +24,7 @@ export const LogisticsPredictionInputSchema = z.object({
 });
 export type LogisticsPredictionInput = z.infer<typeof LogisticsPredictionInputSchema>;
 
-export const LogisticsPredictionOutputSchema = z.object({
+const LogisticsPredictionOutputSchema = z.object({
   productId: z.string(),
   productName: z.string(),
   daysToRupture: z.number().describe("Estimated number of days until the current stock runs out based on 30-day sales velocity. Returns Infinity if no sales."),
@@ -161,4 +161,3 @@ const prompt = ai.definePrompt({
   `,
 });
 */
-
