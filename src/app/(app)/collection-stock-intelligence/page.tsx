@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
@@ -46,7 +47,7 @@ interface ProjectedChartDataPoint {
 
 const chartConfig = {
   stock: {
-    label: "Estoque Total Projetado", // Updated label
+    label: "Estoque Total Projetado",
     color: "hsl(var(--chart-1))",
   },
 } satisfies ChartConfig;
@@ -143,20 +144,19 @@ export default function CollectionStockIntelligencePage() {
 
       let stockRiskStatus: StockRiskStatus = 'N/A';
       if (estimatedCoverageDays !== null) {
-        if (estimatedCoverageDays < 7) stockRiskStatus = 'Alerta Crítico'; // Ruptura < 7 dias
-        else if (estimatedCoverageDays <= 14) stockRiskStatus = 'Risco Moderado'; // Cobertura 7-14 dias
-        else stockRiskStatus = 'Estável'; // Cobertura > 14 dias
+        if (estimatedCoverageDays < 7) stockRiskStatus = 'Alerta Crítico';
+        else if (estimatedCoverageDays <= 14) stockRiskStatus = 'Risco Moderado';
+        else stockRiskStatus = 'Estável';
       } else if (dailyAverageSales === 0 && p.stock > 0) {
         stockRiskStatus = 'Estável'; 
       }
 
       let recommendedReplenishment = 0;
       if (dailyAverageSales > 0) {
-        const targetStock = dailyAverageSales * COVERAGE_TARGET_DAYS_REPLENISHMENT; // Target 21 dias
+        const targetStock = dailyAverageSales * COVERAGE_TARGET_DAYS_REPLENISHMENT;
         recommendedReplenishment = Math.max(0, Math.round(targetStock - actualStockForCoverage - (p.openOrders || 0) ));
       }
       
-      // Insights (based on new coverage logic)
       const isHighDemandLowCoverage = dailyAverageSales > 5 && (estimatedCoverageDays !== null && estimatedCoverageDays < 3);
       const isZeroSalesWithStock = dailyAverageSales === 0 && p.stock > 0;
       
@@ -171,28 +171,36 @@ export default function CollectionStockIntelligencePage() {
       let priority: 1 | 2 | 3 | undefined;
       let automatedJustification = '';
       if (estimatedCoverageDays !== null) {
-          if (estimatedCoverageDays < 5) { // P1: Ruptura em até 5 dias (Estoque Total)
+          if (estimatedCoverageDays < 5) { 
               priority = 1;
               automatedJustification = `Ruptura Crítica Est.Total! Cobertura: ${estimatedCoverageDays.toFixed(1)} dias.`;
-          } else if (estimatedCoverageDays < 10) { // P2: Ruptura entre 5-10 dias (Estoque Total)
+          } else if (estimatedCoverageDays < 10) { 
               priority = 2;
               automatedJustification = `Risco Alto Est.Total! Cobertura: ${estimatedCoverageDays.toFixed(1)} dias.`;
-          } else { // P3: Estável ou ocioso
+          } else { 
               priority = 3;
-              automatedJustification = `Est.Total estável ou ocioso. Cobertura: ${estimatedCoverageDays.toFixed(1)} dias.`;
+              automatedJustification = `Est.Total estável. Cobertura: ${estimatedCoverageDays.toFixed(1)} dias.`;
           }
       } else if (isZeroSalesWithStock) {
           priority = 3;
           automatedJustification = 'Est.Total parado (sem vendas recentes).';
+      } else {
+          priority = 3; // Default to stable if no clear risk and not zero sales with stock
+          automatedJustification = 'Dados insuficientes para risco detalhado ou sem vendas.';
       }
+      
+      if ((priority === 1 || priority === 2) && (p.openOrders || 0) > 0) {
+        automatedJustification += ` (Atenção: ${(p.openOrders || 0).toLocaleString()} unid. em pedidos abertos)`;
+      }
+
 
       return {
         ...p,
         dailyAverageSales,
-        estimatedCoverageDays, // Based on Estoque Total
-        dailyDepletionRate,    // Based on Estoque Total
-        stockRiskStatus,       // Based on Estoque Total coverage
-        recommendedReplenishment, // Targets Estoque Total
+        estimatedCoverageDays, 
+        dailyDepletionRate,    
+        stockRiskStatus,       
+        recommendedReplenishment, 
         isHighDemandLowCoverage,
         isZeroSalesWithStock,
         isRecentCollectionFastDepletion,
@@ -228,7 +236,7 @@ export default function CollectionStockIntelligencePage() {
       ruptureUnder7Days: enhancedProducts.filter(p => p.estimatedCoverageDays !== null && p.estimatedCoverageDays < 7 && p.stockRiskStatus === 'Alerta Crítico'),
       stagnantStock: enhancedProducts.filter(p => p.isZeroSalesWithStock),
       fastDepletionRecent: enhancedProducts.filter(p => p.isRecentCollectionFastDepletion),
-      dailySalesExceedsPE: enhancedProducts.filter(p => p.dailyAverageSales > 0 && p.readyToShip < p.dailyAverageSales), // This insight remains about PE as a source
+      dailySalesExceedsPE: enhancedProducts.filter(p => p.dailyAverageSales > 0 && p.readyToShip < p.dailyAverageSales),
     };
   }, [enhancedProducts]);
 
@@ -282,7 +290,7 @@ export default function CollectionStockIntelligencePage() {
     setProjectedRuptureDayIndex(ruptureDay);
   }, [selectedProductForChart, simulationParams]);
 
-  const productsForChartSelection = useMemo(() => { // Chart selection can still be based on having sales or stock
+  const productsForChartSelection = useMemo(() => {
     return enhancedProducts.filter(p => (p.dailyAverageSales || 0) > 0 || (p.stock || 0) > 0).sort((a,b) => a.name.localeCompare(b.name));
   }, [enhancedProducts]);
 
@@ -310,13 +318,13 @@ export default function CollectionStockIntelligencePage() {
     toast({ title: "Exportando...", description: "Gerando sugestão de reposição." });
 
     const dataToExport = actionListProducts
-        .filter(p => p.priority === 1 || p.priority === 2) // P1: <5d, P2: <10d (Est.Total)
+        .filter(p => p.priority === 1 || p.priority === 2)
         .map(p => {
           const targetStockFor15d = (p.dailyAverageSales || 0) * ACTION_LIST_COVERAGE_TARGET_DAYS;
           const replenishmentSuggestion15d = Math.max(0, Math.round(targetStockFor15d - (p.stock || 0) - (p.openOrders || 0)));
           return {
-            "Produto": p.name,
             "ID VTEX": String(p.vtexId ?? ''),
+            "Produto": p.name,
             "Prioridade": p.priority,
             "Status Risco Estoque (Est.Total)": p.stockRiskStatus,
             "Cobertura Atual (Est.Total Dias)": p.estimatedCoverageDays?.toFixed(1) ?? 'N/A',
@@ -410,7 +418,7 @@ export default function CollectionStockIntelligencePage() {
                 <div className="p-3 border border-destructive rounded-md bg-destructive/5">
                   <h4 className="font-semibold text-destructive flex items-center"><PackageX className="mr-2 h-5 w-5"/>Risco de Ruptura (Est.Total &lt; 7 dias): {insights.ruptureUnder7Days.length} SKU(s)</h4>
                   <ul className="list-disc list-inside text-sm text-destructive/90 max-h-32 overflow-y-auto">
-                    {insights.ruptureUnder7Days.slice(0,5).map(p => <li key={String(p.vtexId)}>{p.name} ({p.estimatedCoverageDays?.toFixed(1)}d)</li>)}
+                    {insights.ruptureUnder7Days.slice(0,5).map(p => <li key={String(p.vtexId)}>{p.name} (Est.Total cobrindo {p.estimatedCoverageDays?.toFixed(1)}d)</li>)}
                     {insights.ruptureUnder7Days.length > 5 && <li>E mais {insights.ruptureUnder7Days.length - 5}...</li>}
                   </ul>
                 </div>
@@ -426,7 +434,7 @@ export default function CollectionStockIntelligencePage() {
               )}
               {insights.dailySalesExceedsPE.length > 0 && (
                 <div className="p-3 border border-orange-500 rounded-md bg-orange-500/5">
-                  <h4 className="font-semibold text-orange-600 flex items-center"><AlertCircle className="mr-2 h-5 w-5"/>Alerta de Fonte: Venda Diária &gt; Pronta Entrega: {insights.dailySalesExceedsPE.length} SKU(s)</h4>
+                  <h4 className="font-semibold text-orange-600 flex items-center"><AlertCircle className="mr-2 h-5 w-5"/>Alerta de Fonte Potencial: Venda Diária &gt; Pronta Entrega: {insights.dailySalesExceedsPE.length} SKU(s)</h4>
                   <ul className="list-disc list-inside text-sm text-orange-500/90 max-h-32 overflow-y-auto">
                     {insights.dailySalesExceedsPE.slice(0,5).map(p => <li key={String(p.vtexId)}>{p.name} (VMD: {p.dailyAverageSales.toFixed(1)}, PE: {p.readyToShip})</li>)}
                     {insights.dailySalesExceedsPE.length > 5 && <li>E mais {insights.dailySalesExceedsPE.length - 5}...</li>}
@@ -463,7 +471,6 @@ export default function CollectionStockIntelligencePage() {
                     onValueChange={(value) => {
                       const product = productsForChartSelection.find(p => String(p.vtexId) === value);
                       setSelectedProductForChart(product || null);
-                      // Reset simulation params when product changes
                       setSimulationParams({ salesAdjustment: 0, replenishmentAmount: 0, replenishmentDay: 0 });
                     }}
                   >
@@ -724,3 +731,4 @@ export default function CollectionStockIntelligencePage() {
     </div>
   );
 }
+
