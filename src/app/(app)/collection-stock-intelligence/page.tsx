@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import {
-  Loader2, Database, Brain, TrendingUp, AlertTriangle, PackageSearch, BarChart2, Settings2, Download, Filter as FilterIcon, ListFilter, Clock, AlertCircle, ShoppingBag, PackageX, ArrowUpRightSquare, PlusCircle, LineChart, Percent, CalendarDays
+  Loader2, Database, Brain, TrendingUp, AlertTriangle, PackageSearch, BarChart2, Settings2, Download, Filter as FilterIcon, ListFilter, Clock, AlertCircle, ShoppingBag, PackageX, ArrowUpRightSquare, PlusCircle, LineChart
 } from 'lucide-react';
 import { format as formatDateFns, isValid as isDateValid, differenceInDays, isAfter, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -333,23 +333,15 @@ export default function CollectionStockIntelligencePage() {
         avgCoverageDays: 0, 
         criticalSkus: 0, 
         moderateSkus: 0,
-        percentageSoldCollectionDisplay: "N/A",
-        estimatedCollectionSellOutDateDisplay: "N/A",
       };
     }
     const productsWithCoverage = filteredEnhancedProducts.filter(p => p.estimatedCoverageDays !== null && Number.isFinite(p.estimatedCoverageDays) && p.estimatedCoverageDays !== Infinity);
     const totalCoverageDays = productsWithCoverage.reduce((sum, p) => sum + (p.estimatedCoverageDays || 0), 0);
     
-    // Placeholder values for new metrics as actual calculation needs more data
-    const percentageSoldCollectionDisplay = "N/A";
-    const estimatedCollectionSellOutDateDisplay = "N/A";
-
     return {
       avgCoverageDays: productsWithCoverage.length > 0 ? totalCoverageDays / productsWithCoverage.length : 0,
       criticalSkus: filteredEnhancedProducts.filter(p => p.stockRiskStatus === 'Alerta Crítico').length,
       moderateSkus: filteredEnhancedProducts.filter(p => p.stockRiskStatus === 'Risco Moderado').length,
-      percentageSoldCollectionDisplay,
-      estimatedCollectionSellOutDateDisplay,
     };
   }, [filteredEnhancedProducts]);
 
@@ -601,13 +593,11 @@ export default function CollectionStockIntelligencePage() {
                           <Skeleton className="h-8 w-3/4 my-1.5" />
                           <Skeleton className="h-8 w-3/4 my-1.5" />
                           <Skeleton className="h-8 w-3/4 my-1.5" />
-                          <Skeleton className="h-8 w-3/4 my-1.5" />
-                          <Skeleton className="h-8 w-3/4 my-1.5" />
                         </>
                     ): filteredEnhancedProducts.length > 0 ? (
                         <div className="grid grid-cols-1 gap-3">
                             <div className="flex justify-between items-center p-2.5 bg-muted/50 rounded-md">
-                                <span className="font-medium text-sm">Média de Cobertura (Est.Total):</span>
+                                <span className="font-medium text-sm">Média de Cobertura (Est.Total Geral):</span>
                                 <span className="font-bold text-lg text-primary">{backofficeMetrics.avgCoverageDays.toFixed(1)} dias</span>
                             </div>
                             <div className="flex justify-between items-center p-2.5 bg-destructive/10 rounded-md">
@@ -618,20 +608,12 @@ export default function CollectionStockIntelligencePage() {
                                 <span className="font-medium text-sm text-amber-700">SKUs em Risco Moderado (Est.Total):</span>
                                 <span className="font-bold text-lg text-amber-700">{backofficeMetrics.moderateSkus}</span>
                             </div>
-                            <div className="flex justify-between items-center p-2.5 bg-blue-500/10 rounded-md">
-                                <span className="font-medium text-sm text-blue-700 flex items-center"><Percent className="mr-1.5 h-4 w-4"/>% Vendida da Coleção:</span>
-                                <span className="font-bold text-lg text-blue-700">{backofficeMetrics.percentageSoldCollectionDisplay}</span>
-                            </div>
-                            <div className="flex justify-between items-center p-2.5 bg-purple-500/10 rounded-md">
-                                <span className="font-medium text-sm text-purple-700 flex items-center"><CalendarDays className="mr-1.5 h-4 w-4"/>Data Esgotamento Coleção:</span>
-                                <span className="font-bold text-lg text-purple-700">{backofficeMetrics.estimatedCollectionSellOutDateDisplay}</span>
-                            </div>
                         </div>
                     ) : (
                          <p className="text-sm text-muted-foreground">Nenhum produto corresponde aos filtros para exibir métricas de cobertura.</p>
                     )}
                      <p className="text-xs text-muted-foreground pt-3">
-                        As métricas "% vendida da coleção" e "data de esgotamento da coleção" são complexas e requerem dados de "Estoque Inicial da Coleção" por produto (não disponível no upload atual) ou um histórico detalhado de vendas por SKU para serem calculadas com precisão. Atualmente, são exibidas como "N/A".
+                        Métricas mais avançadas como % vendida da coleção e data de esgotamento da coleção são complexas e requerem dados adicionais (ex: Estoque Inicial da Coleção) ou um histórico de vendas detalhado por SKU para serem calculadas com precisão.
                     </p>
                 </CardContent>
             </Card>
@@ -786,4 +768,5 @@ export default function CollectionStockIntelligencePage() {
     </div>
   );
 }
+
 
