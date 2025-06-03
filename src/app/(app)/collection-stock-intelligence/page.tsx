@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import {
-  Loader2, Database, Brain, TrendingUp, AlertTriangle, PackageSearch, BarChart2, Settings2, Download, Filter as FilterIcon, ListFilter, Clock, AlertCircle, ShoppingBag, PackageX, ArrowUpRightSquare, PlusCircle, LineChart
+  Loader2, Database, Brain, TrendingUp, AlertTriangle, PackageSearch, BarChart2, Settings2, Download, Filter as FilterIcon, ListFilter, Clock, AlertCircle, ShoppingBag, PackageX, ArrowUpRightSquare, PlusCircle, LineChart, Percent, CalendarDays
 } from 'lucide-react';
 import { format as formatDateFns, isValid as isDateValid, differenceInDays, isAfter, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -140,16 +140,14 @@ export default function CollectionStockIntelligencePage() {
       const dailyAverageSales = p.sales30d && p.sales30d > 0 ? p.sales30d / 30 : 0;
       const currentStockForCoverage = p.stock || 0; 
       
-      const estimatedCoverageDaysCurrentStock = dailyAverageSales > 0 ? currentStockForCoverage / dailyAverageSales : Infinity;
-      const stockIncludingOpenOrders = currentStockForCoverage + (p.openOrders || 0);
-      const estimatedCoverageDaysWithOpenOrders = dailyAverageSales > 0 ? stockIncludingOpenOrders / dailyAverageSales : Infinity;
+      const estimatedCoverageDays = dailyAverageSales > 0 ? currentStockForCoverage / dailyAverageSales : (currentStockForCoverage > 0 ? Infinity : 0);
 
       const dailyDepletionRate = currentStockForCoverage > 0 && dailyAverageSales > 0 ? (dailyAverageSales / currentStockForCoverage) * 100 : null;
 
       let stockRiskStatusDisplay: StockRiskStatus = 'Estável'; 
       if (dailyAverageSales > 0) {
-          if (estimatedCoverageDaysCurrentStock < 7) stockRiskStatusDisplay = 'Alerta Crítico';
-          else if (estimatedCoverageDaysCurrentStock <= 14) stockRiskStatusDisplay = 'Risco Moderado';
+          if (estimatedCoverageDays < 7) stockRiskStatusDisplay = 'Alerta Crítico';
+          else if (estimatedCoverageDays <= 14) stockRiskStatusDisplay = 'Risco Moderado';
           else stockRiskStatusDisplay = 'Estável';
       } else if (currentStockForCoverage > 0) {
           stockRiskStatusDisplay = 'Estável'; 
@@ -159,6 +157,8 @@ export default function CollectionStockIntelligencePage() {
       
       let priority: 1 | 2 | 3 | undefined;
       let automatedJustification = '';
+      const estimatedCoverageDaysWithOpenOrders = dailyAverageSales > 0 ? (currentStockForCoverage + (p.openOrders || 0)) / dailyAverageSales : (currentStockForCoverage + (p.openOrders || 0) > 0 ? Infinity : 0);
+
 
       if (dailyAverageSales === 0) {
           if (currentStockForCoverage > 0) {
@@ -168,41 +168,41 @@ export default function CollectionStockIntelligencePage() {
               priority = 3;
               automatedJustification = 'Sem Est.Total e sem vendas.';
           }
-      } else { // dailyAverageSales > 0
-          if (estimatedCoverageDaysCurrentStock < 5) { // Current stock very low
+      } else { 
+          if (estimatedCoverageDays < 5) { 
               if ((p.openOrders || 0) === 0 || estimatedCoverageDaysWithOpenOrders < 5) {
                   priority = 1;
-                  automatedJustification = `Ruptura Crítica Est.Total! Cob. atual: ${estimatedCoverageDaysCurrentStock.toFixed(1)}d.`;
+                  automatedJustification = `Ruptura Crítica Est.Total! Cob. atual: ${estimatedCoverageDays.toFixed(1)}d.`;
                   if ((p.openOrders || 0) > 0) {
-                      automatedJustification += ` Mesmo com ${(p.openOrders || 0)} OC, cob. será ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
+                      automatedJustification += ` Mesmo com ${p.openOrders || 0} OC, cob. será ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
                   } else {
                       automatedJustification += ` Sem OCs.`;
                   }
               } else if (estimatedCoverageDaysWithOpenOrders < 10) {
                   priority = 2;
-                  automatedJustification = `Est.Total baixo (${estimatedCoverageDaysCurrentStock.toFixed(1)}d), mas ${(p.openOrders || 0)} OC melhorarão para ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d (Atenção).`;
-              } else { // Open orders will make it stable
+                  automatedJustification = `Est.Total baixo (${estimatedCoverageDays.toFixed(1)}d), mas ${p.openOrders || 0} OC melhorarão para ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d (Atenção).`;
+              } else { 
                   priority = 3;
-                  automatedJustification = `Est.Total baixo (${estimatedCoverageDaysCurrentStock.toFixed(1)}d), mas ${(p.openOrders || 0)} OC estabilizarão para ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
+                  automatedJustification = `Est.Total baixo (${estimatedCoverageDays.toFixed(1)}d), mas ${p.openOrders || 0} OC estabilizarão para ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
               }
-          } else if (estimatedCoverageDaysCurrentStock < 10) { // Current stock moderately low
+          } else if (estimatedCoverageDays < 10) { 
               if ((p.openOrders || 0) === 0 || estimatedCoverageDaysWithOpenOrders < 10) {
                   priority = 2;
-                  automatedJustification = `Risco Alto Est.Total! Cob. atual: ${estimatedCoverageDaysCurrentStock.toFixed(1)}d.`;
+                  automatedJustification = `Risco Alto Est.Total! Cob. atual: ${estimatedCoverageDays.toFixed(1)}d.`;
                   if ((p.openOrders || 0) > 0) {
-                      automatedJustification += ` Com ${(p.openOrders || 0)} OC, cob. será ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
+                      automatedJustification += ` Com ${p.openOrders || 0} OC, cob. será ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
                   } else {
                       automatedJustification += ` Sem OCs.`;
                   }
-              } else { // Open orders will make it stable
+              } else { 
                   priority = 3;
-                  automatedJustification = `Est.Total moderado (${estimatedCoverageDaysCurrentStock.toFixed(1)}d), ${(p.openOrders || 0)} OC estabilizarão para ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
+                  automatedJustification = `Est.Total moderado (${estimatedCoverageDays.toFixed(1)}d), ${p.openOrders || 0} OC estabilizarão para ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
               }
-          } else { // Current stock is stable
+          } else { 
               priority = 3;
-              automatedJustification = `Est.Total estável. Cob. atual: ${estimatedCoverageDaysCurrentStock.toFixed(1)}d.`;
+              automatedJustification = `Est.Total estável. Cob. atual: ${estimatedCoverageDays.toFixed(1)}d.`;
               if ((p.openOrders || 0) > 0) {
-                   automatedJustification += ` (${(p.openOrders || 0)} OC chegando).`;
+                   automatedJustification += ` (${p.openOrders || 0} OC chegando).`;
               }
           }
       }
@@ -214,7 +214,7 @@ export default function CollectionStockIntelligencePage() {
         recommendedReplenishment = Math.max(0, Math.round(neededForTarget));
       }
       
-      const isHighDemandLowCoverage = dailyAverageSales > 5 && (estimatedCoverageDaysCurrentStock !== null && estimatedCoverageDaysCurrentStock < 3);
+      const isHighDemandLowCoverage = dailyAverageSales > 5 && (estimatedCoverageDays !== null && estimatedCoverageDays < 3);
       const isZeroSalesWithStock = dailyAverageSales === 0 && p.stock > 0;
       const isDailySalesExceedsTotalStock = dailyAverageSales > 0 && p.stock < dailyAverageSales;
       
@@ -229,7 +229,7 @@ export default function CollectionStockIntelligencePage() {
       return {
         ...p,
         dailyAverageSales,
-        estimatedCoverageDays: estimatedCoverageDaysCurrentStock, 
+        estimatedCoverageDays: estimatedCoverageDays, 
         dailyDepletionRate,    
         stockRiskStatus: stockRiskStatusDisplay,       
         recommendedReplenishment, 
@@ -266,10 +266,10 @@ export default function CollectionStockIntelligencePage() {
 
   const insights = useMemo(() => {
     return {
-      ruptureUnder7Days: enhancedProducts.filter(p => p.stockRiskStatus === 'Alerta Crítico'), // Based on Est.Total
+      ruptureUnder7Days: enhancedProducts.filter(p => p.stockRiskStatus === 'Alerta Crítico'), 
       stagnantStock: enhancedProducts.filter(p => p.isZeroSalesWithStock),
       fastDepletionRecent: enhancedProducts.filter(p => p.isRecentCollectionFastDepletion),
-      dailySalesExceedsTotalStock: enhancedProducts.filter(p => p.isDailySalesExceedsTotalStock), // Now based on Est.Total
+      dailySalesExceedsTotalStock: enhancedProducts.filter(p => p.isDailySalesExceedsTotalStock), 
     };
   }, [enhancedProducts]);
 
@@ -288,7 +288,7 @@ export default function CollectionStockIntelligencePage() {
 
     const projectionDays = 60;
     const data: ProjectedChartDataPoint[] = [];
-    let currentSimulatedStock = selectedProductForChart.stock || 0; // Use Estoque Total for chart
+    let currentSimulatedStock = selectedProductForChart.stock || 0; 
     const effectiveDailySales = (selectedProductForChart.dailyAverageSales || 0) + (simulationParams.salesAdjustment || 0);
     let ruptureDay: number | null = null;
 
@@ -324,21 +324,32 @@ export default function CollectionStockIntelligencePage() {
   }, [selectedProductForChart, simulationParams]);
 
   const productsForChartSelection = useMemo(() => {
-    // Filter for products with VMD >= 1 for chart selection
     return enhancedProducts.filter(p => (p.dailyAverageSales || 0) >= 1).sort((a,b) => a.name.localeCompare(b.name));
   }, [enhancedProducts]);
 
   const backofficeMetrics = useMemo(() => {
     if (filteredEnhancedProducts.length === 0) {
-      return { avgCoverageDays: 0, criticalSkus: 0, moderateSkus: 0 };
+      return { 
+        avgCoverageDays: 0, 
+        criticalSkus: 0, 
+        moderateSkus: 0,
+        percentageSoldCollectionDisplay: "N/A",
+        estimatedCollectionSellOutDateDisplay: "N/A",
+      };
     }
     const productsWithCoverage = filteredEnhancedProducts.filter(p => p.estimatedCoverageDays !== null && Number.isFinite(p.estimatedCoverageDays) && p.estimatedCoverageDays !== Infinity);
     const totalCoverageDays = productsWithCoverage.reduce((sum, p) => sum + (p.estimatedCoverageDays || 0), 0);
     
+    // Placeholder values for new metrics as actual calculation needs more data
+    const percentageSoldCollectionDisplay = "N/A";
+    const estimatedCollectionSellOutDateDisplay = "N/A";
+
     return {
       avgCoverageDays: productsWithCoverage.length > 0 ? totalCoverageDays / productsWithCoverage.length : 0,
-      criticalSkus: filteredEnhancedProducts.filter(p => p.stockRiskStatus === 'Alerta Crítico').length, // Based on Est.Total risk
-      moderateSkus: filteredEnhancedProducts.filter(p => p.stockRiskStatus === 'Risco Moderado').length, // Based on Est.Total risk
+      criticalSkus: filteredEnhancedProducts.filter(p => p.stockRiskStatus === 'Alerta Crítico').length,
+      moderateSkus: filteredEnhancedProducts.filter(p => p.stockRiskStatus === 'Risco Moderado').length,
+      percentageSoldCollectionDisplay,
+      estimatedCollectionSellOutDateDisplay,
     };
   }, [filteredEnhancedProducts]);
 
@@ -584,33 +595,43 @@ export default function CollectionStockIntelligencePage() {
                     <CardTitle className="flex items-center"><BarChart2 className="mr-2 h-5 w-5 text-primary"/>Visão Geral da Cobertura e Riscos (Est.Total)</CardTitle>
                     <CardDescription>Métricas agregadas sobre a saúde do Estoque Total com base nos filtros atuais.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="space-y-2">
                     {isLoadingPageData && filteredEnhancedProducts.length === 0 ? (
                         <>
-                          <Skeleton className="h-8 w-3/4 my-2" />
-                          <Skeleton className="h-8 w-3/4 my-2" />
-                          <Skeleton className="h-8 w-3/4 my-2" />
+                          <Skeleton className="h-8 w-3/4 my-1.5" />
+                          <Skeleton className="h-8 w-3/4 my-1.5" />
+                          <Skeleton className="h-8 w-3/4 my-1.5" />
+                          <Skeleton className="h-8 w-3/4 my-1.5" />
+                          <Skeleton className="h-8 w-3/4 my-1.5" />
                         </>
                     ): filteredEnhancedProducts.length > 0 ? (
-                        <>
-                            <div className="flex justify-between items-center p-3 bg-muted/50 rounded-md">
-                                <span className="font-medium text-sm">Média de Cobertura (Est.Total Geral):</span>
+                        <div className="grid grid-cols-1 gap-3">
+                            <div className="flex justify-between items-center p-2.5 bg-muted/50 rounded-md">
+                                <span className="font-medium text-sm">Média de Cobertura (Est.Total):</span>
                                 <span className="font-bold text-lg text-primary">{backofficeMetrics.avgCoverageDays.toFixed(1)} dias</span>
                             </div>
-                            <div className="flex justify-between items-center p-3 bg-destructive/10 rounded-md">
+                            <div className="flex justify-between items-center p-2.5 bg-destructive/10 rounded-md">
                                 <span className="font-medium text-sm text-destructive">SKUs em Alerta Crítico (Est.Total):</span>
                                 <span className="font-bold text-lg text-destructive">{backofficeMetrics.criticalSkus}</span>
                             </div>
-                            <div className="flex justify-between items-center p-3 bg-amber-500/10 rounded-md">
+                            <div className="flex justify-between items-center p-2.5 bg-amber-500/10 rounded-md">
                                 <span className="font-medium text-sm text-amber-700">SKUs em Risco Moderado (Est.Total):</span>
                                 <span className="font-bold text-lg text-amber-700">{backofficeMetrics.moderateSkus}</span>
                             </div>
-                        </>
+                            <div className="flex justify-between items-center p-2.5 bg-blue-500/10 rounded-md">
+                                <span className="font-medium text-sm text-blue-700 flex items-center"><Percent className="mr-1.5 h-4 w-4"/>% Vendida da Coleção:</span>
+                                <span className="font-bold text-lg text-blue-700">{backofficeMetrics.percentageSoldCollectionDisplay}</span>
+                            </div>
+                            <div className="flex justify-between items-center p-2.5 bg-purple-500/10 rounded-md">
+                                <span className="font-medium text-sm text-purple-700 flex items-center"><CalendarDays className="mr-1.5 h-4 w-4"/>Data Esgotamento Coleção:</span>
+                                <span className="font-bold text-lg text-purple-700">{backofficeMetrics.estimatedCollectionSellOutDateDisplay}</span>
+                            </div>
+                        </div>
                     ) : (
                          <p className="text-sm text-muted-foreground">Nenhum produto corresponde aos filtros para exibir métricas de cobertura.</p>
                     )}
-                     <p className="text-xs text-muted-foreground pt-2">
-                        Métricas avançadas como "% vendida da coleção" e "data de esgotamento da coleção" estão em desenvolvimento.
+                     <p className="text-xs text-muted-foreground pt-3">
+                        As métricas "% vendida da coleção" e "data de esgotamento da coleção" são complexas e requerem dados de "Estoque Inicial da Coleção" por produto (não disponível no upload atual) ou um histórico detalhado de vendas por SKU para serem calculadas com precisão. Atualmente, são exibidas como "N/A".
                     </p>
                 </CardContent>
             </Card>
