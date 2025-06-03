@@ -21,6 +21,7 @@ import { ptBR } from 'date-fns/locale';
 import * as XLSX from 'xlsx';
 import { predictLogistics, type LogisticsPredictionInput, type LogisticsPredictionOutput } from '@/ai/flows/logistics-predictor-flow';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Skeleton } from '@/components/ui/skeleton';
 
 
 const ALL_COLLECTIONS_VALUE = "_ALL_COLLECTIONS_INTEL_";
@@ -506,3 +507,4 @@ export default function IntelligencePanelPage() {
   );
 }
 
+    
