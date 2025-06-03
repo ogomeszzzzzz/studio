@@ -60,20 +60,41 @@ export interface AggregatedPillow {
   derivation?: string;
   vtexId?: string | number;
   sales30d: number;
-  openOrders: number; // Added openOrders
+  openOrders: number; 
   isCritical?: boolean;
   isUrgent?: boolean;
 }
 
-export type SortCriteria = 'name' | 'stock' | 'fillPercentage' | 'sales30d' | 'openOrders'; // Added openOrders
+export type SortCriteria = 'name' | 'stock' | 'fillPercentage' | 'sales30d' | 'openOrders'; 
 export type SortOrder = 'asc' | 'desc';
 export type StockStatusFilter = 'all' | 'critical' | 'empty' | 'low' | 'medium' | 'good' | 'overstocked';
 
 // For Stock History Chart
 export interface StockHistoryEntry {
   id: string;
-  date: Date; // Will be a JS Date object on the client
+  date: Date; 
   totalStockUnits: number;
   totalSkusWithStock: number;
+}
+
+// For Intelligence Panel AI Flow
+export interface LogisticsPredictionInput {
+  productId: string;
+  productName: string;
+  currentStock: number;
+  sales30d: number;
+  price: number;
+  readyToShipStock: number;
+  regulatorStock: number;
+  openOrders: number;
+}
+
+export interface LogisticsPredictionOutput {
+  productId: string;
+  productName: string;
+  daysToRupture: number; // Can be Infinity if no sales
+  riskStatus: 'Baixo' | 'Médio' | 'Alto' | 'Crítico' | 'N/A';
+  suggestedRestockUnits: number;
+  alerts?: string[];
 }
 

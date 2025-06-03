@@ -9,4 +9,5 @@ config();
 // import '@/ai/flows/product-type-identifier.ts';
 // import '@/ai/flows/product-size-identifier.ts';
 // import '@/ai/flows/collection-gap-analyzer.ts';
+import '@/ai/flows/logistics-predictor-flow.ts';
 
