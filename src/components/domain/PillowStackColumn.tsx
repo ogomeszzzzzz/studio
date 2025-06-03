@@ -3,7 +3,7 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { TrendingUp, AlertCircle, PackageX, Zap, Inbox, Repeat, MinusCircle, PlusCircle, ThumbsUp, AlertOctagon, ShoppingBag, TrendingDown, HelpCircle } from "lucide-react"; // Added TrendingDown
+import { TrendingUp, AlertCircle, PackageX, Zap, Inbox, Repeat, MinusCircle, PlusCircle, ThumbsUp, AlertOctagon, ShoppingBag, TrendingDown, HelpCircle, AlertTriangle } from "lucide-react"; // Added AlertTriangle
 import type { SalesBasedPillowStatus } from "@/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -81,7 +81,7 @@ export function PillowStackColumn({
       statusTooltip = "Produto com estoque, mas sem vendas recentes (30d).";
       break;
     default: // N/A or undefined
-      statusIcon = <HelpCircle className="mr-1 h-3 w-3" />; // Changed from AlertOctagon to HelpCircle for N/A
+      statusIcon = <HelpCircle className="mr-1 h-3 w-3" />;
       statusText = "N/A";
       statusColorClass = "bg-gray-400 text-white";
       statusTooltip = "Status de vendas não aplicável ou dados insuficientes.";
@@ -191,4 +191,3 @@ export function PillowStackColumn({
     </Card>
   );
 }
-
