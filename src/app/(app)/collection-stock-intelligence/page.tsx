@@ -138,7 +138,7 @@ export default function CollectionStockIntelligencePage() {
     const today = new Date();
     const processed: EnhancedProductForStockIntelligence[] = allProducts.map(p => {
       const dailyAverageSales = p.sales30d && p.sales30d > 0 ? p.sales30d / 30 : 0;
-      const currentStockForCoverage = p.stock || 0; // Use Estoque Total
+      const currentStockForCoverage = p.stock || 0; 
       
       const estimatedCoverageDaysCurrentStock = dailyAverageSales > 0 ? currentStockForCoverage / dailyAverageSales : Infinity;
       const stockIncludingOpenOrders = currentStockForCoverage + (p.openOrders || 0);
@@ -168,8 +168,8 @@ export default function CollectionStockIntelligencePage() {
               priority = 3;
               automatedJustification = 'Sem Est.Total e sem vendas.';
           }
-      } else {
-          if (estimatedCoverageDaysCurrentStock < 5) { 
+      } else { // dailyAverageSales > 0
+          if (estimatedCoverageDaysCurrentStock < 5) { // Current stock very low
               if ((p.openOrders || 0) === 0 || estimatedCoverageDaysWithOpenOrders < 5) {
                   priority = 1;
                   automatedJustification = `Ruptura Crítica Est.Total! Cob. atual: ${estimatedCoverageDaysCurrentStock.toFixed(1)}d.`;
@@ -180,12 +180,12 @@ export default function CollectionStockIntelligencePage() {
                   }
               } else if (estimatedCoverageDaysWithOpenOrders < 10) {
                   priority = 2;
-                  automatedJustification = `Est.Total baixo (${estimatedCoverageDaysCurrentStock.toFixed(1)}d). ${(p.openOrders || 0)} OC melhorarão para ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d (Atenção).`;
-              } else { 
+                  automatedJustification = `Est.Total baixo (${estimatedCoverageDaysCurrentStock.toFixed(1)}d), mas ${(p.openOrders || 0)} OC melhorarão para ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d (Atenção).`;
+              } else { // Open orders will make it stable
                   priority = 3;
                   automatedJustification = `Est.Total baixo (${estimatedCoverageDaysCurrentStock.toFixed(1)}d), mas ${(p.openOrders || 0)} OC estabilizarão para ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
               }
-          } else if (estimatedCoverageDaysCurrentStock < 10) { 
+          } else if (estimatedCoverageDaysCurrentStock < 10) { // Current stock moderately low
               if ((p.openOrders || 0) === 0 || estimatedCoverageDaysWithOpenOrders < 10) {
                   priority = 2;
                   automatedJustification = `Risco Alto Est.Total! Cob. atual: ${estimatedCoverageDaysCurrentStock.toFixed(1)}d.`;
@@ -194,11 +194,11 @@ export default function CollectionStockIntelligencePage() {
                   } else {
                       automatedJustification += ` Sem OCs.`;
                   }
-              } else { 
+              } else { // Open orders will make it stable
                   priority = 3;
                   automatedJustification = `Est.Total moderado (${estimatedCoverageDaysCurrentStock.toFixed(1)}d), ${(p.openOrders || 0)} OC estabilizarão para ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
               }
-          } else { 
+          } else { // Current stock is stable
               priority = 3;
               automatedJustification = `Est.Total estável. Cob. atual: ${estimatedCoverageDaysCurrentStock.toFixed(1)}d.`;
               if ((p.openOrders || 0) > 0) {
@@ -266,10 +266,10 @@ export default function CollectionStockIntelligencePage() {
 
   const insights = useMemo(() => {
     return {
-      ruptureUnder7Days: enhancedProducts.filter(p => p.stockRiskStatus === 'Alerta Crítico'),
+      ruptureUnder7Days: enhancedProducts.filter(p => p.stockRiskStatus === 'Alerta Crítico'), // Based on Est.Total
       stagnantStock: enhancedProducts.filter(p => p.isZeroSalesWithStock),
       fastDepletionRecent: enhancedProducts.filter(p => p.isRecentCollectionFastDepletion),
-      dailySalesExceedsTotalStock: enhancedProducts.filter(p => p.isDailySalesExceedsTotalStock),
+      dailySalesExceedsTotalStock: enhancedProducts.filter(p => p.isDailySalesExceedsTotalStock), // Now based on Est.Total
     };
   }, [enhancedProducts]);
 
@@ -288,7 +288,7 @@ export default function CollectionStockIntelligencePage() {
 
     const projectionDays = 60;
     const data: ProjectedChartDataPoint[] = [];
-    let currentSimulatedStock = selectedProductForChart.stock || 0; 
+    let currentSimulatedStock = selectedProductForChart.stock || 0; // Use Estoque Total for chart
     const effectiveDailySales = (selectedProductForChart.dailyAverageSales || 0) + (simulationParams.salesAdjustment || 0);
     let ruptureDay: number | null = null;
 
@@ -324,7 +324,8 @@ export default function CollectionStockIntelligencePage() {
   }, [selectedProductForChart, simulationParams]);
 
   const productsForChartSelection = useMemo(() => {
-    return enhancedProducts.filter(p => (p.dailyAverageSales || 0) > 0 || (p.stock || 0) > 0).sort((a,b) => a.name.localeCompare(b.name));
+    // Filter for products with VMD >= 1 for chart selection
+    return enhancedProducts.filter(p => (p.dailyAverageSales || 0) >= 1).sort((a,b) => a.name.localeCompare(b.name));
   }, [enhancedProducts]);
 
   const backofficeMetrics = useMemo(() => {
@@ -336,8 +337,8 @@ export default function CollectionStockIntelligencePage() {
     
     return {
       avgCoverageDays: productsWithCoverage.length > 0 ? totalCoverageDays / productsWithCoverage.length : 0,
-      criticalSkus: filteredEnhancedProducts.filter(p => p.stockRiskStatus === 'Alerta Crítico').length,
-      moderateSkus: filteredEnhancedProducts.filter(p => p.stockRiskStatus === 'Risco Moderado').length,
+      criticalSkus: filteredEnhancedProducts.filter(p => p.stockRiskStatus === 'Alerta Crítico').length, // Based on Est.Total risk
+      moderateSkus: filteredEnhancedProducts.filter(p => p.stockRiskStatus === 'Risco Moderado').length, // Based on Est.Total risk
     };
   }, [filteredEnhancedProducts]);
 
@@ -354,7 +355,6 @@ export default function CollectionStockIntelligencePage() {
         .filter(p => p.priority === 1 || p.priority === 2) 
         .map(p => {
           const targetStockFor15d = (p.dailyAverageSales || 0) * ACTION_LIST_COVERAGE_TARGET_DAYS;
-          
           const replenishmentSuggestion15d = Math.max(0, Math.round(targetStockFor15d - (p.stock || 0) - (p.openOrders || 0)));
           return {
             "ID VTEX": String(p.vtexId ?? ''),
@@ -495,11 +495,11 @@ export default function CollectionStockIntelligencePage() {
                   <LineChart className="mr-2 h-5 w-5 text-primary" />
                   Gráfico de Tendência de Estoque Total e Simulação
                 </CardTitle>
-                <CardDescription>Selecione um produto e simule ajustes para visualizar o impacto no Estoque Total.</CardDescription>
+                <CardDescription>Selecione um produto (com VMD ≥ 1) e simule ajustes para visualizar o impacto no Estoque Total.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <Label htmlFor="productChartSelect">Selecionar Produto para Gráfico</Label>
+                  <Label htmlFor="productChartSelect">Selecionar Produto para Gráfico (VMD ≥ 1)</Label>
                   <Select
                     value={selectedProductForChart?.vtexId ? String(selectedProductForChart.vtexId) : ""}
                     onValueChange={(value) => {
@@ -519,7 +519,7 @@ export default function CollectionStockIntelligencePage() {
                           </SelectItem>
                         ))
                       ) : (
-                        <SelectItem value="" disabled>Nenhum produto com vendas ou estoque para projetar</SelectItem>
+                        <SelectItem value="" disabled>Nenhum produto com VMD ≥ 1 para projetar</SelectItem>
                       )}
                     </SelectContent>
                   </Select>
@@ -575,7 +575,7 @@ export default function CollectionStockIntelligencePage() {
                     </div>
                   </>
                 )}
-                {!selectedProductForChart && <p className="text-sm text-muted-foreground text-center py-4">Selecione um produto acima para visualizar a projeção de Estoque Total.</p>}
+                {!selectedProductForChart && <p className="text-sm text-muted-foreground text-center py-4">Selecione um produto (com VMD ≥ 1) acima para visualizar a projeção de Estoque Total.</p>}
               </CardContent>
             </Card>
 
