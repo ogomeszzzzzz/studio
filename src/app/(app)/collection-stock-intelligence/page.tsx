@@ -138,24 +138,23 @@ export default function CollectionStockIntelligencePage() {
     const today = new Date();
     const processed: EnhancedProductForStockIntelligence[] = allProducts.map(p => {
       const dailyAverageSales = p.sales30d && p.sales30d > 0 ? p.sales30d / 30 : 0;
-      const currentStockForCoverage = p.stock || 0;
-      const openOrders = p.openOrders || 0;
+      const currentStockForCoverage = p.stock || 0; // Use Estoque Total
       
       const estimatedCoverageDaysCurrentStock = dailyAverageSales > 0 ? currentStockForCoverage / dailyAverageSales : Infinity;
-      const stockIncludingOpenOrders = currentStockForCoverage + openOrders;
+      const stockIncludingOpenOrders = currentStockForCoverage + (p.openOrders || 0);
       const estimatedCoverageDaysWithOpenOrders = dailyAverageSales > 0 ? stockIncludingOpenOrders / dailyAverageSales : Infinity;
 
       const dailyDepletionRate = currentStockForCoverage > 0 && dailyAverageSales > 0 ? (dailyAverageSales / currentStockForCoverage) * 100 : null;
 
-      let stockRiskStatusDisplay: StockRiskStatus = 'Estável'; // For display in table/filters
+      let stockRiskStatusDisplay: StockRiskStatus = 'Estável'; 
       if (dailyAverageSales > 0) {
           if (estimatedCoverageDaysCurrentStock < 7) stockRiskStatusDisplay = 'Alerta Crítico';
           else if (estimatedCoverageDaysCurrentStock <= 14) stockRiskStatusDisplay = 'Risco Moderado';
           else stockRiskStatusDisplay = 'Estável';
       } else if (currentStockForCoverage > 0) {
-          stockRiskStatusDisplay = 'Estável'; // Stagnant
+          stockRiskStatusDisplay = 'Estável'; 
       } else {
-          stockRiskStatusDisplay = 'N/A'; // No stock, no sales
+          stockRiskStatusDisplay = 'N/A'; 
       }
       
       let priority: 1 | 2 | 3 | undefined;
@@ -167,43 +166,43 @@ export default function CollectionStockIntelligencePage() {
               automatedJustification = 'Est.Total parado (sem vendas recentes).';
           } else {
               priority = 3;
-              automatedJustification = 'Sem estoque e sem vendas.';
+              automatedJustification = 'Sem Est.Total e sem vendas.';
           }
       } else {
-          if (estimatedCoverageDaysCurrentStock < 5) { // Current stock critically low
-              if (openOrders === 0 || estimatedCoverageDaysWithOpenOrders < 5) {
+          if (estimatedCoverageDaysCurrentStock < 5) { 
+              if ((p.openOrders || 0) === 0 || estimatedCoverageDaysWithOpenOrders < 5) {
                   priority = 1;
                   automatedJustification = `Ruptura Crítica Est.Total! Cob. atual: ${estimatedCoverageDaysCurrentStock.toFixed(1)}d.`;
-                  if (openOrders > 0) {
-                      automatedJustification += ` Mesmo com ${openOrders} OC, cob. será ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
+                  if ((p.openOrders || 0) > 0) {
+                      automatedJustification += ` Mesmo com ${(p.openOrders || 0)} OC, cob. será ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
                   } else {
                       automatedJustification += ` Sem OCs.`;
                   }
               } else if (estimatedCoverageDaysWithOpenOrders < 10) {
                   priority = 2;
-                  automatedJustification = `Est.Total baixo (${estimatedCoverageDaysCurrentStock.toFixed(1)}d). ${openOrders} OC melhorarão para ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d (Atenção).`;
+                  automatedJustification = `Est.Total baixo (${estimatedCoverageDaysCurrentStock.toFixed(1)}d). ${(p.openOrders || 0)} OC melhorarão para ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d (Atenção).`;
               } else { 
                   priority = 3;
-                  automatedJustification = `Est.Total baixo (${estimatedCoverageDaysCurrentStock.toFixed(1)}d), mas ${openOrders} OC estabilizarão para ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
+                  automatedJustification = `Est.Total baixo (${estimatedCoverageDaysCurrentStock.toFixed(1)}d), mas ${(p.openOrders || 0)} OC estabilizarão para ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
               }
-          } else if (estimatedCoverageDaysCurrentStock < 10) { // Current stock at moderate risk
-              if (openOrders === 0 || estimatedCoverageDaysWithOpenOrders < 10) {
+          } else if (estimatedCoverageDaysCurrentStock < 10) { 
+              if ((p.openOrders || 0) === 0 || estimatedCoverageDaysWithOpenOrders < 10) {
                   priority = 2;
                   automatedJustification = `Risco Alto Est.Total! Cob. atual: ${estimatedCoverageDaysCurrentStock.toFixed(1)}d.`;
-                  if (openOrders > 0) {
-                      automatedJustification += ` Com ${openOrders} OC, cob. será ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
+                  if ((p.openOrders || 0) > 0) {
+                      automatedJustification += ` Com ${(p.openOrders || 0)} OC, cob. será ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
                   } else {
                       automatedJustification += ` Sem OCs.`;
                   }
               } else { 
                   priority = 3;
-                  automatedJustification = `Est.Total moderado (${estimatedCoverageDaysCurrentStock.toFixed(1)}d), ${openOrders} OC estabilizarão para ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
+                  automatedJustification = `Est.Total moderado (${estimatedCoverageDaysCurrentStock.toFixed(1)}d), ${(p.openOrders || 0)} OC estabilizarão para ${estimatedCoverageDaysWithOpenOrders.toFixed(1)}d.`;
               }
-          } else { // Current stock is stable
+          } else { 
               priority = 3;
               automatedJustification = `Est.Total estável. Cob. atual: ${estimatedCoverageDaysCurrentStock.toFixed(1)}d.`;
-              if (openOrders > 0) {
-                   automatedJustification += ` (${openOrders} OC chegando).`;
+              if ((p.openOrders || 0) > 0) {
+                   automatedJustification += ` (${(p.openOrders || 0)} OC chegando).`;
               }
           }
       }
@@ -211,12 +210,13 @@ export default function CollectionStockIntelligencePage() {
       let recommendedReplenishment = 0;
       if (dailyAverageSales > 0) {
         const targetStock = dailyAverageSales * COVERAGE_TARGET_DAYS_REPLENISHMENT;
-        const neededForTarget = targetStock - (currentStockForCoverage + openOrders); // Consider OCs for replenishment calc
+        const neededForTarget = targetStock - (currentStockForCoverage + (p.openOrders || 0));
         recommendedReplenishment = Math.max(0, Math.round(neededForTarget));
       }
       
       const isHighDemandLowCoverage = dailyAverageSales > 5 && (estimatedCoverageDaysCurrentStock !== null && estimatedCoverageDaysCurrentStock < 3);
       const isZeroSalesWithStock = dailyAverageSales === 0 && p.stock > 0;
+      const isDailySalesExceedsTotalStock = dailyAverageSales > 0 && p.stock < dailyAverageSales;
       
       let isRecentCollectionFastDepletion = false;
       if (p.collectionStartDate && isDateValid(p.collectionStartDate)) {
@@ -237,7 +237,8 @@ export default function CollectionStockIntelligencePage() {
         isZeroSalesWithStock,
         isRecentCollectionFastDepletion,
         priority,
-        automatedJustification
+        automatedJustification,
+        isDailySalesExceedsTotalStock
       };
     });
     setEnhancedProducts(processed);
@@ -265,10 +266,10 @@ export default function CollectionStockIntelligencePage() {
 
   const insights = useMemo(() => {
     return {
-      ruptureUnder7Days: enhancedProducts.filter(p => p.stockRiskStatus === 'Alerta Crítico'), // Based on current stock
+      ruptureUnder7Days: enhancedProducts.filter(p => p.stockRiskStatus === 'Alerta Crítico'),
       stagnantStock: enhancedProducts.filter(p => p.isZeroSalesWithStock),
       fastDepletionRecent: enhancedProducts.filter(p => p.isRecentCollectionFastDepletion),
-      dailySalesExceedsPE: enhancedProducts.filter(p => p.dailyAverageSales > 0 && p.readyToShip < p.dailyAverageSales),
+      dailySalesExceedsTotalStock: enhancedProducts.filter(p => p.isDailySalesExceedsTotalStock),
     };
   }, [enhancedProducts]);
 
@@ -287,7 +288,7 @@ export default function CollectionStockIntelligencePage() {
 
     const projectionDays = 60;
     const data: ProjectedChartDataPoint[] = [];
-    let currentSimulatedStock = selectedProductForChart.stock || 0; // Use Estoque Total for chart base
+    let currentSimulatedStock = selectedProductForChart.stock || 0; 
     const effectiveDailySales = (selectedProductForChart.dailyAverageSales || 0) + (simulationParams.salesAdjustment || 0);
     let ruptureDay: number | null = null;
 
@@ -304,7 +305,7 @@ export default function CollectionStockIntelligencePage() {
         hasReplenishment = true;
       }
       
-      dayStock = Math.max(0, dayStock); // Stock cannot go below zero
+      dayStock = Math.max(0, dayStock); 
       currentSimulatedStock = dayStock;
 
       data.push({
@@ -350,10 +351,10 @@ export default function CollectionStockIntelligencePage() {
     toast({ title: "Exportando...", description: "Gerando sugestão de reposição." });
 
     const dataToExport = actionListProducts
-        .filter(p => p.priority === 1 || p.priority === 2) // Export P1 and P2
+        .filter(p => p.priority === 1 || p.priority === 2) 
         .map(p => {
           const targetStockFor15d = (p.dailyAverageSales || 0) * ACTION_LIST_COVERAGE_TARGET_DAYS;
-          // Suggestion considers current stock and open orders for 15d target
+          
           const replenishmentSuggestion15d = Math.max(0, Math.round(targetStockFor15d - (p.stock || 0) - (p.openOrders || 0)));
           return {
             "ID VTEX": String(p.vtexId ?? ''),
@@ -465,14 +466,14 @@ export default function CollectionStockIntelligencePage() {
                   </ul>
                 </div>
               )}
-              {insights.dailySalesExceedsPE.length > 0 && (
+              {insights.dailySalesExceedsTotalStock.length > 0 && (
                 <div className="p-3 border border-orange-500 rounded-md bg-orange-500/5">
-                  <h4 className="font-semibold text-orange-600 flex items-center"><AlertCircle className="mr-2 h-5 w-5"/>Alerta de Fonte Potencial: Venda Diária &gt; Pronta Entrega: {insights.dailySalesExceedsPE.length} SKU(s)</h4>
+                  <h4 className="font-semibold text-orange-600 flex items-center"><AlertCircle className="mr-2 h-5 w-5"/>Alerta Crítico: Venda Diária &gt; Estoque Total: {insights.dailySalesExceedsTotalStock.length} SKU(s)</h4>
                   <ul className="list-disc list-inside text-sm text-orange-500/90 max-h-32 overflow-y-auto">
-                    {insights.dailySalesExceedsPE.slice(0,5).map(p => <li key={String(p.vtexId)}>{p.name} (VMD: {p.dailyAverageSales.toFixed(1)}, PE: {p.readyToShip})</li>)}
-                    {insights.dailySalesExceedsPE.length > 5 && <li>E mais {insights.dailySalesExceedsPE.length - 5}...</li>}
+                    {insights.dailySalesExceedsTotalStock.slice(0,5).map(p => <li key={String(p.vtexId)}>{p.name} (VMD: {p.dailyAverageSales.toFixed(1)}, Est.Total: {p.stock})</li>)}
+                    {insights.dailySalesExceedsTotalStock.length > 5 && <li>E mais {insights.dailySalesExceedsTotalStock.length - 5}...</li>}
                   </ul>
-                   <p className="text-xs text-orange-500/80 mt-1">Indica que a demanda diária pode ser maior que o estoque disponível para reposição imediata via "Pronta Entrega". Verifique o Estoque Total para risco de ruptura.</p>
+                   <p className="text-xs text-orange-500/80 mt-1">Indica que a demanda diária é maior que o Estoque Total disponível, levando a uma ruptura iminente se não houver reposição.</p>
                 </div>
               )}
               {insights.fastDepletionRecent.length > 0 && (
