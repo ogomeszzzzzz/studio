@@ -160,31 +160,32 @@ export default function CollectionStockIntelligencePage() {
 
       let calculatedPriority: 1 | 2 | 3 | undefined;
       let automatedJustification = '';
+      const openOrdersQty = p.openOrders || 0;
 
-      const stockPlusOC = currentStockForCoverage + (p.openOrders || 0);
+      const stockPlusOC = currentStockForCoverage + openOrdersQty;
       const estimatedCoverageDaysWithOpenOrders = dailyAverageSales > 0 ? stockPlusOC / dailyAverageSales : (stockPlusOC > 0 ? Infinity : 0);
 
       // Priority 1: Critical Out of Stock for Selling Items
       if ((p.stock === 0 || p.stock < dailyAverageSales) && dailyAverageSales >= MIN_VMD_FOR_CRITICAL_PRIORITY) {
           if (estimatedCoverageDaysWithOpenOrders < CRITICAL_DAYS_OF_STOCK_WITH_OC) {
               calculatedPriority = 1;
-              automatedJustification = `Est. ZERADO/BAIXO com Venda ALTA (VMD: ${dailyAverageSales.toFixed(1)}). ${p.openOrders || 0} Ped.Aberto(s) insuficientes (<${CRITICAL_DAYS_OF_STOCK_WITH_OC}d cob). URGENTE!`;
+              automatedJustification = `Est. ZERADO/BAIXO com Venda ALTA (VMD: ${dailyAverageSales.toFixed(1)}). ${openOrdersQty} Peças em Aberto insuficientes (<${CRITICAL_DAYS_OF_STOCK_WITH_OC}d cob). URGENTE!`;
           } else {
               calculatedPriority = 2; // Downgraded from P1 due to open orders
-              automatedJustification = `Est. ZERADO/BAIXO com Venda ALTA (VMD: ${dailyAverageSales.toFixed(1)}), mas ${p.openOrders || 0} Ped.Aberto(s) devem cobrir ~${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d. Atenção.`;
+              automatedJustification = `Est. ZERADO/BAIXO com Venda ALTA (VMD: ${dailyAverageSales.toFixed(1)}), mas ${openOrdersQty} Peças em Aberto devem cobrir ~${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d. Atenção.`;
           }
       }
       // Priority 2: Low Stock for Selling Items
       else if (estimatedCoverageDays < LOW_DAYS_OF_STOCK_THRESHOLD && dailyAverageSales > 0) {
           if (estimatedCoverageDaysWithOpenOrders < LOW_DAYS_OF_STOCK_THRESHOLD) {
               calculatedPriority = 2;
-              automatedJustification = `Risco ALTO Est.Total! Cob. atual: ${estimatedCoverageDays.toFixed(1)}d (VMD: ${dailyAverageSales.toFixed(1)}). ${p.openOrders || 0} Ped.Aberto(s) insuficientes p/ cobrir ${LOW_DAYS_OF_STOCK_THRESHOLD}d (cob. c/ Ped.Aberto: ${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d). Atenção!`;
+              automatedJustification = `Risco ALTO Est.Total! Cob. atual: ${estimatedCoverageDays.toFixed(1)}d (VMD: ${dailyAverageSales.toFixed(1)}). ${openOrdersQty} Peças em Aberto insuficientes p/ cobrir ${LOW_DAYS_OF_STOCK_THRESHOLD}d (cob. c/ Ped.Aberto: ${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d). Atenção!`;
           } else if (estimatedCoverageDaysWithOpenOrders < MODERATE_DAYS_OF_STOCK_THRESHOLD) {
               calculatedPriority = 2; // Still moderate risk even with open orders
-              automatedJustification = `Risco Moderado Est.Total. Cob. atual: ${estimatedCoverageDays.toFixed(1)}d. ${p.openOrders || 0} Ped.Aberto(s) melhorarão p/ ${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d.`;
+              automatedJustification = `Risco Moderado Est.Total. Cob. atual: ${estimatedCoverageDays.toFixed(1)}d. ${openOrdersQty} Peças em Aberto melhorarão p/ ${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d.`;
           } else { // Open orders make it stable
               calculatedPriority = 3;
-              automatedJustification = `Est.Total Baixo (${estimatedCoverageDays.toFixed(1)}d), mas ${p.openOrders || 0} Ped.Aberto(s) estabilizarão p/ ${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d. Monitorar.`;
+              automatedJustification = `Est.Total Baixo (${estimatedCoverageDays.toFixed(1)}d), mas ${openOrdersQty} Peças em Aberto estabilizarão p/ ${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d. Monitorar.`;
           }
       }
       // Priority 3: Moderate stock or stable or no sales
@@ -194,14 +195,14 @@ export default function CollectionStockIntelligencePage() {
               automatedJustification = currentStockForCoverage > 0 ? 'Est.Total parado (sem vendas recentes).' : 'Sem Est.Total e sem vendas.';
           } else if (estimatedCoverageDays < MODERATE_DAYS_OF_STOCK_THRESHOLD) {
               if (estimatedCoverageDaysWithOpenOrders < MODERATE_DAYS_OF_STOCK_THRESHOLD) {
-                  automatedJustification = `Risco Moderado Est.Total (Cob: ${estimatedCoverageDays.toFixed(1)}d). ${p.openOrders || 0} Ped.Aberto(s) manterão em risco moderado (Cob c/ Ped.Aberto: ${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d).`;
+                  automatedJustification = `Risco Moderado Est.Total (Cob: ${estimatedCoverageDays.toFixed(1)}d). ${openOrdersQty} Peças em Aberto manterão em risco moderado (Cob c/ Ped.Aberto: ${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d).`;
               } else {
-                  automatedJustification = `Est.Total Moderado (${estimatedCoverageDays.toFixed(1)}d), ${p.openOrders || 0} Ped.Aberto(s) estabilizarão. Monitorar.`;
+                  automatedJustification = `Est.Total Moderado (${estimatedCoverageDays.toFixed(1)}d), ${openOrdersQty} Peças em Aberto estabilizarão. Monitorar.`;
               }
           } else { // Stable
               automatedJustification = `Est.Total Estável. Cob. atual: ${estimatedCoverageDays.toFixed(1)}d.`;
-              if ((p.openOrders || 0) > 0) {
-                 automatedJustification += ` (${p.openOrders} Ped.Aberto chegando).`;
+              if (openOrdersQty > 0) {
+                 automatedJustification += ` (${openOrdersQty} Peças em Aberto chegando).`;
               }
           }
       }
@@ -209,7 +210,7 @@ export default function CollectionStockIntelligencePage() {
       let recommendedReplenishment = 0;
       if (dailyAverageSales > 0) {
         const targetStock = dailyAverageSales * COVERAGE_TARGET_DAYS_REPLENISHMENT;
-        const neededForTarget = targetStock - (currentStockForCoverage + (p.openOrders || 0));
+        const neededForTarget = targetStock - (currentStockForCoverage + openOrdersQty);
         recommendedReplenishment = Math.max(0, Math.round(neededForTarget));
       }
 
@@ -771,3 +772,4 @@ export default function CollectionStockIntelligencePage() {
     </div>
   );
 }
+
