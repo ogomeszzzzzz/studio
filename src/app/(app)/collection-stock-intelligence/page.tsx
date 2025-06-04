@@ -27,8 +27,15 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 const ALL_COLLECTIONS_VALUE = "_ALL_COLLECTIONS_";
 const ALL_RISK_STATUS_VALUE = "_ALL_RISK_STATUS_";
-const COVERAGE_TARGET_DAYS_REPLENISHMENT = 21;
-const ACTION_LIST_COVERAGE_TARGET_DAYS = 15;
+const COVERAGE_TARGET_DAYS_REPLENISHMENT = 21; // For replenishment suggestion column
+const ACTION_LIST_COVERAGE_TARGET_DAYS = 15; // For export suggestion
+
+// Constants for Prioritization Logic
+const MIN_VMD_FOR_CRITICAL_PRIORITY = 1.0;
+const CRITICAL_DAYS_OF_STOCK_WITH_OC = 3; // If stock+OC covers less than this for critical items, it's P1
+const LOW_DAYS_OF_STOCK_THRESHOLD = 7;    // General threshold for "low stock" status
+const MODERATE_DAYS_OF_STOCK_THRESHOLD = 14; // If OCs push coverage above this, it might not be P1/P2 anymore
+
 
 const productFromFirestore = (data: any): Product => {
   return {
@@ -142,70 +149,78 @@ export default function CollectionStockIntelligencePage() {
       const estimatedCoverageDays = dailyAverageSales > 0 ? currentStockForCoverage / dailyAverageSales : (currentStockForCoverage > 0 ? Infinity : 0);
       const dailyDepletionRate = currentStockForCoverage > 0 && dailyAverageSales > 0 ? (dailyAverageSales / currentStockForCoverage) * 100 : null;
 
-      let stockRiskStatusDisplay: StockRiskStatus = 'Estável';
+      let stockRiskStatusDisplay: StockRiskStatus = 'Estável'; // For main table display based on current stock
       if (dailyAverageSales > 0) {
           if (estimatedCoverageDays < 7) stockRiskStatusDisplay = 'Alerta Crítico';
           else if (estimatedCoverageDays <= 14) stockRiskStatusDisplay = 'Risco Moderado';
           else stockRiskStatusDisplay = 'Estável';
       } else if (currentStockForCoverage > 0) {
-          stockRiskStatusDisplay = 'Estável';
+          stockRiskStatusDisplay = 'Estável'; // Has stock, no sales
       } else {
-          stockRiskStatusDisplay = 'N/A';
+          stockRiskStatusDisplay = 'N/A'; // No stock, no sales
       }
 
-      const MIN_VMD_FOR_CRITICAL_PRIORITY = 1.0;
-      const CRITICAL_DAYS_OF_STOCK_WITH_OC = 3;
-      const LOW_DAYS_OF_STOCK_THRESHOLD = 7;
-      const MODERATE_DAYS_OF_STOCK_THRESHOLD = 14;
-
-      let calculatedPriority: 1 | 2 | 3 | undefined;
+      // Refined Priority Logic for Action List
+      let calculatedPriority: 1 | 2 | 3;
       let automatedJustification = '';
       const openOrdersQty = p.openOrders || 0;
-
       const stockPlusOC = currentStockForCoverage + openOrdersQty;
       const estimatedCoverageDaysWithOpenOrders = dailyAverageSales > 0 ? stockPlusOC / dailyAverageSales : (stockPlusOC > 0 ? Infinity : 0);
 
-      // Priority 1: Critical Out of Stock for Selling Items
+      // Determine Priority
       if ((p.stock === 0 || p.stock < dailyAverageSales) && dailyAverageSales >= MIN_VMD_FOR_CRITICAL_PRIORITY) {
-          if (estimatedCoverageDaysWithOpenOrders < CRITICAL_DAYS_OF_STOCK_WITH_OC) {
-              calculatedPriority = 1;
-              automatedJustification = `Est. ZERADO/BAIXO com Venda ALTA (VMD: ${dailyAverageSales.toFixed(1)}). ${openOrdersQty} Peças em Aberto insuficientes (<${CRITICAL_DAYS_OF_STOCK_WITH_OC}d cob). URGENTE!`;
-          } else {
-              calculatedPriority = 2; // Downgraded from P1 due to open orders
-              automatedJustification = `Est. ZERADO/BAIXO com Venda ALTA (VMD: ${dailyAverageSales.toFixed(1)}), mas ${openOrdersQty} Peças em Aberto devem cobrir ~${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d. Atenção.`;
-          }
-      }
-      // Priority 2: Low Stock for Selling Items
-      else if (estimatedCoverageDays < LOW_DAYS_OF_STOCK_THRESHOLD && dailyAverageSales > 0) {
-          if (estimatedCoverageDaysWithOpenOrders < LOW_DAYS_OF_STOCK_THRESHOLD) {
-              calculatedPriority = 2;
-              automatedJustification = `Risco ALTO Est.Total! Cob. atual: ${estimatedCoverageDays.toFixed(1)}d (VMD: ${dailyAverageSales.toFixed(1)}). ${openOrdersQty} Peças em Aberto insuficientes p/ cobrir ${LOW_DAYS_OF_STOCK_THRESHOLD}d (cob. c/ Ped.Aberto: ${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d). Atenção!`;
-          } else if (estimatedCoverageDaysWithOpenOrders < MODERATE_DAYS_OF_STOCK_THRESHOLD) {
-              calculatedPriority = 2; // Still moderate risk even with open orders
-              automatedJustification = `Risco Moderado Est.Total. Cob. atual: ${estimatedCoverageDays.toFixed(1)}d. ${openOrdersQty} Peças em Aberto melhorarão p/ ${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d.`;
-          } else { // Open orders make it stable
-              calculatedPriority = 3;
-              automatedJustification = `Est.Total Baixo (${estimatedCoverageDays.toFixed(1)}d), mas ${openOrdersQty} Peças em Aberto estabilizarão p/ ${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d. Monitorar.`;
-          }
-      }
-      // Priority 3: Moderate stock or stable or no sales
-      else {
+        if (estimatedCoverageDaysWithOpenOrders < CRITICAL_DAYS_OF_STOCK_WITH_OC) {
+          calculatedPriority = 1;
+        } else if (estimatedCoverageDaysWithOpenOrders < MODERATE_DAYS_OF_STOCK_THRESHOLD) {
+          calculatedPriority = 2;
+        } else {
           calculatedPriority = 3;
-          if (dailyAverageSales === 0) {
-              automatedJustification = currentStockForCoverage > 0 ? 'Est.Total parado (sem vendas recentes).' : 'Sem Est.Total e sem vendas.';
-          } else if (estimatedCoverageDays < MODERATE_DAYS_OF_STOCK_THRESHOLD) {
-              if (estimatedCoverageDaysWithOpenOrders < MODERATE_DAYS_OF_STOCK_THRESHOLD) {
-                  automatedJustification = `Risco Moderado Est.Total (Cob: ${estimatedCoverageDays.toFixed(1)}d). ${openOrdersQty} Peças em Aberto manterão em risco moderado (Cob c/ Ped.Aberto: ${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d).`;
-              } else {
-                  automatedJustification = `Est.Total Moderado (${estimatedCoverageDays.toFixed(1)}d), ${openOrdersQty} Peças em Aberto estabilizarão. Monitorar.`;
-              }
-          } else { // Stable
-              automatedJustification = `Est.Total Estável. Cob. atual: ${estimatedCoverageDays.toFixed(1)}d.`;
-              if (openOrdersQty > 0) {
-                 automatedJustification += ` (${openOrdersQty} Peças em Aberto chegando).`;
-              }
-          }
+        }
+      } else if (estimatedCoverageDays < LOW_DAYS_OF_STOCK_THRESHOLD && dailyAverageSales > 0) {
+        if (estimatedCoverageDaysWithOpenOrders < MODERATE_DAYS_OF_STOCK_THRESHOLD) {
+          calculatedPriority = 2;
+        } else {
+          calculatedPriority = 3;
+        }
+      } else {
+        calculatedPriority = 3;
       }
+
+      // Generate Justification based on final priority and conditions
+      if (calculatedPriority === 1) {
+        if (openOrdersQty === 0) {
+          automatedJustification = `Est. ZERADO/BAIXO, Venda ALTA (VMD ${dailyAverageSales.toFixed(1)}). Sem Ped.Aberto. AÇÃO IMEDIATA!`;
+        } else {
+          automatedJustification = `Est. ZERADO/BAIXO, Venda ALTA (VMD ${dailyAverageSales.toFixed(1)}). ${openOrdersQty} Peças em Aberto INSUFICIENTES (<${CRITICAL_DAYS_OF_STOCK_WITH_OC}d cob). AÇÃO IMEDIATA!`;
+        }
+      } else if (calculatedPriority === 2) {
+        if ((p.stock === 0 || p.stock < dailyAverageSales) && dailyAverageSales >= MIN_VMD_FOR_CRITICAL_PRIORITY) { // Downgraded P1
+           automatedJustification = `Est. ZERADO/BAIXO, Venda ALTA (VMD ${dailyAverageSales.toFixed(1)}). ${openOrdersQty} Peças em Aberto elevam cob. para ~${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d. ATENÇÃO!`;
+        } else { // Initially low stock, OCs don't make it fully stable
+            if (openOrdersQty === 0) {
+                automatedJustification = `RISCO ALTO! Estoque baixo (${estimatedCoverageDays.toFixed(1)}d cob.), Venda (VMD ${dailyAverageSales.toFixed(1)}). Sem Ped.Aberto. ATENÇÃO!`;
+            } else {
+                 if (estimatedCoverageDaysWithOpenOrders < LOW_DAYS_OF_STOCK_THRESHOLD) {
+                    automatedJustification = `RISCO ALTO! Est. baixo (${estimatedCoverageDays.toFixed(1)}d). ${openOrdersQty} Peças em Aberto mantém cob. BAIXA (~${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d). ATENÇÃO!`;
+                 } else {
+                    automatedJustification = `RISCO! Est. baixo (${estimatedCoverageDays.toFixed(1)}d). ${openOrdersQty} Peças em Aberto elevam cob. para ~${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d (ideal >${MODERATE_DAYS_OF_STOCK_THRESHOLD}d). ATENÇÃO!`;
+                 }
+            }
+        }
+      } else { // Priority 3
+        if (dailyAverageSales === 0) {
+          automatedJustification = currentStockForCoverage > 0 ? `Est. PARADO (sem vendas recentes). Avaliar.` : 'Sem Estoque e Sem Vendas.';
+        } else if (((p.stock === 0 || p.stock < dailyAverageSales) && dailyAverageSales >= MIN_VMD_FOR_CRITICAL_PRIORITY) && estimatedCoverageDaysWithOpenOrders >= MODERATE_DAYS_OF_STOCK_THRESHOLD) {
+            // Downgraded P1 that became stable due to OCs
+            automatedJustification = `Venda ALTA (VMD ${dailyAverageSales.toFixed(1)}), mas ${openOrdersQty} Peças em Aberto devem ESTABILIZAR (~${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d cob.). Monitorar.`;
+        } else if ((estimatedCoverageDays < LOW_DAYS_OF_STOCK_THRESHOLD && dailyAverageSales > 0) && estimatedCoverageDaysWithOpenOrders >= MODERATE_DAYS_OF_STOCK_THRESHOLD) {
+            // Was low stock, but OCs made it stable
+            automatedJustification = `Est. baixo (${estimatedCoverageDays.toFixed(1)}d), mas ${openOrdersQty} Peças em Aberto devem ESTABILIZAR (~${estimatedCoverageDaysWithOpenOrders.toFixed(0)}d cob.). Monitorar.`;
+        } else { // Generally stable or already moderate
+            automatedJustification = `Est. ESTÁVEL/MODERADO (${estimatedCoverageDays.toFixed(1)}d cob.). ${openOrdersQty > 0 ? `${openOrdersQty} Peças em Aberto chegando.` : 'Sem Ped.Aberto relevante.'}`;
+        }
+      }
+
 
       let recommendedReplenishment = 0;
       if (dailyAverageSales > 0) {
@@ -231,13 +246,13 @@ export default function CollectionStockIntelligencePage() {
         dailyAverageSales,
         estimatedCoverageDays: estimatedCoverageDays,
         dailyDepletionRate,
-        stockRiskStatus: stockRiskStatusDisplay,
+        stockRiskStatus: stockRiskStatusDisplay, // For general table display
         recommendedReplenishment,
         isHighDemandLowCoverage,
         isZeroSalesWithStock,
         isRecentCollectionFastDepletion,
-        priority: calculatedPriority,
-        automatedJustification,
+        priority: calculatedPriority, // For action list
+        automatedJustification,      // For action list
         isDailySalesExceedsTotalStock
       };
     });
@@ -266,10 +281,10 @@ export default function CollectionStockIntelligencePage() {
 
   const insights = useMemo(() => {
     return {
-      ruptureUnder7Days: enhancedProducts.filter(p => p.stockRiskStatus === 'Alerta Crítico'),
+      ruptureUnder7Days: enhancedProducts.filter(p => p.stockRiskStatus === 'Alerta Crítico'), // Based on current stock
       stagnantStock: enhancedProducts.filter(p => p.isZeroSalesWithStock),
       fastDepletionRecent: enhancedProducts.filter(p => p.isRecentCollectionFastDepletion),
-      dailySalesExceedsTotalStock: enhancedProducts.filter(p => p.isDailySalesExceedsTotalStock),
+      dailySalesExceedsTotalStock: enhancedProducts.filter(p => p.isDailySalesExceedsTotalStock), // Based on current stock
     };
   }, [enhancedProducts]);
 
@@ -344,8 +359,8 @@ export default function CollectionStockIntelligencePage() {
 
     return {
       avgCoverageDays: productsWithCoverage.length > 0 ? totalCoverageDays / productsWithCoverage.length : 0,
-      criticalSkus: filteredEnhancedProducts.filter(p => p.stockRiskStatus === 'Alerta Crítico').length,
-      moderateSkus: filteredEnhancedProducts.filter(p => p.stockRiskStatus === 'Risco Moderado').length,
+      criticalSkus: filteredEnhancedProducts.filter(p => p.stockRiskStatus === 'Alerta Crítico').length, // Based on current stock
+      moderateSkus: filteredEnhancedProducts.filter(p => p.stockRiskStatus === 'Risco Moderado').length, // Based on current stock
     };
   }, [filteredEnhancedProducts]);
 
@@ -359,9 +374,10 @@ export default function CollectionStockIntelligencePage() {
     toast({ title: "Exportando...", description: "Gerando sugestão de reposição." });
 
     const dataToExport = actionListProducts
-        .filter(p => p.priority === 1 || p.priority === 2)
+        .filter(p => p.priority === 1 || p.priority === 2) // Export P1 and P2 priorities
         .map(p => {
           const targetStockFor15d = (p.dailyAverageSales || 0) * ACTION_LIST_COVERAGE_TARGET_DAYS;
+          // Replenishment to reach 15d target for ESTOQUE TOTAL, considering current stock and open orders
           const replenishmentSuggestion15d = Math.max(0, Math.round(targetStockFor15d - (p.stock || 0) - (p.openOrders || 0)));
           return {
             "ID VTEX": String(p.vtexId ?? ''),
@@ -593,7 +609,7 @@ export default function CollectionStockIntelligencePage() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                     {isLoadingPageData && filteredEnhancedProducts.length === 0 ? (
-                        <div className="grid grid-cols-1 gap-3">
+                       <div className="grid grid-cols-1 gap-3">
                           <Skeleton className="h-8 w-3/4 my-1.5" />
                           <Skeleton className="h-8 w-3/4 my-1.5" />
                           <Skeleton className="h-8 w-3/4 my-1.5" />
@@ -616,7 +632,7 @@ export default function CollectionStockIntelligencePage() {
                     ) : (
                          <p className="text-sm text-muted-foreground">Nenhum produto corresponde aos filtros para exibir métricas de cobertura.</p>
                     )}
-                    <p className="text-xs text-muted-foreground pt-2">
+                     <p className="text-xs text-muted-foreground pt-2">
                         Métricas mais avançadas de cobertura da coleção requerem dados adicionais (ex: Estoque Inicial da Coleção, histórico de vendas detalhado) para serem calculadas com precisão.
                     </p>
                 </CardContent>
