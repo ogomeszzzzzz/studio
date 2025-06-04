@@ -54,12 +54,17 @@ export default function UserProfilePage() {
 
 
       const result = await updateUserProfile(currentUser.email, updates);
-      if (result.status === 'success' && result.user) {
+      console.log("Profile update result from server action:", result); // For debugging
+
+      if (result && result.status === 'success' && result.user) {
         toast({ title: "Sucesso", description: "Perfil atualizado!" });
         setCurrentUser(result.user); // Update context with new user data
         setInitialName(result.user.name); // Update initialName after successful save
-      } else {
+      } else if (result && result.message) {
         toast({ title: "Erro ao Atualizar", description: result.message, variant: "destructive" });
+      } else {
+        // Handle cases where result is undefined or doesn't have expected properties
+        toast({ title: "Erro Crítico", description: "Resposta inesperada do servidor ao atualizar perfil.", variant: "destructive" });
       }
     } catch (error) {
       toast({ title: "Erro Crítico", description: (error as Error).message, variant: "destructive" });
