@@ -7,40 +7,31 @@ import type { Product, AggregatedPillow, SortCriteria, SortOrder, StockStatusFil
 import { BedDouble, Loader2, Database, Filter as FilterIcon, AlertTriangle, ShoppingBag, TrendingDown, PackageX, BarChart3, ListFilter, SortAsc, SortDesc, Clock, Zap, Inbox, MinusCircle, PlusCircle, ThumbsUp, AlertOctagon, HelpCircle, PackageSearch, Repeat } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
-import { collection, getDocs, doc, Timestamp, query, getDoc } from 'firebase/firestore';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { format as formatDateFns, isValid as isDateValid } from 'date-fns';
+import { format as formatDateFns } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProducts } from '@/contexts/ProductsContext'; // Import useProducts
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
 
 const PILLOW_PRODUCT_TYPE_EXCEL = "TRAVESSEIRO";
 const PILLOW_NAME_PREFIX = "Travesseiro";
 const PILLOW_BRAND_NAME = "Altenburg";
-const MAX_STOCK_PER_PILLOW_COLUMN = 75; // For visual representation
-const LOW_STOCK_THRESHOLD_PERCENTAGE = 0.25; // For visual representation in column
-const GOOD_STOCK_THRESHOLD_PERCENTAGE = 0.75; // For visual representation in column
+const MAX_STOCK_PER_PILLOW_COLUMN = 75; 
+const LOW_STOCK_THRESHOLD_PERCENTAGE = 0.25; 
+const GOOD_STOCK_THRESHOLD_PERCENTAGE = 0.75; 
 
-// New constants for sales-based analysis
 const PILLOW_TARGET_COVERAGE_DAYS = 30;
 const PILLOW_SALES_BASED_LOW_STOCK_DAYS = 7;
-const PILLOW_SALES_BASED_HIGH_SALES_THRESHOLD = 10; // sales30d units for "Urgent" classification
-const PILLOW_OVERSTOCK_FACTOR = 1.5; // 150% of ideal stock for sales
-const MIN_SIGNIFICANT_DAILY_SALES = 0.2; // Approx 6 sales in 30 days
+const PILLOW_SALES_BASED_HIGH_SALES_THRESHOLD = 10; 
+const PILLOW_OVERSTOCK_FACTOR = 1.5; 
+const MIN_SIGNIFICANT_DAILY_SALES = 0.2; 
 
-
-const productFromFirestore = (data: any): Product => {
-  return {
-    ...data,
-    collectionStartDate: data.collectionStartDate instanceof Timestamp ? data.collectionStartDate.toDate() : null,
-    collectionEndDate: data.collectionEndDate instanceof Timestamp ? data.collectionEndDate.toDate() : null,
-  } as Product;
-};
+// productFromFirestore is no longer needed here
 
 function derivePillowDisplayName(productNameInput: string | undefined): string {
   const productName = productNameInput || "";
@@ -68,66 +59,29 @@ function derivePillowDisplayName(productNameInput: string | undefined): string {
 
 
 export default function PillowStockPage() {
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const { 
+    products: allProducts, 
+    lastDataUpdateTimestamp, 
+    isLoadingProducts: isLoadingFirestore, 
+    productsError,
+    refetchProducts
+  } = useProducts();
+  
   const [aggregatedPillowStockState, setAggregatedPillowStockState] = useState<AggregatedPillow[]>([]);
-  const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
   const { currentUser, isLoading: isAuthLoading } = useAuth();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
-  const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
 
   const [sortCriteria, setSortCriteria] = useState<SortCriteria>('salesBasedStatus');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [stockStatusFilter, setStockStatusFilter] = useState<StockStatusFilter>('all');
 
-
   useEffect(() => {
-    if (isAuthLoading) {
-      if (allProducts.length === 0) setIsLoadingFirestore(true);
-      return;
+    if (!isAuthLoading && !isLoadingFirestore && productsError) {
+        toast({ title: "Erro ao Carregar Dados de Produtos", description: productsError, variant: "destructive", duration: Infinity });
     }
-    if (firestoreClientInitializationError || !firestore) {
-      toast({ title: "Erro Crítico de Configuração/Conexão Firebase", description: firestoreClientInitializationError || "Instância do Firestore não disponível.", variant: "destructive", duration: Infinity });
-      setIsLoadingFirestore(false);
-      return;
-    }
-    if (currentUser) {
-      if (allProducts.length === 0) {
-        setIsLoadingFirestore(true);
-        const fetchProducts = async () => {
-          try {
-            const productsQuery = query(collection(firestore, "shared_products"));
-            const snapshot = await getDocs(productsQuery);
-            const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
-            setAllProducts(productsFromDb);
+  }, [productsError, isAuthLoading, isLoadingFirestore, toast]);
 
-            const metadataDocRef = doc(firestore, "app_metadata", "products_metadata");
-            const metadataDocSnap = await getDoc(metadataDocRef);
-            if (metadataDocSnap.exists()) {
-              const data = metadataDocSnap.data();
-              if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
-                setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
-              }
-            }
-            if (productsFromDb.length === 0) {
-               toast({ title: "Sem Dados no Sistema", description: "Nenhum produto encontrado para análise. Carregue uma planilha no Dashboard.", variant: "default" });
-            }
-          } catch (error) {
-            toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar produtos: ${(error as Error).message}`, variant: "destructive" });
-          } finally {
-            setIsLoadingFirestore(false);
-          }
-        };
-        fetchProducts();
-      } else {
-        setIsLoadingFirestore(false);
-      }
-    } else {
-      setIsLoadingFirestore(false);
-      setAllProducts([]);
-      setAggregatedPillowStockState([]);
-    }
-  }, [currentUser, isAuthLoading, allProducts.length, toast]);
 
   const pillowProducts = useMemo(() => {
     return allProducts.filter(p => p.productType?.toUpperCase() === PILLOW_PRODUCT_TYPE_EXCEL.toUpperCase());
@@ -167,30 +121,19 @@ export default function PillowStockPage() {
         const stockVsIdealFactor = idealStockForSales > 0 ? currentStock / idealStockForSales : (currentStock > 0 ? Infinity : 0);
         const replenishmentSuggestionForSales = dailyAverageSales > 0 ? Math.max(0, Math.round(idealStockForSales - currentStock - openOrders)) : 0;
         
-        let salesBasedStatus: SalesBasedPillowStatus = 'N/A'; // Default
+        let salesBasedStatus: SalesBasedPillowStatus = 'N/A'; 
         if (dailyAverageSales < MIN_SIGNIFICANT_DAILY_SALES) {
-            if (currentStock > 0) {
-                salesBasedStatus = 'NoSales';
-            } else { // currentStock === 0
-                salesBasedStatus = 'N/A'; // Zero stock, negligible sales
-            }
-        } else { // dailyAverageSales >= MIN_SIGNIFICANT_DAILY_SALES
-            if (currentStock === 0 && (openOrders || 0) === 0) {
-                salesBasedStatus = 'Critical';
-            } else if (daysOfStock < PILLOW_SALES_BASED_LOW_STOCK_DAYS && (sales30d || 0) > PILLOW_SALES_BASED_HIGH_SALES_THRESHOLD) {
-                 salesBasedStatus = 'Urgent';
-            } else if (daysOfStock < (PILLOW_TARGET_COVERAGE_DAYS / 2)) {
-                 salesBasedStatus = 'Low';
-            } else if (stockVsIdealFactor > PILLOW_OVERSTOCK_FACTOR) {
-                 salesBasedStatus = 'Overstocked';
-            } else {
-                 salesBasedStatus = 'Healthy';
-            }
+            if (currentStock > 0) salesBasedStatus = 'NoSales';
+            else salesBasedStatus = 'N/A'; 
+        } else { 
+            if (currentStock === 0 && (openOrders || 0) === 0) salesBasedStatus = 'Critical';
+            else if (daysOfStock < PILLOW_SALES_BASED_LOW_STOCK_DAYS && (sales30d || 0) > PILLOW_SALES_BASED_HIGH_SALES_THRESHOLD) salesBasedStatus = 'Urgent';
+            else if (daysOfStock < (PILLOW_TARGET_COVERAGE_DAYS / 2)) salesBasedStatus = 'Low';
+            else if (stockVsIdealFactor > PILLOW_OVERSTOCK_FACTOR) salesBasedStatus = 'Overstocked';
+            else salesBasedStatus = 'Healthy';
         }
 
-
         const fillPercentage = (currentStock / MAX_STOCK_PER_PILLOW_COLUMN) * 100;
-        // Original critical/urgent flags (can be kept for visual column emphasis if needed, or removed if salesBasedStatus is primary)
         const isCriticalOriginal = currentStock === 0 && openOrders === 0 && sales30d > 0; 
         const isUrgentOriginal = currentStock > 0 && 
                          (currentStock + openOrders) < (MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE) &&
@@ -224,15 +167,14 @@ export default function PillowStockPage() {
     if (stockStatusFilter !== 'all') {
       derivedPillows = derivedPillows.filter(p => {
         if (stockStatusFilter.startsWith('sales')) {
-            const status = stockStatusFilter.replace('sales', '') as SalesBasedPillowStatus;
+            const status = stockStatusFilter.replace('sales', '') as SalesBasedPillowStatus; // Ensure correct type assertion
             return p.salesBasedStatus?.toLowerCase() === status.toLowerCase();
         }
-        // Original visual filter logic (can be phased out or kept for column-fill based filtering)
         const stock = p.stock;
         const lowThreshold = MAX_STOCK_PER_PILLOW_COLUMN * LOW_STOCK_THRESHOLD_PERCENTAGE;
         const goodThreshold = MAX_STOCK_PER_PILLOW_COLUMN * GOOD_STOCK_THRESHOLD_PERCENTAGE;
         switch (stockStatusFilter) {
-          case 'critical': return !!p.isCritical || !!p.isUrgent; // Original visual critical
+          case 'critical': return !!p.isCritical || !!p.isUrgent; 
           case 'empty': return stock === 0 && p.openOrders === 0;
           case 'low': return stock > 0 && stock < lowThreshold && !p.isCritical && !p.isUrgent;
           case 'medium': return stock >= lowThreshold && stock < goodThreshold && !p.isCritical && !p.isUrgent;
@@ -243,7 +185,6 @@ export default function PillowStockPage() {
       });
     }
 
-    // Enhanced Sort Logic
     derivedPillows.sort((a, b) => {
       let comparison = 0;
       const valA = a[sortCriteria as keyof AggregatedPillow];
@@ -299,10 +240,10 @@ export default function PillowStockPage() {
   }, [aggregatedPillowStockState, pillowProducts]); 
 
   const noPillowsFoundInExcel = useMemo(() => {
-    return allProducts.length > 0 && pillowProducts.length === 0;
-  }, [allProducts, pillowProducts]);
+    return allProducts.length > 0 && pillowProducts.length === 0 && !isLoadingFirestore && !productsError;
+  }, [allProducts, pillowProducts, isLoadingFirestore, productsError]);
 
-  const displayLoader = (isLoadingFirestore || isAuthLoading) && allProducts.length === 0;
+  const displayLoader = (isLoadingFirestore || isAuthLoading) && allProducts.length === 0 && !productsError;
   
   const salesStatusFilterOptions: { value: StockStatusFilter; label: string; icon?: React.ElementType }[] = [
     { value: 'all', label: 'Todos Status (Vendas)' },
@@ -319,6 +260,15 @@ export default function PillowStockPage() {
   if (displayLoader) {
     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Carregando dados...</p></div>;
   }
+  if (productsError && !isLoadingFirestore) {
+    return (
+        <Card className="m-auto mt-10 max-w-lg text-center shadow-xl">
+            <CardHeader><AlertTriangle className="mx-auto h-16 w-16 text-destructive mb-4" /><CardTitle className="text-2xl">Erro ao Carregar Dados de Produtos</CardTitle></CardHeader>
+            <CardContent><p className="text-muted-foreground">{productsError}</p><Button onClick={() => refetchProducts()} className="mt-6">Tentar Novamente</Button></CardContent>
+        </Card>
+    );
+  }
+
 
   return (
     <div className="space-y-6">
@@ -340,14 +290,14 @@ export default function PillowStockPage() {
         </div>
       )}
 
-      {!isLoadingFirestore && !isAuthLoading && allProducts.length === 0 && (
+      {!isLoadingFirestore && !isAuthLoading && allProducts.length === 0 && !productsError && (
         <Card className="shadow-lg text-center py-10"><CardHeader><CardTitle className="flex items-center justify-center text-xl">
               <Database className="mr-2 h-7 w-7 text-primary" /> Sem dados para exibir
             </CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Peça ao administrador para carregar dados no Dashboard.</p>
             </CardContent></Card>
       )}
 
-      {!isLoadingFirestore && !isAuthLoading && allProducts.length > 0 && (
+      {(!isLoadingFirestore || allProducts.length > 0) && !isAuthLoading && !productsError && (
         <TooltipProvider>
         <>
           <Card className="shadow-md border-primary/30 border-l-4">
@@ -456,7 +406,7 @@ export default function PillowStockPage() {
                         pillowName={pillow.name}
                         productDerivation={pillow.derivation}
                         currentStock={pillow.stock}
-                        maxStock={MAX_STOCK_PER_PILLOW_COLUMN} // Visual max
+                        maxStock={MAX_STOCK_PER_PILLOW_COLUMN} 
                         sales30d={pillow.sales30d}
                         openOrders={pillow.openOrders}
                         dailyAverageSales={pillow.dailyAverageSales}
@@ -475,4 +425,3 @@ export default function PillowStockPage() {
     </div>
   );
 }
-

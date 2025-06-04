@@ -25,6 +25,7 @@ import { collection, getDocs, writeBatch, doc, Timestamp, query, setDoc, getDoc,
 import { format as formatDateFns, isValid as isDateValid } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProducts } from '@/contexts/ProductsContext'; // Import useProducts
 
 interface AggregatedCollectionData {
   name: string;
@@ -84,13 +85,7 @@ const productToFirestore = (product: Product): any => {
   return data;
 };
 
-const productFromFirestore = (data: any): Product => {
-  return {
-    ...data,
-    collectionStartDate: data.collectionStartDate instanceof Timestamp ? data.collectionStartDate.toDate() : null,
-    collectionEndDate: data.collectionEndDate instanceof Timestamp ? data.collectionEndDate.toDate() : null,
-  } as Product;
-};
+// productFromFirestore is no longer needed here as data comes from context
 
 const stockHistoryEntryFromFirestore = (id: string, data: any): StockHistoryEntry => {
   return {
@@ -103,16 +98,21 @@ const stockHistoryEntryFromFirestore = (id: string, data: any): StockHistoryEntr
 
 
 export default function DashboardPage() {
-  const [dashboardProducts, setDashboardProducts] = useState<Product[]>([]);
+  // Use products and metadata from ProductsContext
+  const { products: dashboardProducts, 
+          lastDataUpdateTimestamp, 
+          isLoadingProducts: isLoadingFirestore, // Rename for clarity in this component
+          productsError, 
+          refetchProducts 
+        } = useProducts();
+
   const [isProcessingExcel, setIsProcessingExcel] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const { toast } = useToast();
 
   const { currentUser, isLoading: isAuthLoading } = useAuth();
-  const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
   const [isSavingFirestore, setIsSavingFirestore] = useState(false);
-  const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
-
+  
   const [selectedCollection, setSelectedCollection] = useState<string>(ALL_COLLECTIONS_VALUE);
   
   const [stockHistory, setStockHistory] = useState<StockHistoryEntry[]>([]);
@@ -123,127 +123,54 @@ export default function DashboardPage() {
 
  const fetchHistory = useCallback(async () => {
     if (!currentUser || !firestore || firestoreClientInitializationError) {
-      console.log("DashboardPage (fetchHistory): Pre-conditions not met. User:", !!currentUser, "Firestore:", !!firestore, "Error:", firestoreClientInitializationError);
       setIsLoadingHistory(false);
       if (!currentUser || !firestore) setStockHistory([]);
       return;
     }
-
-    console.log("DashboardPage (fetchHistory): Attempting to fetch stock history.");
     setIsLoadingHistory(true);
     try {
       const historyQuery = query(collection(firestore, "stock_history"), orderBy("date", "asc"));
       const historySnapshot = await getDocs(historyQuery);
       const historyFromDb: StockHistoryEntry[] = historySnapshot.docs.map(docSnap => stockHistoryEntryFromFirestore(docSnap.id, docSnap.data()));
       setStockHistory(historyFromDb);
-      console.log("DashboardPage (fetchHistory): Fetched stock history entries:", historyFromDb.length);
     } catch (error) {
       const fullError = error instanceof Error ? error : new Error(String(error));
-      console.error("DashboardPage (fetchHistory): Error fetching stock history:", fullError);
-      toast({ title: "Erro ao Carregar Histórico", description: `Não foi possível buscar o histórico de estoque: ${fullError.message}. Detalhes: ${fullError.stack || 'Sem stack trace'}`, variant: "destructive" });
+      toast({ title: "Erro ao Carregar Histórico", description: `Não foi possível buscar o histórico de estoque: ${fullError.message}.`, variant: "destructive" });
       setStockHistory([]);
     } finally {
-      console.log("DashboardPage (fetchHistory): Fetch attempt finished. Setting isLoadingHistory to false.");
       setIsLoadingHistory(false);
     }
-  }, [currentUser, toast]); // Removed isSavingFirestore as it's handled in the calling useEffect
+  }, [currentUser, toast]);
 
   useEffect(() => {
-    console.log(`DashboardPage (Main useEffect): AuthLoading: ${isAuthLoading}, CurrentUser: ${!!currentUser}, Products loaded: ${dashboardProducts.length}, Saving: ${isSavingFirestore}, Firestore client init error: ${firestoreClientInitializationError}, Firestore instance: ${!!firestore}`);
-    
-    if (isAuthLoading) {
-        console.log("DashboardPage (Main useEffect): Auth context is loading, waiting...");
-        if (dashboardProducts.length === 0) setIsLoadingFirestore(true);
-        if (stockHistory.length === 0) setIsLoadingHistory(true); // Set history loading if auth is pending and history empty
+    if (isAuthLoading) return;
+
+    if (firestoreClientInitializationError || !firestore) {
+      // Error already handled by ProductsContext or global error display
+      setIsLoadingHistory(false);
+      return;
+    }
+    if (productsError) {
+        // If product context has error, don't attempt history fetch
+        setIsLoadingHistory(false);
         return;
     }
 
-    if (firestoreClientInitializationError) {
-      toast({ title: "Erro Crítico de Configuração Firebase", description: `Cliente Firebase não inicializado: ${firestoreClientInitializationError}. Verifique o console e as configurações .env.`, variant: "destructive", duration: Infinity });
-      setIsLoadingFirestore(false);
-      setIsLoadingHistory(false);
-      return;
-    }
-    if (!firestore) {
-      toast({ title: "Erro Crítico de Conexão", description: "Instância do Firestore não está disponível. Verifique a conexão e configuração.", variant: "destructive", duration: Infinity });
-      setIsLoadingFirestore(false);
-      setIsLoadingHistory(false);
-      return;
-    }
-
     if (currentUser) {
-      console.log(`DashboardPage (Main useEffect - User Available): Products loaded: ${dashboardProducts.length}, Saving: ${isSavingFirestore}, History Loaded: ${stockHistory.length}`);
-      // Fetch Products
-      if (dashboardProducts.length === 0 && !isSavingFirestore) {
-        setIsLoadingFirestore(true);
-        const fetchProducts = async () => {
-          console.log("DashboardPage (Main useEffect - Products): Attempting to fetch products from GLOBAL /shared_products.");
-          try {
-            const productsColPath = "shared_products";
-            const productsQuery = query(collection(firestore, productsColPath));
-            const snapshot = await getDocs(productsQuery);
-            const productsFromDb: Product[] = snapshot.docs.map(docSnap => productFromFirestore(docSnap.data()));
-            setDashboardProducts(productsFromDb);
-            console.log("DashboardPage (Main useEffect - Products): Fetched products from Firestore:", productsFromDb.length);
-            
-            const metadataDocRef = doc(firestore, "app_metadata", "products_metadata");
-            const metadataDocSnap = await getDoc(metadataDocRef);
-            if (metadataDocSnap.exists()) {
-              const data = metadataDocSnap.data();
-              if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
-                setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
-                 console.log("DashboardPage (Main useEffect - Products): Fetched lastDataUpdateTimestamp:", data.lastUpdatedAt.toDate());
-              } else {
-                setLastDataUpdateTimestamp(null);
-              }
-            } else {
-              setLastDataUpdateTimestamp(null);
-            }
-             if (productsFromDb.length === 0 && isAdmin) { 
-               toast({ title: "Sem Dados Carregados", description: "Nenhum produto encontrado. Faça o upload de uma planilha para popular os dados.", variant: "default" });
-            } else if (productsFromDb.length === 0 && !isAdmin) {
-               toast({ title: "Sem Dados no Sistema", description: "Nenhum produto encontrado. O administrador precisa carregar uma planilha.", variant: "default" });
-            }
-          } catch (error) {
-            console.error("DashboardPage (Main useEffect - Products): Error fetching products from Firestore:", error);
-            const firestoreError = error as Error;
-            toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${firestoreError.message}`, variant: "destructive" });
-          } finally {
-            setIsLoadingFirestore(false);
-            console.log("DashboardPage (Main useEffect - Products): Finished fetching products, isLoadingFirestore set to false.");
-          }
-        };
-        fetchProducts();
-      } else if (!isSavingFirestore) { 
-        setIsLoadingFirestore(false);
-      }
-
-      // Stock History Fetching Logic
-       console.log(`DashboardPage (Main useEffect - History Prep): isSavingFirestore: ${isSavingFirestore}, stockHistory.length: ${stockHistory.length}, lastDataUpdateTimestamp: ${lastDataUpdateTimestamp?.toISOString()}`);
       const fetchNeeded = 
           stockHistory.length === 0 || 
           (lastDataUpdateTimestamp && stockHistory.length > 0 && stockHistory[stockHistory.length-1]?.date && lastDataUpdateTimestamp > stockHistory[stockHistory.length-1].date);
 
-      if (!isSavingFirestore && fetchNeeded) {
-        console.log("DashboardPage (Main useEffect - History): Conditions met for fetching/refreshing history. Calling fetchHistory.");
+      if (!isSavingFirestore && fetchNeeded && !isLoadingFirestore) {
         fetchHistory();
-      } else if (!isSavingFirestore && !fetchNeeded) {
-        console.log("DashboardPage (Main useEffect - History): Conditions NOT met for fetching history (or already fetched). Setting isLoadingHistory to false.");
+      } else if (!isSavingFirestore && !isLoadingFirestore) {
         setIsLoadingHistory(false);
-      } else if (isSavingFirestore) {
-        console.log("DashboardPage (Main useEffect - History): Saving products is in progress. Deferring history fetch/update. Ensuring isLoadingHistory is false.");
-        setIsLoadingHistory(false); // Explicitly set to false if saving is happening
       }
-
-    } else { 
-      console.log("DashboardPage (Main useEffect): No current user. Clearing data and setting loading states to false.");
-      setDashboardProducts([]);
-      setLastDataUpdateTimestamp(null);
-      setIsLoadingFirestore(false);
+    } else {
       setStockHistory([]);
       setIsLoadingHistory(false);
     }
-  }, [currentUser, isAuthLoading, isAdmin, toast, isSavingFirestore, lastDataUpdateTimestamp, dashboardProducts.length, stockHistory.length, fetchHistory]);
+  }, [currentUser, isAuthLoading, isAdmin, toast, isSavingFirestore, lastDataUpdateTimestamp, stockHistory.length, fetchHistory, productsError, isLoadingFirestore]);
 
 
   const saveProductsToFirestore = useCallback(async (productsToSave: Product[]) => {
@@ -255,10 +182,8 @@ export default function DashboardPage() {
       toast({ title: "Erro de Configuração", description: "Instância do Firestore não está disponível para salvar.", variant: "destructive" });
       return;
     }
-    console.log("DashboardPage: Admin attempting to save products to GLOBAL /shared_products collection.");
     setIsSavingFirestore(true);
-    setIsLoadingFirestore(true); 
-    setIsLoadingHistory(true); // Indicate history will also be updated/reloaded
+    setIsLoadingHistory(true);
 
     let totalDeleted = 0;
     let totalAdded = 0;
@@ -269,7 +194,6 @@ export default function DashboardPage() {
       
       const existingDocsSnapshot = await getDocs(query(productsColRef));
       const docsToDelete = existingDocsSnapshot.docs;
-      console.log(`DashboardPage: Found ${docsToDelete.length} existing products to delete.`);
 
       for (let i = 0; i < docsToDelete.length; i += FIRESTORE_BATCH_LIMIT) {
         const batch = writeBatch(firestore);
@@ -277,11 +201,9 @@ export default function DashboardPage() {
         chunk.forEach(docSnapshot => batch.delete(docSnapshot.ref));
         await batch.commit();
         totalDeleted += chunk.length;
-        console.log(`DashboardPage: Batch deleted ${chunk.length} products. Total deleted so far: ${totalDeleted}`);
       }
 
       if (productsToSave.length > 0) {
-        console.log(`DashboardPage: Starting to add ${productsToSave.length} new products.`);
         for (let i = 0; i < productsToSave.length; i += FIRESTORE_BATCH_LIMIT) {
           const batch = writeBatch(firestore);
           const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
@@ -291,7 +213,6 @@ export default function DashboardPage() {
           });
           await batch.commit();
           totalAdded += chunk.length;
-          console.log(`DashboardPage: Batch added ${chunk.length} products. Total added so far: ${totalAdded}`);
         }
       }
 
@@ -303,43 +224,33 @@ export default function DashboardPage() {
           totalStockUnits: currentTotalStockUnits,
           totalSkusWithStock: currentTotalSkusWithStock,
         });
-        console.log("DashboardPage: Stock history entry added.");
       }
 
       const metadataDocRef = doc(firestore, "app_metadata", "products_metadata");
       await setDoc(metadataDocRef, { lastUpdatedAt: serverTimestamp() }, { merge: true });
-      console.log("DashboardPage: Products metadata (lastUpdatedAt) updated.");
       
-      setDashboardProducts(productsToSave);
-      const newTimestamp = new Date();
-      setLastDataUpdateTimestamp(newTimestamp); 
-      setStockHistory([]); 
+      await refetchProducts(); // Refetch products in context
+      setStockHistory([]); // Clear local history to trigger refetch
 
       toast({ title: "Dados Globais Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} antigos foram removidos.` : ''} Histórico de estoque atualizado.` });
 
     } catch (error) {
-      console.error("DashboardPage: Error saving products to Firestore:", error);
       const firestoreError = error as Error;
       toast({ title: "Erro ao Salvar", description: `Não foi possível salvar: ${firestoreError.message}`, variant: "destructive" });
     } finally {
       setIsSavingFirestore(false);
-      setIsLoadingFirestore(false);
       // isLoadingHistory will be handled by the main useEffect reacting to lastDataUpdateTimestamp
-      console.log("DashboardPage: Finished saving products, isSavingFirestore set to false.");
     }
-  }, [currentUser, isAdmin, toast]); 
+  }, [currentUser, isAdmin, toast, refetchProducts]); 
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
-    console.log("DashboardPage: Excel data processed, parsed products count:", parsedProducts.length);
     await saveProductsToFirestore(parsedProducts);
   }, [saveProductsToFirestore]);
 
   const handleProcessingStart = () => {
-    console.log("DashboardPage: Excel processing started.");
     setIsProcessingExcel(true);
   };
   const handleProcessingEnd = () => {
-    console.log("DashboardPage: Excel processing ended.");
     setIsProcessingExcel(false);
   };
 
@@ -393,7 +304,7 @@ export default function DashboardPage() {
       const collectionKey = product.collection || 'Não Especificada';
       const typeKey = product.productType || 'Não Especificado';
       const sizeKey = product.size || 'Não Especificado';
-      const printKey = product.description || 'Não Especificada'; // Using 'description' for print/pattern
+      const printKey = product.description || 'Não Especificada'; 
 
       const currentCol = stockByCollectionMap.get(collectionKey) || { stock: 0, skus: 0 };
       currentCol.stock += (product.stock || 0);
@@ -637,8 +548,17 @@ export default function DashboardPage() {
   const displayLoader = (isLoadingFirestore || isAuthLoading) && dashboardProducts.length === 0 && !isSavingFirestore;
 
   if (displayLoader) {
-    return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Carregando dados...</p></div>;
+    return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Carregando dados do painel...</p></div>;
   }
+  if (productsError) {
+    return (
+        <Card className="m-auto mt-10 max-w-lg text-center shadow-xl">
+            <CardHeader><AlertTriangle className="mx-auto h-16 w-16 text-destructive mb-4" /><CardTitle className="text-2xl">Erro ao Carregar Dados</CardTitle></CardHeader>
+            <CardContent><p className="text-muted-foreground">{productsError}</p><Button onClick={() => refetchProducts()} className="mt-6">Tentar Novamente</Button></CardContent>
+        </Card>
+    );
+  }
+
 
   return (
     <div className="space-y-8">
@@ -849,6 +769,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-
-    

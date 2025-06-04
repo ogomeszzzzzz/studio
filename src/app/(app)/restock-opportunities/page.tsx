@@ -5,7 +5,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { FilterControlsSection } from '@/components/domain/FilterControlsSection';
 import { ProductDataTableSection } from '@/components/domain/ProductDataTableSection';
 import type { Product, FilterState } from '@/types';
-import { PackageSearch, Download, TrendingUp, ClipboardList, CheckSquare, Loader2, Database, Filter, HelpCircle, ListFilter, Clock } from 'lucide-react';
+import { PackageSearch, Download, TrendingUp, ClipboardList, CheckSquare, Loader2, Database, Filter, HelpCircle, ListFilter, Clock, AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,115 +13,41 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import * as XLSX from 'xlsx';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
-import { collection, getDocs, doc, Timestamp, query, getDoc } from 'firebase/firestore';
 import { format as formatDateFns, isValid as isDateValid } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProducts } from '@/contexts/ProductsContext'; // Import useProducts
 
 
 const ALL_COLLECTIONS_VALUE = "_ALL_COLLECTIONS_";
 const ALL_PRODUCT_TYPES_VALUE = "_ALL_PRODUCT_TYPES_";
 const DEFAULT_LOW_STOCK_THRESHOLD = 10;
 
-const productFromFirestore = (data: any): Product => {
-  return {
-    ...data,
-    collectionStartDate: data.collectionStartDate instanceof Timestamp ? data.collectionStartDate.toDate() : null,
-    collectionEndDate: data.collectionEndDate instanceof Timestamp ? data.collectionEndDate.toDate() : null,
-  } as Product;
-};
-
+// productFromFirestore is no longer needed here
 
 export default function RestockOpportunitiesPage() {
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const { 
+    products: allProducts, 
+    lastDataUpdateTimestamp, 
+    isLoadingProducts: isLoadingFirestore, 
+    productsError,
+    refetchProducts 
+  } = useProducts();
+
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
   const [baseFilters, setBaseFilters] = useState<FilterState | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // For local filtering logic
   const [isExporting, setIsExporting] = useState(false);
   const [lowStockThreshold, setLowStockThreshold] = useState<string>(DEFAULT_LOW_STOCK_THRESHOLD.toString());
   const { toast } = useToast();
-  const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
 
   const { currentUser, isLoading: isAuthLoading } = useAuth();
-  const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
-
 
   useEffect(() => {
-    console.log("RestockOpportunitiesPage: useEffect triggered. AuthLoading:", isAuthLoading, "CurrentUser:", !!currentUser, "Products loaded:", allProducts.length, "Firestore client init error:", firestoreClientInitializationError);
-
-    if (isAuthLoading) {
-      console.log("RestockOpportunitiesPage: Auth context is loading...");
-      if (allProducts.length === 0) setIsLoadingFirestore(true);
-      return;
+    if (!isAuthLoading && !isLoadingFirestore && productsError) {
+        toast({ title: "Erro ao Carregar Dados de Produtos", description: productsError, variant: "destructive", duration: Infinity });
     }
-    
-    if (firestoreClientInitializationError) {
-      toast({ title: "Erro Crítico de Configuração Firebase", description: `Cliente Firebase não inicializado: ${firestoreClientInitializationError}. Verifique o console e as configurações .env.`, variant: "destructive", duration: Infinity });
-      setIsLoadingFirestore(false);
-      return;
-    }
-    if (!firestore) {
-      toast({ title: "Erro Crítico de Conexão", description: "Instância do Firestore não está disponível. Verifique a conexão e configuração.", variant: "destructive", duration: Infinity });
-      setIsLoadingFirestore(false);
-      return;
-    }
-
-    if (currentUser) {
-      if (allProducts.length === 0) {
-        console.log("RestockOpportunitiesPage: Attempting to fetch products from GLOBAL collection. Firestore available:", !!firestore);
-        setIsLoadingFirestore(true);
-         if (!firestore) {
-             toast({ title: "Erro Interno", description: "Firestore não disponível para buscar dados.", variant: "destructive" });
-             setIsLoadingFirestore(false);
-             return;
-          }
-        const fetchProducts = async () => {
-          try {
-            const productsColPath = "shared_products"; // GLOBAL path
-            const productsQuery = query(collection(firestore, productsColPath));
-            const snapshot = await getDocs(productsQuery);
-            const productsFromDb: Product[] = snapshot.docs
-              .map(docSnap => productFromFirestore(docSnap.data()));
-            
-            setAllProducts(productsFromDb);
-            console.log(`RestockOpportunitiesPage: Fetched ${productsFromDb.length} products.`);
-
-
-            const metadataDocRef = doc(firestore, "app_metadata", "products_metadata"); // GLOBAL path
-            const metadataDocSnap = await getDoc(metadataDocRef);
-            if (metadataDocSnap.exists()) {
-              const data = metadataDocSnap.data();
-              if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
-                setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
-              }
-            } else {
-                setLastDataUpdateTimestamp(null);
-            }
-
-            if (productsFromDb.length > 0) {
-              // toast({ title: "Dados Carregados", description: "Dados de produtos carregados." });
-            } else {
-               toast({ title: "Sem Dados no Sistema", description: "Nenhum produto encontrado para análise de oportunidades. O administrador precisa carregar uma planilha no Dashboard.", variant: "default" });
-            }
-          } catch (error) {
-            console.error("Error fetching products from Firestore (Restock):", error);
-            toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${(error as Error).message}`, variant: "destructive" });
-          } finally {
-            setIsLoadingFirestore(false);
-          }
-        };
-        fetchProducts();
-      } else {
-        setIsLoadingFirestore(false);
-      }
-    } else {
-      setIsLoadingFirestore(false);
-      setAllProducts([]);
-      setFilteredProducts([]);
-      setLastDataUpdateTimestamp(null);
-    }
-  }, [currentUser, isAuthLoading, allProducts.length, toast]);
+  }, [productsError, isAuthLoading, isLoadingFirestore, toast]);
 
 
   const availableCollections = useMemo(() => {
@@ -143,7 +69,6 @@ export default function RestockOpportunitiesPage() {
     }
 
     setIsLoading(true); 
-    console.log("Applying filters with baseFilters:", baseFilters, "lowStockThreshold:", lowStockThreshold);
     let tempFiltered = [...allProducts];
     const effectiveThreshold = parseInt(lowStockThreshold, 10);
     const currentThreshold = isNaN(effectiveThreshold) || lowStockThreshold.trim() === '' ? DEFAULT_LOW_STOCK_THRESHOLD : effectiveThreshold;
@@ -182,7 +107,6 @@ export default function RestockOpportunitiesPage() {
       canRestockAmount: Math.min(Math.max(0, currentThreshold - p.stock), p.readyToShip + (p.regulatorStock || 0))
     }));
 
-    console.log("Filtered products count:", tempFiltered.length);
     setFilteredProducts(tempFiltered);
     setIsLoading(false); 
   }, [allProducts, baseFilters, lowStockThreshold, toast, isAuthLoading, isLoadingFirestore]);
@@ -195,10 +119,10 @@ export default function RestockOpportunitiesPage() {
   useEffect(() => {
    if(!isAuthLoading && !isLoadingFirestore && allProducts.length > 0) {
     applyAllFilters();
-   } else if (!isAuthLoading && !isLoadingFirestore && allProducts.length === 0) {
+   } else if (!isAuthLoading && !isLoadingFirestore && allProducts.length === 0 && !productsError) {
     setFilteredProducts([]);
    }
-  }, [allProducts, lowStockThreshold, baseFilters, applyAllFilters, isAuthLoading, isLoadingFirestore]);
+  }, [allProducts, lowStockThreshold, baseFilters, applyAllFilters, isAuthLoading, isLoadingFirestore, productsError]);
 
 
   const summaryStats = useMemo(() => {
@@ -262,10 +186,18 @@ export default function RestockOpportunitiesPage() {
     applyAllFilters();
   }
 
-  const displayLoader = (isLoadingFirestore || isAuthLoading) && allProducts.length === 0;
+  const displayLoader = (isLoadingFirestore || isAuthLoading) && allProducts.length === 0 && !productsError;
 
   if (displayLoader) {
     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Carregando dados...</p></div>;
+  }
+  if (productsError && !isLoadingFirestore) {
+    return (
+        <Card className="m-auto mt-10 max-w-lg text-center shadow-xl">
+            <CardHeader><AlertTriangle className="mx-auto h-16 w-16 text-destructive mb-4" /><CardTitle className="text-2xl">Erro ao Carregar Dados de Produtos</CardTitle></CardHeader>
+            <CardContent><p className="text-muted-foreground">{productsError}</p><Button onClick={() => refetchProducts()} className="mt-6">Tentar Novamente</Button></CardContent>
+        </Card>
+    );
   }
 
 
@@ -291,7 +223,7 @@ export default function RestockOpportunitiesPage() {
         </div>
       )}
 
-      {!isLoadingFirestore && !isAuthLoading && allProducts.length === 0 && (
+      {!isLoadingFirestore && !isAuthLoading && allProducts.length === 0 && !productsError && (
         <Card className="shadow-lg text-center py-10">
           <CardHeader>
             <CardTitle className="flex items-center justify-center text-xl">
@@ -307,7 +239,7 @@ export default function RestockOpportunitiesPage() {
         </Card>
       )}
 
-      {!isLoadingFirestore && !isAuthLoading && allProducts.length > 0 && (
+      {(!isLoadingFirestore || allProducts.length > 0) && !isAuthLoading && !productsError && (
         <>
           <Card className="shadow-md border-primary border-l-4">
             <CardHeader>

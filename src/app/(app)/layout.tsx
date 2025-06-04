@@ -10,6 +10,7 @@ import { Loader2, LogOut, LayoutDashboard, UserCircle, ShieldCheck, Store, Build
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
+import { ProductsProvider } from '@/contexts/ProductsContext'; // Import ProductsProvider
 import {
   Accordion,
   AccordionContent,
@@ -268,6 +269,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   
   if (currentUser && effectivelyApproved) {
     return (
+      <ProductsProvider> {/* Wrap with ProductsProvider */}
         <div className="flex min-h-screen">
         <nav className="w-64 bg-card border-r border-border p-4 space-y-1 hidden md:flex flex-col shadow-md">
             <Accordion type="single" collapsible className="w-full" value={activeAccordionItem} onValueChange={setActiveAccordionItem}>
@@ -363,10 +365,11 @@ export default function AppLayout({ children }: AppLayoutProps) {
             </main>
         </div>
         </div>
+      </ProductsProvider>
     );
   }
 
-  console.log("AppLayout: Reached fallback loader. State: authLoading", authContextLoading, "isUserDataLoaded", isUserDataLoaded, "currentUser", !!currentUser, "effectivelyApproved", effectivelyApproved);
+  console.log("AppLayout: Reached fallback loader. State: authContextLoading", authContextLoading, "isUserDataLoaded", isUserDataLoaded, "currentUser", !!currentUser, "effectivelyApproved", effectivelyApproved);
   return (
     <div className="flex items-center justify-center min-h-screen bg-background">
       <Loader2 className="h-12 w-12 animate-spin text-primary" />

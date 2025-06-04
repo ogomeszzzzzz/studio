@@ -6,26 +6,19 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { ProductDataTableSection } from '@/components/domain/ProductDataTableSection';
 import type { Product } from '@/types';
-import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
-import { collection, getDocs, doc, Timestamp, query, getDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, BarChart, PieChartIcon as PieChartLucide, Filter, Download, Database, ListFilter, Clock } from 'lucide-react';
+import { Loader2, BarChart, PieChartIcon as PieChartLucide, Filter, Download, Database, ListFilter, Clock, AlertTriangle } from 'lucide-react';
 import { ResponsiveContainer, BarChart as RechartsBarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, Legend as RechartsLegend, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart";
 import * as XLSX from 'xlsx';
-import { format as formatDateFns, isValid as isDateValid } from 'date-fns';
+import { format as formatDateFns } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProducts } from '@/contexts/ProductsContext'; // Import useProducts
 
-const productFromFirestore = (data: any): Product => {
-  return {
-    ...data,
-    collectionStartDate: data.collectionStartDate instanceof Timestamp ? data.collectionStartDate.toDate() : null,
-    collectionEndDate: data.collectionEndDate instanceof Timestamp ? data.collectionEndDate.toDate() : null,
-  } as Product;
-};
+// productFromFirestore is no longer needed here
 
 const CURVE_COLORS: ChartConfig = {
   A: { label: "Curva A", color: "hsl(var(--chart-1))" },
@@ -35,89 +28,27 @@ const CURVE_COLORS: ChartConfig = {
 };
 
 export default function AbcAnalysisPage() {
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const { 
+    products: allProducts, 
+    lastDataUpdateTimestamp, 
+    isLoadingProducts: isLoadingFirestore, 
+    productsError,
+    refetchProducts
+  } = useProducts();
+  
   const [abcAnalyzedProducts, setAbcAnalyzedProducts] = useState<Product[]>([]);
-  const [isLoadingFirestore, setIsLoadingFirestore] = useState(true);
   const [isCalculatingAbc, setIsCalculatingAbc] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const { currentUser, isLoading: isAuthLoading } = useAuth();
   const { toast } = useToast();
-  const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
   const [selectedAbcFilter, setSelectedAbcFilter] = useState<'ALL' | 'A' | 'B' | 'C' | 'N/A'>('ALL');
 
-
   useEffect(() => {
-    console.log("AbcAnalysisPage: useEffect triggered. AuthLoading:", isAuthLoading, "CurrentUser:", !!currentUser, "Products loaded:", allProducts.length, "Firestore client init error:", firestoreClientInitializationError);
-    
-    if (isAuthLoading) {
-      console.log("AbcAnalysisPage: Auth context is loading...");
-      if (allProducts.length === 0) setIsLoadingFirestore(true);
-      return;
+    if (!isAuthLoading && !isLoadingFirestore && productsError) {
+        toast({ title: "Erro ao Carregar Dados de Produtos", description: productsError, variant: "destructive", duration: Infinity });
     }
+  }, [productsError, isAuthLoading, isLoadingFirestore, toast]);
 
-    if (firestoreClientInitializationError) {
-      toast({ title: "Erro Crítico de Configuração Firebase", description: `Cliente Firebase não inicializado: ${firestoreClientInitializationError}. Verifique o console e as configurações .env.`, variant: "destructive", duration: Infinity });
-      setIsLoadingFirestore(false);
-      return;
-    }
-    if (!firestore) {
-      toast({ title: "Erro Crítico de Conexão", description: "Instância do Firestore não está disponível. Verifique a conexão e configuração.", variant: "destructive", duration: Infinity });
-      setIsLoadingFirestore(false);
-      return;
-    }
-
-    if (currentUser) {
-      if (allProducts.length === 0) {
-        setIsLoadingFirestore(true);
-        const fetchProducts = async () => {
-          console.log("AbcAnalysisPage: Attempting to fetch products from GLOBAL collection. Firestore instance available:", !!firestore);
-           if (!firestore) {
-             toast({ title: "Erro Interno", description: "Firestore não disponível para buscar dados.", variant: "destructive" });
-             setIsLoadingFirestore(false);
-             return;
-          }
-          try {
-            const productsColPath = "shared_products"; // GLOBAL path
-            const productsQuery = query(collection(firestore, productsColPath));
-            const snapshot = await getDocs(productsQuery);
-            const productsFromDb: Product[] = snapshot.docs
-              .map(docSnap => productFromFirestore(docSnap.data()));
-            setAllProducts(productsFromDb);
-            console.log(`AbcAnalysisPage: Fetched ${productsFromDb.length} products.`);
-
-            const metadataDocRef = doc(firestore, "app_metadata", "products_metadata"); // GLOBAL path
-            const metadataDocSnap = await getDoc(metadataDocRef);
-            if (metadataDocSnap.exists()) {
-              const data = metadataDocSnap.data();
-              if (data.lastUpdatedAt && data.lastUpdatedAt instanceof Timestamp) {
-                setLastDataUpdateTimestamp(data.lastUpdatedAt.toDate());
-              }
-            } else {
-               setLastDataUpdateTimestamp(null);
-            }
-            if (productsFromDb.length > 0) {
-              // toast({ title: "Dados Carregados", description: `${productsFromDb.length} produtos carregados.` });
-            } else {
-               toast({ title: "Sem Dados no Sistema", description: "Nenhum produto encontrado para análise ABC. O administrador precisa carregar uma planilha no Dashboard.", variant: "default" });
-            }
-          } catch (error) {
-            console.error("Error fetching products from Firestore (ABC Analysis):", error);
-            toast({ title: "Erro ao Carregar Dados", description: `Não foi possível buscar os produtos: ${(error as Error).message}`, variant: "destructive" });
-          } finally {
-            setIsLoadingFirestore(false);
-          }
-        };
-        fetchProducts();
-      } else {
-         setIsLoadingFirestore(false);
-      }
-    } else {
-      setIsLoadingFirestore(false);
-      setAllProducts([]);
-      setAbcAnalyzedProducts([]);
-      setLastDataUpdateTimestamp(null);
-    }
-  }, [currentUser, isAuthLoading, allProducts.length, toast]);
 
   const performAbcAnalysis = useCallback((products: Product[]): Product[] => {
     if (products.length === 0) return [];
@@ -132,13 +63,14 @@ export default function AbcAnalysisPage() {
 
     if (productsWithRevenue.length === 0) {
         setIsCalculatingAbc(false);
+        // Ensure all products (even those without revenue) are returned for the table
         return products.map(p => ({ ...p, abcCurve: 'N/A', revenue30d: 0, cumulativeRevenuePercentage: 0 }));
     }
 
     productsWithRevenue.sort((a, b) => (b.revenue30d || 0) - (a.revenue30d || 0));
 
     const totalRevenue = productsWithRevenue.reduce((sum, p) => sum + (p.revenue30d || 0), 0);
-    if (totalRevenue === 0) {
+    if (totalRevenue === 0) { // Should be caught by productsWithRevenue.length check, but defensive
         setIsCalculatingAbc(false);
         return products.map(p => ({ ...p, abcCurve: 'N/A', revenue30d: 0, cumulativeRevenuePercentage: 0 }));
     }
@@ -156,6 +88,7 @@ export default function AbcAnalysisPage() {
       return { ...p, abcCurve: curve, cumulativeRevenuePercentage: cumulativePercentage };
     });
 
+    // Include products that were filtered out (no revenue) and mark them as N/A
     const productsWithoutRevenue = products
         .filter(p => (p.price || 0) * (p.sales30d || 0) <= 0)
         .map(p => ({...p, abcCurve: 'N/A' as const, revenue30d: 0, cumulativeRevenuePercentage: 0}));
@@ -165,13 +98,13 @@ export default function AbcAnalysisPage() {
   }, []);
 
   useEffect(() => {
-    if (allProducts.length > 0) {
+    if (allProducts.length > 0 && !isLoadingFirestore && !productsError) {
       const analyzed = performAbcAnalysis(allProducts);
       setAbcAnalyzedProducts(analyzed);
-    } else {
+    } else if (!isLoadingFirestore && !productsError) { // If allProducts is empty but not loading/erroring
       setAbcAnalyzedProducts([]);
     }
-  }, [allProducts, performAbcAnalysis]);
+  }, [allProducts, performAbcAnalysis, isLoadingFirestore, productsError]);
 
   const filteredTableProducts = useMemo(() => {
     if (selectedAbcFilter === 'ALL') {
@@ -290,11 +223,20 @@ export default function AbcAnalysisPage() {
     );
   };
 
-  const displayLoader = (isLoadingFirestore || isAuthLoading) && allProducts.length === 0;
+  const displayLoader = (isLoadingFirestore || isAuthLoading) && allProducts.length === 0 && !productsError;
 
   if (displayLoader) {
     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Carregando dados...</p></div>;
   }
+  if (productsError && !isLoadingFirestore) {
+    return (
+        <Card className="m-auto mt-10 max-w-lg text-center shadow-xl">
+            <CardHeader><AlertTriangle className="mx-auto h-16 w-16 text-destructive mb-4" /><CardTitle className="text-2xl">Erro ao Carregar Dados de Produtos</CardTitle></CardHeader>
+            <CardContent><p className="text-muted-foreground">{productsError}</p><Button onClick={() => refetchProducts()} className="mt-6">Tentar Novamente</Button></CardContent>
+        </Card>
+    );
+  }
+
 
   return (
     <div className="space-y-6">
@@ -325,7 +267,7 @@ export default function AbcAnalysisPage() {
         </div>
       )}
 
-      {allProducts.length === 0 && !isLoadingFirestore && !isAuthLoading && (
+      {allProducts.length === 0 && !isLoadingFirestore && !isAuthLoading && !productsError && (
         <Card className="shadow-lg text-center py-10">
           <CardHeader><CardTitle className="flex items-center justify-center text-xl"><Database className="mr-2 h-7 w-7 text-primary" />Sem Dados para Análise</CardTitle></CardHeader>
           <CardContent>
@@ -338,7 +280,7 @@ export default function AbcAnalysisPage() {
         <Card className="shadow-lg"><CardHeader><CardTitle className="flex items-center"><Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" />Calculando Curva ABC...</CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Aguarde enquanto a análise é processada.</p></CardContent></Card>
       )}
 
-      {allProducts.length > 0 && !isCalculatingAbc && !isLoadingFirestore && !isAuthLoading && (
+      {allProducts.length > 0 && !isCalculatingAbc && !isLoadingFirestore && !isAuthLoading && !productsError && (
         <>
           <Card className="shadow-md">
             <CardHeader>
