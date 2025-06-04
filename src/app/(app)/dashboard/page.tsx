@@ -72,20 +72,37 @@ const PIE_COLORS = ["hsl(var(--chart-2))", "hsl(var(--destructive))"]; // Green 
 
 const productToFirestore = (product: Product): any => {
   const data: any = { ...product };
+  // Validate collectionStartDate
   if (product.collectionStartDate && isDateValid(product.collectionStartDate)) {
-    data.collectionStartDate = Timestamp.fromDate(product.collectionStartDate);
+    const year = product.collectionStartDate.getFullYear();
+    if (year >= 1900 && year <= 3000) { // Firestore Timestamps typically handle years 1-9999, this is a practical range
+      data.collectionStartDate = Timestamp.fromDate(product.collectionStartDate);
+    } else {
+      console.warn(`productToFirestore: collectionStartDate year ${year} for product ${product.vtexId} is out of range (1900-3000). Setting to null.`);
+      data.collectionStartDate = null;
+    }
   } else {
     data.collectionStartDate = null;
   }
+
+  // Validate collectionEndDate
   if (product.collectionEndDate && isDateValid(product.collectionEndDate)) {
-    data.collectionEndDate = Timestamp.fromDate(product.collectionEndDate);
+    const year = product.collectionEndDate.getFullYear();
+    if (year >= 1900 && year <= 3000) {
+      data.collectionEndDate = Timestamp.fromDate(product.collectionEndDate);
+    } else {
+      console.warn(`productToFirestore: collectionEndDate year ${year} for product ${product.vtexId} is out of range (1900-3000). Setting to null.`);
+      data.collectionEndDate = null;
+    }
   } else {
     data.collectionEndDate = null;
   }
+  // Remove raw date strings if they exist, as they are not needed in Firestore
+  delete data.rawCollectionStartDate;
+  delete data.rawCollectionEndDate;
   return data;
 };
 
-// productFromFirestore is no longer needed here as data comes from context
 
 const stockHistoryEntryFromFirestore = (id: string, data: any): StockHistoryEntry => {
   return {
@@ -183,7 +200,7 @@ export default function DashboardPage() {
       return;
     }
     setIsSavingFirestore(true);
-    setIsLoadingHistory(true);
+    setIsLoadingHistory(true); // Set loading history to true here as new history will be added
 
     let totalDeleted = 0;
     let totalAdded = 0;
@@ -230,16 +247,21 @@ export default function DashboardPage() {
       await setDoc(metadataDocRef, { lastUpdatedAt: serverTimestamp() }, { merge: true });
       
       await refetchProducts(); // Refetch products in context
-      setStockHistory([]); // Clear local history to trigger refetch
+      // After products are refetched, fetchHistory will be called by its own useEffect logic
+      // if lastDataUpdateTimestamp (from refetchProducts) is newer than current history.
+      // No need to explicitly call fetchHistory here, let the existing useEffect handle it.
+      // Just ensure isLoadingHistory is correctly managed.
 
       toast({ title: "Dados Globais Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} antigos foram removidos.` : ''} Histórico de estoque atualizado.` });
 
     } catch (error) {
       const firestoreError = error as Error;
       toast({ title: "Erro ao Salvar", description: `Não foi possível salvar: ${firestoreError.message}`, variant: "destructive" });
+      setIsLoadingHistory(false); // Ensure loading stops on error
     } finally {
       setIsSavingFirestore(false);
-      // isLoadingHistory will be handled by the main useEffect reacting to lastDataUpdateTimestamp
+      // isLoadingHistory will be set to false by fetchHistory's finally block.
+      // Or, if no refetch of history is needed, it should already be false from ProductsContext.
     }
   }, [currentUser, isAdmin, toast, refetchProducts]); 
 
@@ -769,3 +791,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+

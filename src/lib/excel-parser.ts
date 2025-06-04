@@ -8,9 +8,19 @@ const robustParseDate = (dateStr: string | number | undefined): Date | null => {
 
   if (typeof dateStr === 'number') {
     // Excel date (serial number)
-    const excelEpoch = new Date(Date.UTC(1899, 11, 30)); // Excel epoch starts Dec 30, 1899 for compatibility with Lotus 1-2-3
-    const date = new Date(excelEpoch.getTime() + dateStr * 24 * 60 * 60 * 1000);
-    if (isValid(date)) return date;
+    // Add a sanity check for plausible Excel date serial numbers
+    // Roughly: 1 (Jan 1, 1900) to ~2,958,465 (Dec 31, 9999)
+    // Or a bit more lenient: 1 to 4,000,000 to avoid issues with very future but valid dates for planning.
+    // The Firestore timestamp range is year 1 to 9999.
+    // A value like 291491578800 (from error) is far too large for an Excel date serial.
+    if (dateStr > 0 && dateStr < 3000000) { // Allow dates roughly up to year 9999
+        const excelEpoch = new Date(Date.UTC(1899, 11, 30)); // Excel epoch starts Dec 30, 1899 for compatibility with Lotus 1-2-3
+        const date = new Date(excelEpoch.getTime() + dateStr * 24 * 60 * 60 * 1000);
+        if (isValid(date)) return date;
+    } else {
+        console.warn(`Numeric value ${dateStr} is out of plausible range for an Excel date serial number. Not parsing as date.`);
+        return null; // Treat as non-date if out of plausible range
+    }
   }
   if (typeof dateStr === 'string') {
     const commonFormats = [
@@ -142,3 +152,4 @@ export const parseExcelData = (file: File, collectionColumnKey: string = 'COLEÇ
 
 // Removed parseSalesData function as it was specific to the deleted Intelligence Panel
 // export const parseSalesData = (file: File): Promise<SalesRecord[]> => { ... };
+
