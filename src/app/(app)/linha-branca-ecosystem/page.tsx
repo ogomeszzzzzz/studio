@@ -19,7 +19,7 @@ import { ptBR } from 'date-fns/locale';
 const LINHA_BRANCA_COLLECTION_NAME = "Linha Branca";
 const LINHA_BRANCA_TARGET_COVERAGE_DAYS = 45;
 const LINHA_BRANCA_MIN_SIGNIFICANT_DAILY_SALES = 0.1;
-const LINHA_BRANCA_OVERSTOCK_FACTOR = 1.75;
+const LINHA_BRANCA_OVERSTOCK_FACTOR = 1.75; // More than 175% of target stock is overstock
 const LINHA_BRANCA_LOW_STOCK_DAYS = 15;
 const LINHA_BRANCA_CRITICAL_STOCK_DAYS = 5;
 
@@ -68,10 +68,10 @@ const LinhaBrancaItemWidget: React.FC<LinhaBrancaItemWidgetProps> = ({ item }) =
       statusIcon = <PackageX className="h-4 w-4" />;
       statusBadgeVariant = 'destructive';
       break;
-    case 'Low':
+    case 'Low': // Handles both "Low" and "Imbalanced" (which is now set as Low)
       statusBadgeCombinedClasses = "bg-yellow-500 text-black";
       statusIcon = <TrendingDown className="h-4 w-4" />;
-      statusBadgeVariant = 'destructive';
+      statusBadgeVariant = 'destructive'; // Still a concerning state
       break;
     case 'Healthy':
       statusBadgeCombinedClasses = "bg-green-600 text-white";
@@ -89,7 +89,7 @@ const LinhaBrancaItemWidget: React.FC<LinhaBrancaItemWidgetProps> = ({ item }) =
       statusBadgeVariant = 'secondary';
       break;
     default: // N/A or undefined
-      statusBadgeCombinedClasses = "bg-gray-400 text-white"; // Adjusted default for better visibility
+      statusBadgeCombinedClasses = "bg-gray-400 text-white";
       statusIcon = <HelpCircle className="h-4 w-4" />;
       statusBadgeVariant = 'secondary';
       break;
@@ -97,9 +97,9 @@ const LinhaBrancaItemWidget: React.FC<LinhaBrancaItemWidgetProps> = ({ item }) =
 
   let stockPercentage = 0;
   if (item.targetStock > 0) {
-    stockPercentage = Math.min((item.totalStock / item.targetStock) * 100, 150); // Allow >100 for overstock indication
-  } else if (item.totalStock > 0) { // Has stock but no target (e.g., no sales)
-    stockPercentage = 5; // Small fill to show it's not empty
+    stockPercentage = Math.min((item.totalStock / item.targetStock) * 100, 150);
+  } else if (item.totalStock > 0) {
+    stockPercentage = 5;
   }
 
   const progressFillClass = statusBadgeCombinedClasses.split(' ')[0] || "bg-gray-500";
@@ -153,7 +153,7 @@ const LinhaBrancaItemWidget: React.FC<LinhaBrancaItemWidgetProps> = ({ item }) =
           </TooltipTrigger>
           <TooltipContent side="top">
             <p>Status Agregado: {item.status}. Estoque Alvo Agregado: {item.targetStock.toLocaleString()} un.</p>
-            <p>Clique para ver SKUs detalhados.</p>
+            <p>Clique para ver SKUs detalhados e códigos de referência.</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
@@ -208,6 +208,8 @@ export default function LinhaBrancaEcosystemPage() {
   const { products: allProducts, isLoadingProducts, productsError, refetchProducts, lastDataUpdateTimestamp } = useProducts();
   const { toast } = useToast();
   const [processedLinhaBrancaData, setProcessedLinhaBrancaData] = useState<LinhaBrancaBedSizeSummary[]>([]);
+  const [detailedItemForUrgentAction, setDetailedItemForUrgentAction] = useState<AggregatedLinhaBrancaItem | null>(null);
+
 
   useEffect(() => {
     if (isLoadingProducts || productsError) {
@@ -229,7 +231,7 @@ export default function LinhaBrancaEcosystemPage() {
 
     linhaBrancaProducts.forEach(p => {
       const { itemType } = getItemTypeAndCleanName(p.name, p.productType);
-      const size = p.size || 'Tamanho Único'; // Default if size is missing
+      const size = p.size || 'Tamanho Único';
       const id = `${itemType}-${size}`;
 
       let entry = aggregatedMap.get(id);
@@ -246,7 +248,7 @@ export default function LinhaBrancaEcosystemPage() {
           daysOfStock: null,
           targetStock: 0,
           replenishmentSuggestion: 0,
-          status: 'N/A', // Default status
+          status: 'N/A',
           contributingSkus: [],
         };
       }
@@ -266,19 +268,23 @@ export default function LinhaBrancaEcosystemPage() {
       const neededForTarget = item.targetStock - (item.totalStock + item.totalOpenOrders);
       item.replenishmentSuggestion = item.dailyAverageSales > 0 ? Math.max(0, Math.round(neededForTarget)) : 0;
 
+      const hasSignificantZeroStockSku = item.contributingSkus.some(
+        sku => (sku.stock || 0) === 0 && ((sku.sales30d || 0) / 30) >= LINHA_BRANCA_MIN_SIGNIFICANT_DAILY_SALES
+      );
+
       if (item.dailyAverageSales < LINHA_BRANCA_MIN_SIGNIFICANT_DAILY_SALES) {
         item.status = item.totalStock > 0 ? 'NoSales' : 'N/A';
       } else {
-        const effectiveCoverage = item.dailyAverageSales > 0 ? (item.totalStock + item.totalOpenOrders) / item.dailyAverageSales : Infinity;
+        const effectiveCoverageWithOC = item.dailyAverageSales > 0 ? (item.totalStock + item.totalOpenOrders) / item.dailyAverageSales : Infinity;
 
-        if (item.daysOfStock !== null && item.daysOfStock < LINHA_BRANCA_CRITICAL_STOCK_DAYS && effectiveCoverage < LINHA_BRANCA_LOW_STOCK_DAYS) {
-            item.status = 'Critical';
-        } else if (item.daysOfStock !== null && item.daysOfStock < LINHA_BRANCA_LOW_STOCK_DAYS) {
-            item.status = 'Low';
+        if (item.daysOfStock !== null && item.daysOfStock < LINHA_BRANCA_CRITICAL_STOCK_DAYS && effectiveCoverageWithOC < LINHA_BRANCA_LOW_STOCK_DAYS) {
+          item.status = 'Critical';
+        } else if ((item.daysOfStock !== null && item.daysOfStock < LINHA_BRANCA_LOW_STOCK_DAYS) || hasSignificantZeroStockSku) {
+          item.status = 'Low'; // If overall low, or any significant SKU is zero, it's 'Low'
         } else if (item.targetStock > 0 && (item.totalStock / item.targetStock) > LINHA_BRANCA_OVERSTOCK_FACTOR && item.daysOfStock && item.daysOfStock > (LINHA_BRANCA_TARGET_COVERAGE_DAYS * LINHA_BRANCA_OVERSTOCK_FACTOR)) {
-            item.status = 'Overstocked';
+          item.status = 'Overstocked'; // This is now only reached if not Critical, Low (due to days or gaps)
         } else {
-            item.status = 'Healthy';
+          item.status = 'Healthy';
         }
       }
       finalAggregatedItems.push(item);
@@ -297,35 +303,22 @@ export default function LinhaBrancaEcosystemPage() {
         let criticalCount = 0;
         let lowCount = 0;
         items.forEach(it => {
-          if (it.status === 'Critical') {
-            criticalCount++;
-          }
-          if (it.status === 'Low') {
-            lowCount++;
-          }
+          if (it.status === 'Critical') criticalCount++;
+          if (it.status === 'Low') lowCount++;
         });
 
         let overallHarmonyStatus: LinhaBrancaBedSizeSummary['overallHarmonyStatus'] = 'Good';
-        if (criticalCount > 0) {
-          overallHarmonyStatus = 'Critical';
-        } else if (lowCount > 0) {
-          overallHarmonyStatus = 'NeedsAttention';
-        }
+        if (criticalCount > 0) overallHarmonyStatus = 'Critical';
+        else if (lowCount > 0) overallHarmonyStatus = 'NeedsAttention';
 
         return { size, items: items.sort((a,b) => a.itemType.localeCompare(b.itemType)), overallHarmonyStatus };
       })
       .sort((a, b) => {
         const indexA = COMMON_SIZES_ORDER.indexOf(a.size);
         const indexB = COMMON_SIZES_ORDER.indexOf(b.size);
-        if (indexA !== -1 && indexB !== -1) {
-          return indexA - indexB;
-        }
-        if (indexA !== -1) {
-          return -1;
-        }
-        if (indexB !== -1) {
-          return 1;
-        }
+        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+        if (indexA !== -1) return -1;
+        if (indexB !== -1) return 1;
         return a.size.localeCompare(b.size);
       });
 
@@ -339,27 +332,14 @@ export default function LinhaBrancaEcosystemPage() {
       return { totalStockValue: 0, outOfStockSkus: 0, overstockedSkus: 0, replenishmentNeededUnits: 0, criticalStatusCount: 0, lowStatusCount: 0 };
     }
 
-    let totalStockValue = 0;
-    let outOfStockSkus = 0;
-    let overstockedSkus = 0;
-    let replenishmentNeededUnits = 0;
-    let criticalStatusCount = 0;
-    let lowStatusCount = 0;
-
-    allAggregatedItems.forEach(item => {
-      if (item.status === 'Critical') {
-         criticalStatusCount++;
-      }
-      if (item.status === 'Low') {
-        lowStatusCount++;
-      }
-      if (item.status === 'Overstocked') {
-         overstockedSkus++;
-      }
-      replenishmentNeededUnits += item.replenishmentSuggestion;
-    });
-
-    return { totalStockValue, outOfStockSkus, overstockedSkus, replenishmentNeededUnits, criticalStatusCount, lowStatusCount };
+    return {
+      totalStockValue: 0, // Placeholder, not calculated
+      outOfStockSkus: 0, // Placeholder, needs SKU level definition
+      overstockedSkus: allAggregatedItems.filter(i => i.status === 'Overstocked').length,
+      replenishmentNeededUnits: allAggregatedItems.reduce((sum, item) => sum + item.replenishmentSuggestion, 0),
+      criticalStatusCount: allAggregatedItems.filter(i => i.status === 'Critical').length,
+      lowStatusCount: allAggregatedItems.filter(i => i.status === 'Low').length,
+    };
   }, [processedLinhaBrancaData]);
 
   const urgentActions = useMemo(() => {
@@ -425,12 +405,12 @@ export default function LinhaBrancaEcosystemPage() {
                 <CardContent><p className="text-2xl font-bold text-destructive">{kpis.criticalStatusCount.toLocaleString()}</p><p className="text-xs text-muted-foreground">Venda relevante, cob. &lt; {LINHA_BRANCA_CRITICAL_STOCK_DAYS}d</p></CardContent>
               </Card>
               <Card className="bg-card shadow-sm border-yellow-500 border-l-4">
-                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-yellow-600">Itens Agreg. Baixos</CardTitle></CardHeader>
-                <CardContent><p className="text-2xl font-bold text-yellow-600">{kpis.lowStatusCount.toLocaleString()}</p><p className="text-xs text-muted-foreground">Venda relevante, cob. &lt; {LINHA_BRANCA_LOW_STOCK_DAYS}d</p></CardContent>
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-yellow-600">Itens Agreg. Baixos/Falhas</CardTitle></CardHeader>
+                <CardContent><p className="text-2xl font-bold text-yellow-600">{kpis.lowStatusCount.toLocaleString()}</p><p className="text-xs text-muted-foreground">Cob. &lt; {LINHA_BRANCA_LOW_STOCK_DAYS}d ou SKU chave zerado</p></CardContent>
               </Card>
               <Card className="bg-card shadow-sm border-blue-500 border-l-4">
                 <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-blue-600">Itens Agreg. Superestocados</CardTitle></CardHeader>
-                <CardContent><p className="text-2xl font-bold text-blue-600">{processedLinhaBrancaData.flatMap(s => s.items).filter(i => i.status === 'Overstocked').length}</p><p className="text-xs text-muted-foreground">Estoque &gt; {LINHA_BRANCA_OVERSTOCK_FACTOR * 100}% do alvo</p></CardContent>
+                <CardContent><p className="text-2xl font-bold text-blue-600">{kpis.overstockedSkus}</p><p className="text-xs text-muted-foreground">Estoque &gt; {LINHA_BRANCA_OVERSTOCK_FACTOR * 100}% do alvo</p></CardContent>
               </Card>
               <Card className="bg-card shadow-sm border-green-500 border-l-4">
                 <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-green-600">Total Reposição Sugerida</CardTitle></CardHeader>
@@ -447,19 +427,70 @@ export default function LinhaBrancaEcosystemPage() {
             <Card className="border-red-500/70 shadow-md">
               <CardHeader className="bg-red-500/10">
                 <CardTitle className="text-red-700 flex items-center"><AlertTriangle className="mr-2"/>Ações Urgentes Sugeridas ({urgentActions.length})</CardTitle>
-                <CardDescription className="text-red-600">Itens agregados críticos ou baixos com maior VMD precisando de reposição.</CardDescription>
+                <CardDescription className="text-red-600">Itens agregados críticos ou baixos/com falhas, com maior VMD e precisando de reposição. Clique para ver detalhes.</CardDescription>
               </CardHeader>
               <CardContent className="pt-4">
                 <ul className="space-y-2 text-sm">
                   {urgentActions.map(item => (
-                    <li key={item.id} className="p-2.5 border border-red-500/30 rounded-md bg-red-500/5 hover:bg-red-500/10 transition-colors">
-                      <span className="font-semibold text-red-800">{item.displayName}</span>: Repor <span className="font-bold text-red-800">{item.replenishmentSuggestion} un</span>. (Est.Agreg: {item.totalStock}, VMD Agreg: {item.dailyAverageSales.toFixed(1)}, Status Agreg: <span className="font-medium">{item.status}</span>)
-                    </li>
+                    <DialogTrigger key={item.id} asChild>
+                      <li
+                        onClick={() => setDetailedItemForUrgentAction(item)}
+                        className="p-2.5 border border-red-500/30 rounded-md bg-red-500/5 hover:bg-red-500/10 transition-colors cursor-pointer"
+                      >
+                        <span className="font-semibold text-red-800">{item.displayName}</span>: Repor <span className="font-bold text-red-800">{item.replenishmentSuggestion} un</span>. (Est.Agreg: {item.totalStock}, VMD Agreg: {item.dailyAverageSales.toFixed(1)}, Status Agreg: <span className="font-medium">{item.status}</span>)
+                      </li>
+                    </DialogTrigger>
                   ))}
                 </ul>
               </CardContent>
             </Card>
           )}
+           {/* Dialog for Urgent Action Item Details */}
+            <Dialog open={!!detailedItemForUrgentAction} onOpenChange={(open) => { if (!open) setDetailedItemForUrgentAction(null); }}>
+                {detailedItemForUrgentAction && (
+                <DialogContent className="sm:max-w-2xl md:max-w-3xl lg:max-w-4xl">
+                    <DialogHeader>
+                    <DialogTitle className="text-xl">SKUs Detalhados para Ação Urgente: {detailedItemForUrgentAction.displayName}</DialogTitle>
+                    <DialogDescription>
+                        Lista de SKUs individuais que compõem o item agregado "{detailedItemForUrgentAction.displayName}".
+                        Total Agregado: Estoque {detailedItemForUrgentAction.totalStock}, VMD {detailedItemForUrgentAction.dailyAverageSales.toFixed(1)}, Ped.Abertos {detailedItemForUrgentAction.totalOpenOrders}, Sug.Repor {detailedItemForUrgentAction.replenishmentSuggestion}.
+                    </DialogDescription>
+                    </DialogHeader>
+                    <div className="max-h-[60vh] overflow-y-auto mt-4">
+                    {detailedItemForUrgentAction.contributingSkus.length > 0 ? (
+                        <Table>
+                        <TableHeader>
+                            <TableRow>
+                            <TableHead className="min-w-[250px]">Nome Produto (SKU)</TableHead>
+                            <TableHead>ID VTEX</TableHead>
+                            <TableHead className="text-right">Estoque SKU</TableHead>
+                            <TableHead className="text-right">Venda 30d SKU</TableHead>
+                            <TableHead className="text-right">Ped.Abertos SKU</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {detailedItemForUrgentAction.contributingSkus.map(sku => (
+                            <TableRow key={String(sku.vtexId) + '-' + sku.name}>
+                                <TableCell className="text-xs font-medium">{sku.name}</TableCell>
+                                <TableCell className="text-xs">{String(sku.vtexId)}</TableCell>
+                                <TableCell className="text-right text-xs">{sku.stock.toLocaleString()}</TableCell>
+                                <TableCell className="text-right text-xs">{(sku.sales30d || 0).toLocaleString()}</TableCell>
+                                <TableCell className="text-right text-xs">{(sku.openOrders || 0).toLocaleString()}</TableCell>
+                            </TableRow>
+                            ))}
+                        </TableBody>
+                        </Table>
+                    ) : (
+                        <p className="text-muted-foreground text-center py-4">Nenhum SKU individual encontrado para este item.</p>
+                    )}
+                    </div>
+                    <DialogFooter className="mt-4">
+                        <DialogClose asChild><Button variant="outline">Fechar</Button></DialogClose>
+                    </DialogFooter>
+                </DialogContent>
+                )}
+            </Dialog>
+
 
           {processedLinhaBrancaData.length === 0 && linhaBrancaOriginalProducts.length > 0 && !isLoadingProducts && (
              <Card className="shadow-md text-center py-10">
@@ -509,3 +540,4 @@ export default function LinhaBrancaEcosystemPage() {
     </div>
   );
 }
+
