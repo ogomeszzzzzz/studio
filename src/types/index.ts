@@ -77,7 +77,7 @@ export interface AggregatedPillow {
 
 export type SortCriteria = 'name' | 'stock' | 'fillPercentage' | 'sales30d' | 'openOrders' | 'dailyAverageSales' | 'estimatedCoverageDays' | 'daysOfStock' | 'stockVsIdealFactor'; // Added for new page
 export type SortOrder = 'asc' | 'desc';
-export type StockStatusFilter = 'all' | 'critical' | 'empty' | 'low' | 'medium' | 'good' | 'overstocked' | 'salesCritical' | 'salesUrgent' | 'salesLow' | 'salesHealthy' | 'salesOverstocked' | 'salesNoSales';
+export type StockStatusFilter = 'all' | 'critical' | 'empty' | 'low' | 'medium' | 'good' | 'overstocked' | 'salesCritical' | 'salesUrgent' | 'salesLow' | 'salesHealthy' | 'salesOverstocked' | 'salesNoSales' | 'salesN/A';
 
 
 // For Stock History Chart
@@ -124,7 +124,7 @@ export interface AggregatedLinhaBrancaItem {
   targetStock: number;
   replenishmentSuggestion: number;
   status: LinhaBrancaStockStatus;
-  contributingSkus: Product[];
+  contributingSkus: Product[]; // Changed to store full Product objects, or at least essential fields
 }
 
 export interface LinhaBrancaBedSizeSummary {
@@ -136,3 +136,6 @@ export interface LinhaBrancaBedSizeSummary {
 // SalesRecord type was removed as the related panel was deleted.
 // If Component 6 (daily sales upload) is fully implemented later, this might be revived.
 
+
+
+    
