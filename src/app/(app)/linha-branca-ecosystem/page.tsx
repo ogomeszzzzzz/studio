@@ -29,13 +29,24 @@ const getItemTypeAndCleanName = (productName: string, productType?: string): { i
   const pNameLower = productName.toLowerCase();
   const pTypeLower = productType?.toLowerCase() || '';
 
-  if (pNameLower.includes('protetor') && pNameLower.includes('colchão') || pTypeLower.includes('protetor de colchao')) return { itemType: 'Protetor de Colchão', cleanedName: productName.replace(/protetor de colchão/gi, '').trim() };
-  if (pNameLower.includes('protetor') && pNameLower.includes('travesseiro') || pTypeLower.includes('protetor de travesseiro')) return { itemType: 'Protetor de Travesseiro', cleanedName: productName.replace(/protetor de travesseiro/gi, '').trim() };
-  if (pNameLower.includes('saia') && pNameLower.includes('box') || pTypeLower.includes('saia box')) return { itemType: 'Saia Box', cleanedName: productName.replace(/saia box/gi, '').trim() };
-
-  if (pTypeLower.includes('protetor') && pTypeLower.includes('colchao')) return { itemType: 'Protetor de Colchão', cleanedName: productName };
-  if (pTypeLower.includes('protetor') && pTypeLower.includes('travesseiro')) return { itemType: 'Protetor de Travesseiro', cleanedName: productName };
-  if (pTypeLower.includes('saia')) return { itemType: 'Saia Box', cleanedName: productName };
+  if ((pNameLower.includes('protetor') && pNameLower.includes('colchão')) || pTypeLower.includes('protetor de colchao')) {
+     return { itemType: 'Protetor de Colchão', cleanedName: productName.replace(/protetor de colchão/gi, '').trim() };
+  }
+  if ((pNameLower.includes('protetor') && pNameLower.includes('travesseiro')) || pTypeLower.includes('protetor de travesseiro')) {
+     return { itemType: 'Protetor de Travesseiro', cleanedName: productName.replace(/protetor de travesseiro/gi, '').trim() };
+  }
+  if ((pNameLower.includes('saia') && pNameLower.includes('box')) || pTypeLower.includes('saia box')) {
+     return { itemType: 'Saia Box', cleanedName: productName.replace(/saia box/gi, '').trim() };
+  }
+  if (pTypeLower.includes('protetor') && pTypeLower.includes('colchao')) {
+    return { itemType: 'Protetor de Colchão', cleanedName: productName };
+  }
+  if (pTypeLower.includes('protetor') && pTypeLower.includes('travesseiro')) {
+    return { itemType: 'Protetor de Travesseiro', cleanedName: productName };
+  }
+  if (pTypeLower.includes('saia')) {
+    return { itemType: 'Saia Box', cleanedName: productName };
+  }
 
   return { itemType: 'Outros', cleanedName: productName };
 };
@@ -45,23 +56,53 @@ interface LinhaBrancaItemWidgetProps {
 }
 
 const LinhaBrancaItemWidget: React.FC<LinhaBrancaItemWidgetProps> = ({ item }) => {
-  let statusColorClass = "bg-gray-500";
+  let statusText = item.status;
+  let statusBadgeCombinedClasses = "bg-gray-500 text-white";
   let statusIcon = <HelpCircle className="h-4 w-4" />;
-  let stockPercentage = 0;
-  if (item.targetStock > 0) {
-    stockPercentage = Math.min((item.totalStock / item.targetStock) * 100, 150);
-  } else if (item.totalStock > 0) {
-    stockPercentage = 150;
-  }
+  let statusBadgeVariant: "default" | "destructive" | "outline" | "secondary" = 'outline';
+
 
   switch (item.status) {
-    case 'Critical': statusColorClass = 'bg-red-600'; statusIcon = <PackageX className="h-4 w-4" />; break;
-    case 'Low': statusColorClass = 'bg-yellow-500 text-black'; statusIcon = <TrendingDown className="h-4 w-4" />; break;
-    case 'Healthy': statusColorClass = 'bg-green-600'; statusIcon = <ThumbsUp className="h-4 w-4" />; break;
-    case 'Overstocked': statusColorClass = 'bg-blue-500'; statusIcon = <Repeat className="h-4 w-4" />; break;
-    case 'NoSales': statusColorClass = 'bg-slate-500'; statusIcon = <MinusCircle className="h-4 w-4" />; break;
-    default: statusIcon = <HelpCircle className="h-4 w-4" />; break;
+    case 'Critical':
+      statusBadgeCombinedClasses = "bg-red-600 text-white";
+      statusIcon = <PackageX className="h-4 w-4" />;
+      statusBadgeVariant = 'destructive';
+      break;
+    case 'Low':
+      statusBadgeCombinedClasses = "bg-yellow-500 text-black";
+      statusIcon = <TrendingDown className="h-4 w-4" />;
+      statusBadgeVariant = 'destructive';
+      break;
+    case 'Healthy':
+      statusBadgeCombinedClasses = "bg-green-600 text-white";
+      statusIcon = <ThumbsUp className="h-4 w-4" />;
+      statusBadgeVariant = 'default';
+      break;
+    case 'Overstocked':
+      statusBadgeCombinedClasses = "bg-blue-500 text-white";
+      statusIcon = <Repeat className="h-4 w-4" />;
+      statusBadgeVariant = 'default';
+      break;
+    case 'NoSales':
+      statusBadgeCombinedClasses = "bg-slate-500 text-white";
+      statusIcon = <MinusCircle className="h-4 w-4" />;
+      statusBadgeVariant = 'secondary';
+      break;
+    default: // N/A or undefined
+      statusBadgeCombinedClasses = "bg-gray-400 text-white"; // Adjusted default for better visibility
+      statusIcon = <HelpCircle className="h-4 w-4" />;
+      statusBadgeVariant = 'secondary';
+      break;
   }
+
+  let stockPercentage = 0;
+  if (item.targetStock > 0) {
+    stockPercentage = Math.min((item.totalStock / item.targetStock) * 100, 150); // Allow >100 for overstock indication
+  } else if (item.totalStock > 0) { // Has stock but no target (e.g., no sales)
+    stockPercentage = 5; // Small fill to show it's not empty
+  }
+
+  const progressFillClass = statusBadgeCombinedClasses.split(' ')[0] || "bg-gray-500";
 
   return (
     <Dialog>
@@ -74,8 +115,8 @@ const LinhaBrancaItemWidget: React.FC<LinhaBrancaItemWidgetProps> = ({ item }) =
                   <CardTitle className="text-sm font-semibold leading-tight truncate" title={item.displayName}>
                     {item.displayName}
                   </CardTitle>
-                   <Badge variant={item.status === 'Critical' || item.status === 'Low' ? 'destructive' : item.status === 'Overstocked' ? 'default': 'outline'} className={`text-xs ${statusColorClass} ${item.status === 'Low' ? 'text-black' : 'text-white'} self-start`}>
-                     {statusIcon} <span className="ml-1">{item.status}</span>
+                   <Badge variant={statusBadgeVariant} className={`text-xs ${statusBadgeCombinedClasses} self-start`}>
+                     {statusIcon} <span className="ml-1">{statusText}</span>
                    </Badge>
                 </CardHeader>
                 <CardContent className="p-3 pt-1 space-y-1.5 text-xs flex-grow flex flex-col justify-between">
@@ -99,11 +140,11 @@ const LinhaBrancaItemWidget: React.FC<LinhaBrancaItemWidgetProps> = ({ item }) =
                   </div>
                   <div className="mt-auto">
                     {item.replenishmentSuggestion > 0 && (
-                      <Badge variant="default" className="w-full justify-center bg-green-600 hover:bg-green-700 text-xs mt-1">
+                      <Badge variant="default" className="w-full justify-center bg-green-600 hover:bg-green-700 text-white text-xs mt-1">
                         <PlusCircle className="mr-1 h-3 w-3" /> Repor Agreg.: {item.replenishmentSuggestion.toLocaleString()}
                       </Badge>
                     )}
-                    <Progress value={stockPercentage} className={`h-2 mt-1.5 ${statusColorClass}`} />
+                    <Progress value={Math.min(stockPercentage, 100)} className={`h-2 mt-1.5 ${progressFillClass}`} />
                      <p className="text-xxs text-muted-foreground text-center mt-0.5">Est.Agreg. vs Alvo ({item.targetStock.toLocaleString()} un)</p>
                   </div>
                 </CardContent>
@@ -142,8 +183,8 @@ const LinhaBrancaItemWidget: React.FC<LinhaBrancaItemWidgetProps> = ({ item }) =
                     <TableCell className="text-xs font-medium">{sku.name}</TableCell>
                     <TableCell className="text-xs">{String(sku.vtexId)}</TableCell>
                     <TableCell className="text-right text-xs">{sku.stock.toLocaleString()}</TableCell>
-                    <TableCell className="text-right text-xs">{sku.sales30d?.toLocaleString() || '0'}</TableCell>
-                    <TableCell className="text-right text-xs">{sku.openOrders?.toLocaleString() || '0'}</TableCell>
+                    <TableCell className="text-right text-xs">{(sku.sales30d || 0).toLocaleString()}</TableCell>
+                    <TableCell className="text-right text-xs">{(sku.openOrders || 0).toLocaleString()}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -166,14 +207,14 @@ const LinhaBrancaItemWidget: React.FC<LinhaBrancaItemWidgetProps> = ({ item }) =
 export default function LinhaBrancaEcosystemPage() {
   const { products: allProducts, isLoadingProducts, productsError, refetchProducts, lastDataUpdateTimestamp } = useProducts();
   const { toast } = useToast();
-
   const [processedLinhaBrancaData, setProcessedLinhaBrancaData] = useState<LinhaBrancaBedSizeSummary[]>([]);
 
   useEffect(() => {
     if (isLoadingProducts || productsError) {
-        if(productsError) {
+        if(productsError && !isLoadingProducts) {
             toast({title: "Erro ao carregar dados de Linha Branca", description: productsError, variant: "destructive"});
         }
+        setProcessedLinhaBrancaData([]);
         return;
     }
 
@@ -188,7 +229,7 @@ export default function LinhaBrancaEcosystemPage() {
 
     linhaBrancaProducts.forEach(p => {
       const { itemType } = getItemTypeAndCleanName(p.name, p.productType);
-      const size = p.size || 'Tamanho Único';
+      const size = p.size || 'Tamanho Único'; // Default if size is missing
       const id = `${itemType}-${size}`;
 
       let entry = aggregatedMap.get(id);
@@ -205,13 +246,13 @@ export default function LinhaBrancaEcosystemPage() {
           daysOfStock: null,
           targetStock: 0,
           replenishmentSuggestion: 0,
-          status: 'N/A',
+          status: 'N/A', // Default status
           contributingSkus: [],
         };
       }
-      entry.totalStock += p.stock || 0;
-      entry.totalSales30d += p.sales30d || 0;
-      entry.totalOpenOrders += p.openOrders || 0;
+      entry.totalStock += (p.stock || 0);
+      entry.totalSales30d += (p.sales30d || 0);
+      entry.totalOpenOrders += (p.openOrders || 0);
       entry.contributingSkus.push(p);
       aggregatedMap.set(id, entry);
     });
@@ -221,12 +262,16 @@ export default function LinhaBrancaEcosystemPage() {
       item.dailyAverageSales = item.totalSales30d > 0 ? item.totalSales30d / 30 : 0;
       item.targetStock = Math.round(item.dailyAverageSales * LINHA_BRANCA_TARGET_COVERAGE_DAYS);
       item.daysOfStock = item.dailyAverageSales > 0 ? item.totalStock / item.dailyAverageSales : (item.totalStock > 0 ? Infinity : 0);
-      item.replenishmentSuggestion = item.dailyAverageSales > 0 ? Math.max(0, Math.round(item.targetStock - item.totalStock - item.totalOpenOrders)) : 0;
+
+      const neededForTarget = item.targetStock - (item.totalStock + item.totalOpenOrders);
+      item.replenishmentSuggestion = item.dailyAverageSales > 0 ? Math.max(0, Math.round(neededForTarget)) : 0;
 
       if (item.dailyAverageSales < LINHA_BRANCA_MIN_SIGNIFICANT_DAILY_SALES) {
         item.status = item.totalStock > 0 ? 'NoSales' : 'N/A';
       } else {
-        if (item.daysOfStock !== null && item.daysOfStock < LINHA_BRANCA_CRITICAL_STOCK_DAYS && item.totalOpenOrders < item.replenishmentSuggestion) {
+        const effectiveCoverage = item.dailyAverageSales > 0 ? (item.totalStock + item.totalOpenOrders) / item.dailyAverageSales : Infinity;
+
+        if (item.daysOfStock !== null && item.daysOfStock < LINHA_BRANCA_CRITICAL_STOCK_DAYS && effectiveCoverage < LINHA_BRANCA_LOW_STOCK_DAYS) {
             item.status = 'Critical';
         } else if (item.daysOfStock !== null && item.daysOfStock < LINHA_BRANCA_LOW_STOCK_DAYS) {
             item.status = 'Low';
@@ -241,7 +286,9 @@ export default function LinhaBrancaEcosystemPage() {
 
     const bySize: Record<string, AggregatedLinhaBrancaItem[]> = {};
     finalAggregatedItems.forEach(item => {
-      if (!bySize[item.size]) bySize[item.size] = [];
+      if (!bySize[item.size]) {
+        bySize[item.size] = [];
+      }
       bySize[item.size].push(item);
     });
 
@@ -250,21 +297,35 @@ export default function LinhaBrancaEcosystemPage() {
         let criticalCount = 0;
         let lowCount = 0;
         items.forEach(it => {
-          if (it.status === 'Critical') criticalCount++;
-          if (it.status === 'Low') lowCount++;
+          if (it.status === 'Critical') {
+            criticalCount++;
+          }
+          if (it.status === 'Low') {
+            lowCount++;
+          }
         });
+
         let overallHarmonyStatus: LinhaBrancaBedSizeSummary['overallHarmonyStatus'] = 'Good';
-        if (criticalCount > 0) overallHarmonyStatus = 'Critical';
-        else if (lowCount > 0) overallHarmonyStatus = 'NeedsAttention';
+        if (criticalCount > 0) {
+          overallHarmonyStatus = 'Critical';
+        } else if (lowCount > 0) {
+          overallHarmonyStatus = 'NeedsAttention';
+        }
 
         return { size, items: items.sort((a,b) => a.itemType.localeCompare(b.itemType)), overallHarmonyStatus };
       })
       .sort((a, b) => {
         const indexA = COMMON_SIZES_ORDER.indexOf(a.size);
         const indexB = COMMON_SIZES_ORDER.indexOf(b.size);
-        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
-        if (indexA !== -1) return -1;
-        if (indexB !== -1) return 1;
+        if (indexA !== -1 && indexB !== -1) {
+          return indexA - indexB;
+        }
+        if (indexA !== -1) {
+          return -1;
+        }
+        if (indexB !== -1) {
+          return 1;
+        }
         return a.size.localeCompare(b.size);
       });
 
@@ -274,7 +335,9 @@ export default function LinhaBrancaEcosystemPage() {
 
   const kpis = useMemo(() => {
     const allAggregatedItems = processedLinhaBrancaData.flatMap(s => s.items);
-    if (allAggregatedItems.length === 0) return { totalStockValue: 0, outOfStockSkus: 0, overstockedSkus: 0, replenishmentNeededUnits: 0, criticalStatusCount: 0, lowStatusCount: 0 };
+    if (allAggregatedItems.length === 0) {
+      return { totalStockValue: 0, outOfStockSkus: 0, overstockedSkus: 0, replenishmentNeededUnits: 0, criticalStatusCount: 0, lowStatusCount: 0 };
+    }
 
     let totalStockValue = 0;
     let outOfStockSkus = 0;
@@ -286,13 +349,12 @@ export default function LinhaBrancaEcosystemPage() {
     allAggregatedItems.forEach(item => {
       if (item.status === 'Critical') {
          criticalStatusCount++;
-         item.contributingSkus.filter(s => s.stock === 0 && (s.sales30d || 0) / 30 >= LINHA_BRANCA_MIN_SIGNIFICANT_DAILY_SALES).forEach(() => outOfStockSkus++);
       }
       if (item.status === 'Low') {
         lowStatusCount++;
       }
       if (item.status === 'Overstocked') {
-         item.contributingSkus.forEach(() => overstockedSkus++);
+         overstockedSkus++;
       }
       replenishmentNeededUnits += item.replenishmentSuggestion;
     });
@@ -304,17 +366,21 @@ export default function LinhaBrancaEcosystemPage() {
     return processedLinhaBrancaData
       .flatMap(s => s.items)
       .filter(item => (item.status === 'Critical' || item.status === 'Low') && item.replenishmentSuggestion > 0)
-      .sort((a, b) => (b.dailyAverageSales) - (a.dailyAverageSales))
-      .sort((a,b) => (a.status === 'Critical' ? -1 : 1) - (b.status === 'Critical' ? -1 : 1))
+      .sort((a, b) => {
+        const statusOrder = { 'Critical': 1, 'Low': 2, 'Healthy': 3, 'Overstocked': 4, 'NoSales': 5, 'N/A': 6 } as Record<LinhaBrancaStockStatus, number>;
+        const statusComparison = statusOrder[a.status] - statusOrder[b.status];
+        if (statusComparison !== 0) return statusComparison;
+        return (b.dailyAverageSales) - (a.dailyAverageSales);
+      })
       .slice(0, 5);
   }, [processedLinhaBrancaData]);
 
 
-  if (isLoadingProducts && allProducts.length === 0) {
+  if (isLoadingProducts && allProducts.length === 0 && !productsError) {
     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Carregando dados...</p></div>;
   }
 
-  if (productsError && allProducts.length === 0) {
+  if (productsError && allProducts.length === 0 && !isLoadingProducts) {
     return (
       <Card className="m-auto mt-10 max-w-lg text-center shadow-xl">
         <CardHeader><AlertTriangle className="mx-auto h-16 w-16 text-destructive mb-4" /><CardTitle className="text-2xl">Erro ao Carregar Dados</CardTitle></CardHeader>
@@ -342,33 +408,33 @@ export default function LinhaBrancaEcosystemPage() {
         </CardHeader>
       </Card>
 
-      {linhaBrancaOriginalProducts.length === 0 && !isLoadingProducts && (
+      {linhaBrancaOriginalProducts.length === 0 && !isLoadingProducts && !productsError && (
          <Card className="shadow-md text-center py-10">
             <CardHeader><CardTitle className="flex items-center justify-center text-xl"><Layers className="mr-2 h-7 w-7 text-primary" />Nenhum Produto "Linha Branca"</CardTitle></CardHeader>
             <CardContent><p className="text-muted-foreground">Não foram encontrados produtos com a coleção "{LINHA_BRANCA_COLLECTION_NAME}" nos dados carregados.</p></CardContent>
          </Card>
       )}
 
-      {linhaBrancaOriginalProducts.length > 0 && (
+      {linhaBrancaOriginalProducts.length > 0 && !productsError && (
         <>
           <Card>
             <CardHeader><CardTitle className="text-lg">Painel de Controle Geral - Linha Branca</CardTitle></CardHeader>
             <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
               <Card className="bg-card shadow-sm border-destructive border-l-4">
                 <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-destructive">Itens Agreg. Críticos</CardTitle></CardHeader>
-                <CardContent><p className="text-2xl font-bold text-destructive">{kpis.criticalStatusCount.toLocaleString()}</p><p className="text-xs text-muted-foreground">Venda relevante, cob. < {LINHA_BRANCA_CRITICAL_STOCK_DAYS}d</p></CardContent>
+                <CardContent><p className="text-2xl font-bold text-destructive">{kpis.criticalStatusCount.toLocaleString()}</p><p className="text-xs text-muted-foreground">Venda relevante, cob. &lt; {LINHA_BRANCA_CRITICAL_STOCK_DAYS}d</p></CardContent>
               </Card>
               <Card className="bg-card shadow-sm border-yellow-500 border-l-4">
                 <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-yellow-600">Itens Agreg. Baixos</CardTitle></CardHeader>
-                <CardContent><p className="text-2xl font-bold text-yellow-600">{kpis.lowStatusCount.toLocaleString()}</p><p className="text-xs text-muted-foreground">Venda relevante, cob. < {LINHA_BRANCA_LOW_STOCK_DAYS}d</p></CardContent>
+                <CardContent><p className="text-2xl font-bold text-yellow-600">{kpis.lowStatusCount.toLocaleString()}</p><p className="text-xs text-muted-foreground">Venda relevante, cob. &lt; {LINHA_BRANCA_LOW_STOCK_DAYS}d</p></CardContent>
               </Card>
-              <Card className="bg-card shadow-sm">
-                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">SKUs Superestocados</CardTitle></CardHeader>
-                <CardContent><p className="text-2xl font-bold text-blue-600">{kpis.overstockedSkus.toLocaleString()}</p><p className="text-xs text-muted-foreground">Estoque > {LINHA_BRANCA_OVERSTOCK_FACTOR * 100}% do alvo de vendas</p></CardContent>
+              <Card className="bg-card shadow-sm border-blue-500 border-l-4">
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-blue-600">Itens Agreg. Superestocados</CardTitle></CardHeader>
+                <CardContent><p className="text-2xl font-bold text-blue-600">{processedLinhaBrancaData.flatMap(s => s.items).filter(i => i.status === 'Overstocked').length}</p><p className="text-xs text-muted-foreground">Estoque &gt; {LINHA_BRANCA_OVERSTOCK_FACTOR * 100}% do alvo</p></CardContent>
               </Card>
-              <Card className="bg-card shadow-sm">
-                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Total Reposição Sugerida</CardTitle></CardHeader>
-                <CardContent><p className="text-2xl font-bold text-green-600">{kpis.replenishmentNeededUnits.toLocaleString()} un.</p><p className="text-xs text-muted-foreground">Para cobrir {LINHA_BRANCA_TARGET_COVERAGE_DAYS} dias de venda</p></CardContent>
+              <Card className="bg-card shadow-sm border-green-500 border-l-4">
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-green-600">Total Reposição Sugerida</CardTitle></CardHeader>
+                <CardContent><p className="text-2xl font-bold text-green-600">{kpis.replenishmentNeededUnits.toLocaleString()} un.</p><p className="text-xs text-muted-foreground">Para cobrir {LINHA_BRANCA_TARGET_COVERAGE_DAYS} dias</p></CardContent>
               </Card>
                <Card className="bg-card shadow-sm">
                 <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Itens Agregados Analisados</CardTitle></CardHeader>
@@ -378,16 +444,16 @@ export default function LinhaBrancaEcosystemPage() {
           </Card>
 
           {urgentActions.length > 0 && (
-            <Card className="border-destructive">
-              <CardHeader>
-                <CardTitle className="text-destructive flex items-center"><AlertTriangle className="mr-2"/>Ações Urgentes Sugeridas ({urgentActions.length})</CardTitle>
-                <CardDescription>Itens agregados críticos ou baixos com maior VMD precisando de reposição.</CardDescription>
+            <Card className="border-red-500/70 shadow-md">
+              <CardHeader className="bg-red-500/10">
+                <CardTitle className="text-red-700 flex items-center"><AlertTriangle className="mr-2"/>Ações Urgentes Sugeridas ({urgentActions.length})</CardTitle>
+                <CardDescription className="text-red-600">Itens agregados críticos ou baixos com maior VMD precisando de reposição.</CardDescription>
               </CardHeader>
-              <CardContent>
-                <ul className="space-y-1 text-sm">
+              <CardContent className="pt-4">
+                <ul className="space-y-2 text-sm">
                   {urgentActions.map(item => (
-                    <li key={item.id} className="p-1.5 bg-destructive/5 rounded-md">
-                      <span className="font-semibold">{item.displayName}</span>: Repor <span className="font-bold">{item.replenishmentSuggestion} un</span>. (Est.Agreg: {item.totalStock}, VMD Agreg: {item.dailyAverageSales.toFixed(1)}, Status Agreg: <span className="font-medium">{item.status}</span>)
+                    <li key={item.id} className="p-2.5 border border-red-500/30 rounded-md bg-red-500/5 hover:bg-red-500/10 transition-colors">
+                      <span className="font-semibold text-red-800">{item.displayName}</span>: Repor <span className="font-bold text-red-800">{item.replenishmentSuggestion} un</span>. (Est.Agreg: {item.totalStock}, VMD Agreg: {item.dailyAverageSales.toFixed(1)}, Status Agreg: <span className="font-medium">{item.status}</span>)
                     </li>
                   ))}
                 </ul>
@@ -395,9 +461,16 @@ export default function LinhaBrancaEcosystemPage() {
             </Card>
           )}
 
+          {processedLinhaBrancaData.length === 0 && linhaBrancaOriginalProducts.length > 0 && !isLoadingProducts && (
+             <Card className="shadow-md text-center py-10">
+                <CardHeader><CardTitle className="flex items-center justify-center text-xl"><Layers className="mr-2 h-7 w-7 text-primary" />Processando Dados da Linha Branca...</CardTitle></CardHeader>
+                <CardContent><p className="text-muted-foreground">Aguarde enquanto os dados são agregados e analisados.</p></CardContent>
+             </Card>
+          )}
+
           <div className="space-y-8">
             {processedLinhaBrancaData.map(bedSizeSummary => (
-              <Card key={bedSizeSummary.size} className="overflow-hidden">
+              <Card key={bedSizeSummary.size} className="overflow-hidden shadow-md">
                 <CardHeader className={`p-4 ${
                     bedSizeSummary.overallHarmonyStatus === 'Critical' ? 'bg-red-500/20' :
                     bedSizeSummary.overallHarmonyStatus === 'NeedsAttention' ? 'bg-yellow-500/20' :
@@ -409,7 +482,11 @@ export default function LinhaBrancaEcosystemPage() {
                      <ThumbsUp className="mr-2 h-6 w-6 text-green-700" /> }
                     Ecossistema Cama: {bedSizeSummary.size}
                   </CardTitle>
-                  <CardDescription>
+                  <CardDescription className={
+                    bedSizeSummary.overallHarmonyStatus === 'Critical' ? 'text-red-700' :
+                    bedSizeSummary.overallHarmonyStatus === 'NeedsAttention' ? 'text-yellow-700' :
+                    'text-green-700'
+                  }>
                     Status geral dos itens Linha Branca para camas {bedSizeSummary.size}.
                   </CardDescription>
                 </CardHeader>
@@ -432,5 +509,3 @@ export default function LinhaBrancaEcosystemPage() {
     </div>
   );
 }
-
-    
