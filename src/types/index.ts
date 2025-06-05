@@ -1,5 +1,4 @@
 
-
 export interface Product {
   vtexId: string | number;
   name: string;
@@ -106,6 +105,32 @@ export interface EnhancedProductForStockIntelligence extends Product {
   priority?: 1 | 2 | 3;
   automatedJustification?: string;
   isDailySalesExceedsTotalStock?: boolean;
+}
+
+// For Linha Branca Ecosystem Page
+export type LinhaBrancaItemType = 'Protetor de Colchão' | 'Protetor de Travesseiro' | 'Saia Box' | 'Outros';
+export type LinhaBrancaStockStatus = 'Critical' | 'Low' | 'Healthy' | 'Overstocked' | 'NoSales' | 'N/A';
+
+export interface AggregatedLinhaBrancaItem {
+  id: string; // e.g., "Protetor de Colchão-Queen"
+  itemType: LinhaBrancaItemType;
+  size: string;
+  displayName: string; // e.g., "Protetor Colchão Queen"
+  totalStock: number;
+  totalSales30d: number;
+  totalOpenOrders: number;
+  dailyAverageSales: number;
+  daysOfStock: number | null;
+  targetStock: number;
+  replenishmentSuggestion: number;
+  status: LinhaBrancaStockStatus;
+  contributingSkus: Product[];
+}
+
+export interface LinhaBrancaBedSizeSummary {
+  size: string;
+  items: AggregatedLinhaBrancaItem[];
+  overallHarmonyStatus: 'Good' | 'NeedsAttention' | 'Critical'; // Example overall status
 }
 
 // SalesRecord type was removed as the related panel was deleted.
