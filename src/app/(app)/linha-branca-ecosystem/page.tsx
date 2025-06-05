@@ -19,7 +19,7 @@ import { ptBR } from 'date-fns/locale';
 const LINHA_BRANCA_COLLECTION_NAME = "Linha Branca";
 const LINHA_BRANCA_TARGET_COVERAGE_DAYS = 45;
 const LINHA_BRANCA_MIN_SIGNIFICANT_DAILY_SALES = 0.1;
-const LINHA_BRANCA_OVERSTOCK_FACTOR = 1.75; // More than 175% of target stock is overstock
+const LINHA_BRANCA_OVERSTOCK_FACTOR = 1.75;
 const LINHA_BRANCA_LOW_STOCK_DAYS = 15;
 const LINHA_BRANCA_CRITICAL_STOCK_DAYS = 5;
 
@@ -68,10 +68,10 @@ const LinhaBrancaItemWidget: React.FC<LinhaBrancaItemWidgetProps> = ({ item }) =
       statusIcon = <PackageX className="h-4 w-4" />;
       statusBadgeVariant = 'destructive';
       break;
-    case 'Low': // Handles both "Low" and "Imbalanced" (which is now set as Low)
+    case 'Low':
       statusBadgeCombinedClasses = "bg-yellow-500 text-black";
       statusIcon = <TrendingDown className="h-4 w-4" />;
-      statusBadgeVariant = 'destructive'; // Still a concerning state
+      statusBadgeVariant = 'destructive';
       break;
     case 'Healthy':
       statusBadgeCombinedClasses = "bg-green-600 text-white";
@@ -88,7 +88,7 @@ const LinhaBrancaItemWidget: React.FC<LinhaBrancaItemWidgetProps> = ({ item }) =
       statusIcon = <MinusCircle className="h-4 w-4" />;
       statusBadgeVariant = 'secondary';
       break;
-    default: // N/A or undefined
+    default:
       statusBadgeCombinedClasses = "bg-gray-400 text-white";
       statusIcon = <HelpCircle className="h-4 w-4" />;
       statusBadgeVariant = 'secondary';
@@ -267,7 +267,7 @@ export default function LinhaBrancaEcosystemPage() {
 
       const neededForTarget = item.targetStock - (item.totalStock + item.totalOpenOrders);
       item.replenishmentSuggestion = item.dailyAverageSales > 0 ? Math.max(0, Math.round(neededForTarget)) : 0;
-
+      
       const hasSignificantZeroStockSku = item.contributingSkus.some(
         sku => (sku.stock || 0) === 0 && ((sku.sales30d || 0) / 30) >= LINHA_BRANCA_MIN_SIGNIFICANT_DAILY_SALES
       );
@@ -280,9 +280,9 @@ export default function LinhaBrancaEcosystemPage() {
         if (item.daysOfStock !== null && item.daysOfStock < LINHA_BRANCA_CRITICAL_STOCK_DAYS && effectiveCoverageWithOC < LINHA_BRANCA_LOW_STOCK_DAYS) {
           item.status = 'Critical';
         } else if ((item.daysOfStock !== null && item.daysOfStock < LINHA_BRANCA_LOW_STOCK_DAYS) || hasSignificantZeroStockSku) {
-          item.status = 'Low'; // If overall low, or any significant SKU is zero, it's 'Low'
+          item.status = 'Low';
         } else if (item.targetStock > 0 && (item.totalStock / item.targetStock) > LINHA_BRANCA_OVERSTOCK_FACTOR && item.daysOfStock && item.daysOfStock > (LINHA_BRANCA_TARGET_COVERAGE_DAYS * LINHA_BRANCA_OVERSTOCK_FACTOR)) {
-          item.status = 'Overstocked'; // This is now only reached if not Critical, Low (due to days or gaps)
+          item.status = 'Overstocked';
         } else {
           item.status = 'Healthy';
         }
@@ -333,8 +333,8 @@ export default function LinhaBrancaEcosystemPage() {
     }
 
     return {
-      totalStockValue: 0, // Placeholder, not calculated
-      outOfStockSkus: 0, // Placeholder, needs SKU level definition
+      totalStockValue: 0,
+      outOfStockSkus: 0,
       overstockedSkus: allAggregatedItems.filter(i => i.status === 'Overstocked').length,
       replenishmentNeededUnits: allAggregatedItems.reduce((sum, item) => sum + item.replenishmentSuggestion, 0),
       criticalStatusCount: allAggregatedItems.filter(i => i.status === 'Critical').length,
@@ -432,64 +432,74 @@ export default function LinhaBrancaEcosystemPage() {
               <CardContent className="pt-4">
                 <ul className="space-y-2 text-sm">
                   {urgentActions.map(item => (
-                    <DialogTrigger key={item.id} asChild>
-                      <li
-                        onClick={() => setDetailedItemForUrgentAction(item)}
-                        className="p-2.5 border border-red-500/30 rounded-md bg-red-500/5 hover:bg-red-500/10 transition-colors cursor-pointer"
+                    <li key={item.id} className="list-none">
+                      <Dialog
+                        open={detailedItemForUrgentAction?.id === item.id}
+                        onOpenChange={(isOpen) => {
+                          if (!isOpen && detailedItemForUrgentAction?.id === item.id) {
+                            setDetailedItemForUrgentAction(null);
+                          }
+                        }}
                       >
-                        <span className="font-semibold text-red-800">{item.displayName}</span>: Repor <span className="font-bold text-red-800">{item.replenishmentSuggestion} un</span>. (Est.Agreg: {item.totalStock}, VMD Agreg: {item.dailyAverageSales.toFixed(1)}, Status Agreg: <span className="font-medium">{item.status}</span>)
-                      </li>
-                    </DialogTrigger>
+                        <DialogTrigger asChild>
+                          <button
+                            onClick={() => setDetailedItemForUrgentAction(item)}
+                            className="w-full text-left p-2.5 border border-red-500/30 rounded-md bg-red-500/5 hover:bg-red-500/10 transition-colors cursor-pointer block"
+                          >
+                            <span className="font-semibold text-red-800">{item.displayName}</span>: Repor <span className="font-bold text-red-800">{item.replenishmentSuggestion} un</span>. (Est.Agreg: {item.totalStock}, VMD Agreg: {item.dailyAverageSales.toFixed(1)}, Status Agreg: <span className="font-medium">{item.status}</span>)
+                          </button>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-2xl md:max-w-3xl lg:max-w-4xl">
+                          {detailedItemForUrgentAction?.id === item.id && (
+                            <>
+                              <DialogHeader>
+                                <DialogTitle className="text-xl">SKUs Detalhados para Ação Urgente: {item.displayName}</DialogTitle>
+                                <DialogDescription>
+                                  Lista de SKUs individuais que compõem o item agregado "{item.displayName}".
+                                  Total Agregado: Estoque {item.totalStock}, VMD {item.dailyAverageSales.toFixed(1)}, Ped.Abertos {item.totalOpenOrders}, Sug.Repor {item.replenishmentSuggestion}.
+                                </DialogDescription>
+                              </DialogHeader>
+                              <div className="max-h-[60vh] overflow-y-auto mt-4">
+                                {item.contributingSkus.length > 0 ? (
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead className="min-w-[250px]">Nome Produto (SKU)</TableHead>
+                                        <TableHead>ID VTEX</TableHead>
+                                        <TableHead className="text-right">Estoque SKU</TableHead>
+                                        <TableHead className="text-right">Venda 30d SKU</TableHead>
+                                        <TableHead className="text-right">Ped.Abertos SKU</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {item.contributingSkus.map(sku => (
+                                        <TableRow key={String(sku.vtexId) + '-' + sku.name}>
+                                          <TableCell className="text-xs font-medium">{sku.name}</TableCell>
+                                          <TableCell className="text-xs">{String(sku.vtexId)}</TableCell>
+                                          <TableCell className="text-right text-xs">{sku.stock.toLocaleString()}</TableCell>
+                                          <TableCell className="text-right text-xs">{(sku.sales30d || 0).toLocaleString()}</TableCell>
+                                          <TableCell className="text-right text-xs">{(sku.openOrders || 0).toLocaleString()}</TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                ) : (
+                                  <p className="text-muted-foreground text-center py-4">Nenhum SKU individual encontrado para este item.</p>
+                                )}
+                              </div>
+                              <DialogFooter className="mt-4">
+                                  <DialogClose asChild><Button variant="outline">Fechar</Button></DialogClose>
+                              </DialogFooter>
+                            </>
+                          )}
+                        </DialogContent>
+                      </Dialog>
+                    </li>
                   ))}
                 </ul>
               </CardContent>
             </Card>
           )}
-           {/* Dialog for Urgent Action Item Details */}
-            <Dialog open={!!detailedItemForUrgentAction} onOpenChange={(open) => { if (!open) setDetailedItemForUrgentAction(null); }}>
-                {detailedItemForUrgentAction && (
-                <DialogContent className="sm:max-w-2xl md:max-w-3xl lg:max-w-4xl">
-                    <DialogHeader>
-                    <DialogTitle className="text-xl">SKUs Detalhados para Ação Urgente: {detailedItemForUrgentAction.displayName}</DialogTitle>
-                    <DialogDescription>
-                        Lista de SKUs individuais que compõem o item agregado "{detailedItemForUrgentAction.displayName}".
-                        Total Agregado: Estoque {detailedItemForUrgentAction.totalStock}, VMD {detailedItemForUrgentAction.dailyAverageSales.toFixed(1)}, Ped.Abertos {detailedItemForUrgentAction.totalOpenOrders}, Sug.Repor {detailedItemForUrgentAction.replenishmentSuggestion}.
-                    </DialogDescription>
-                    </DialogHeader>
-                    <div className="max-h-[60vh] overflow-y-auto mt-4">
-                    {detailedItemForUrgentAction.contributingSkus.length > 0 ? (
-                        <Table>
-                        <TableHeader>
-                            <TableRow>
-                            <TableHead className="min-w-[250px]">Nome Produto (SKU)</TableHead>
-                            <TableHead>ID VTEX</TableHead>
-                            <TableHead className="text-right">Estoque SKU</TableHead>
-                            <TableHead className="text-right">Venda 30d SKU</TableHead>
-                            <TableHead className="text-right">Ped.Abertos SKU</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {detailedItemForUrgentAction.contributingSkus.map(sku => (
-                            <TableRow key={String(sku.vtexId) + '-' + sku.name}>
-                                <TableCell className="text-xs font-medium">{sku.name}</TableCell>
-                                <TableCell className="text-xs">{String(sku.vtexId)}</TableCell>
-                                <TableCell className="text-right text-xs">{sku.stock.toLocaleString()}</TableCell>
-                                <TableCell className="text-right text-xs">{(sku.sales30d || 0).toLocaleString()}</TableCell>
-                                <TableCell className="text-right text-xs">{(sku.openOrders || 0).toLocaleString()}</TableCell>
-                            </TableRow>
-                            ))}
-                        </TableBody>
-                        </Table>
-                    ) : (
-                        <p className="text-muted-foreground text-center py-4">Nenhum SKU individual encontrado para este item.</p>
-                    )}
-                    </div>
-                    <DialogFooter className="mt-4">
-                        <DialogClose asChild><Button variant="outline">Fechar</Button></DialogClose>
-                    </DialogFooter>
-                </DialogContent>
-                )}
-            </Dialog>
 
 
           {processedLinhaBrancaData.length === 0 && linhaBrancaOriginalProducts.length > 0 && !isLoadingProducts && (
@@ -540,4 +550,3 @@ export default function LinhaBrancaEcosystemPage() {
     </div>
   );
 }
-
