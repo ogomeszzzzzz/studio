@@ -71,17 +71,23 @@ export async function registerUserInFirestore(prevState: any, formData: FormData
 }
 
 export async function loginUserWithFirestore(prevState: any, formData: FormData): Promise<ActionResult> {
+  console.log('[Login User Firestore Action] Attempting login...');
   if (adminSDKAuthError) {
+    console.error('[Login User Firestore Action] Admin SDK Error:', adminSDKAuthError);
     return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKAuthError}`, status: 'error' };
   }
   if (!adminFirestore_DefaultDB) {
+     console.error('[Login User Firestore Action] Firestore Default DB not available.');
      return { message: "Erro Crítico no Servidor: Conexão com Firestore (Default DB) para usuários não está disponível.", status: 'error' };
   }
 
   const email = formData.get('email') as string;
   const password = formData.get('password') as string;
+  console.log(`[Login User Firestore Action] Email submitted: '${email}', Password submitted length: ${password?.length}`);
+
 
   if (!email || !password) {
+    console.warn('[Login User Firestore Action] Email or password not provided.');
     return { message: 'Email e senha são obrigatórios.', status: 'error' };
   }
 
@@ -95,51 +101,51 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
     }
 
     const userDataFromDb = userDocSnap.data();
-    if (!userDataFromDb || userDataFromDb.password === undefined || userDataFromDb.password === null) { // Check for undefined or null
-        console.warn(`[Login User Firestore Action] User ${email} has invalid or missing password data in DB.`);
+    if (!userDataFromDb || userDataFromDb.password === undefined || userDataFromDb.password === null) {
+        console.warn(`[Login User Firestore Action] User ${email} has invalid or missing password data in DB. userDataFromDb.password is: ${userDataFromDb?.password}`);
         return { message: 'Dados do usuário inválidos ou senha não configurada.', status: 'error' };
     }
 
     const storedPasswordValue = userDataFromDb.password;
-    let storedPasswordString: string;
+    console.log(`[Login User Firestore Action] User ${email}. Stored password type: ${typeof storedPasswordValue}, Stored password value (first 10 chars if string): '${String(storedPasswordValue).substring(0,10)}...'`);
 
+    let storedPasswordString: string;
     if (typeof storedPasswordValue !== 'string') {
       storedPasswordString = String(storedPasswordValue);
-      console.warn(`[Login User Firestore Action] Stored password for user ${email} was not a string (type: ${typeof storedPasswordValue}). Converted to: '${storedPasswordString}'`);
+      console.warn(`[Login User Firestore Action] Stored password for user ${email} was not a string (original type: ${typeof storedPasswordValue}). Converted to string for comparison. Converted value (first 10 chars): '${storedPasswordString.substring(0,10)}...'`);
     } else {
       storedPasswordString = storedPasswordValue;
     }
     
-    // Handle case where stored password might be an empty string after conversion or originally
-    if (storedPasswordString === "") {
-       console.warn(`[Login User Firestore Action] User ${email} has an empty string as stored password.`);
-       // If user also submits an empty password (though form validation should prevent this), it might match.
-       // However, our initial check `if (!email || !password)` should prevent empty submitted passwords.
-       // So, if stored is empty, and submitted is not, it will fail the match, which is correct.
-    }
-
-
     let isMatch = false;
     let needsPasswordUpdate = false;
 
     try {
-      // bcrypt.compare will throw an error if storedPasswordString is not a valid hash.
       console.log(`[Login User Firestore Action] Attempting bcrypt.compare for user ${email}.`);
       isMatch = await bcrypt.compare(password, storedPasswordString);
       if (isMatch) {
          console.log(`[Login User Firestore Action] User ${email} logged in with hashed password.`);
       } else {
-         console.log(`[Login User Firestore Action] Hashed password comparison failed for user ${email}.`);
+         console.log(`[Login User Firestore Action] Hashed password comparison FAILED for user ${email}.`);
       }
     } catch (e: any) {
-      // This block executes if storedPasswordString is NOT a valid bcrypt hash (e.g., it's plaintext)
-      console.warn(`[Login User Firestore Action] bcrypt.compare threw for user ${email}. Assuming plaintext or malformed stored password. Error: ${e.message}`);
-      if (password === storedPasswordString) { // Plaintext comparison
+      console.warn(`[Login User Firestore Action] bcrypt.compare threw for user ${email}. Error: ${e.message}. This usually means the stored password is NOT a valid hash. Attempting plaintext comparison.`);
+      
+      if (typeof storedPasswordString === 'undefined') {
+          console.error(`[Login User Firestore Action] CRITICAL: storedPasswordString is undefined in catch block for user ${email}. This should not happen.`);
+          return { message: 'Erro interno do servidor ao verificar a senha.', status: 'error' };
+      }
+
+      console.log(`[Login User Firestore Action] Plaintext comparison details for user ${email}:`);
+      console.log(`  - Submitted password type: ${typeof password}, length: ${password.length}, value: '${password}'`);
+      console.log(`  - Stored password (as string) type: ${typeof storedPasswordString}, length: ${storedPasswordString.length}, value: '${storedPasswordString}'`);
+
+      if (password === storedPasswordString) {
         isMatch = true;
-        needsPasswordUpdate = true; // Mark for update to hash
+        needsPasswordUpdate = true;
         console.log(`[Login User Firestore Action] User ${email} logged in with plaintext-equivalent password. Password will be updated to hash.`);
       } else {
-        console.log(`[Login User Firestore Action] Plaintext-equivalent password comparison failed for user ${email}.`);
+        console.log(`[Login User Firestore Action] Plaintext-equivalent password comparison FAILED for user ${email}. isMatch remains false.`);
       }
     }
 
@@ -148,18 +154,15 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
       return { message: 'Senha incorreta.', status: 'error' };
     }
 
-    // If login was successful with a password that needs hashing (plaintext or malformed that matched plaintext)
     if (needsPasswordUpdate) {
       try {
         console.log(`[Login User Firestore Action] Attempting to update password to hash for user ${email}.`);
         const salt = await bcrypt.genSalt(SALT_ROUNDS);
-        const hashedPassword = await bcrypt.hash(password, salt);
+        const hashedPassword = await bcrypt.hash(password, salt); // Hash the submitted (and now verified) password
         await userDocRef.update({ password: hashedPassword });
         console.log(`[Login User Firestore Action] Password for user ${email} successfully updated to hash in Firestore.`);
       } catch (updateError: any) {
         console.error(`[Login User Firestore Action] FAILED to update password to hash for user ${email}:`, updateError.message);
-        // Decide on policy: proceed with login or block? For now, proceed but log error.
-        // toast({ title: "Aviso de Segurança", description: "Não foi possível atualizar sua senha para o formato seguro. Contate o suporte.", variant: "destructive" }); // This toast won't work here.
       }
     }
 
@@ -191,4 +194,5 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
     return { message: `Erro no login: ${error.message || 'Erro desconhecido no servidor.'}.`, status: 'error' };
   }
 }
+
     
