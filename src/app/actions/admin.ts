@@ -4,6 +4,7 @@
 import { adminFirestore_DefaultDB, adminSDKInitializationError } from '@/lib/firebase/adminConfig';
 import type { UserProfile } from '@/types';
 import { Timestamp } from 'firebase-admin/firestore';
+import bcrypt from 'bcrypt';
 
 interface AdminActionResult {
   message: string;
@@ -12,12 +13,13 @@ interface AdminActionResult {
 }
 
 const ADMIN_PRIMARY_EMAIL_SERVER = process.env.ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br";
+const SALT_ROUNDS = 10;
 
 // Function to verify if the caller is the admin based on email
 async function verifyAdminByEmail(callerEmail: string | undefined): Promise<boolean> {
   const expectedAdminEmailFromServer = ADMIN_PRIMARY_EMAIL_SERVER; // Use server-side env var or fallback
   console.log(`[Admin Verification by Email] SERVER_ADMIN_EMAIL value being used: '${expectedAdminEmailFromServer}'`);
-  
+
   if (!callerEmail) {
     console.warn('[Admin Verification by Email] Failed: No caller email provided.');
     return false;
@@ -39,7 +41,7 @@ async function verifyAdminByEmail(callerEmail: string | undefined): Promise<bool
 
 export async function getPendingUsers(adminUserEmail: string): Promise<AdminActionResult> {
   console.log(`[Get Pending Users Action] Received request from admin: ${adminUserEmail}`);
-  
+
   if (adminSDKInitializationError) {
     console.error(`[Get Pending Users Action] Failing due to Admin SDK init error: ${adminSDKInitializationError}`);
     return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0, 200)}`, status: 'error' };
@@ -60,17 +62,6 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
 
   console.log('[Get Pending Users Action] Admin verified. Fetching pending users from Firestore (Default DB)...');
   try {
-    // =====================================================================================
-    // IMPORTANTE: Esta consulta requer um ÍNDICE COMPOSTO no Firestore (Default DB).
-    // Coleção: `auth_users`
-    // Campos do Índice:
-    //   1. `pendingApproval` (Ascendente)
-    //   2. `isApproved` (Ascendente)
-    //   3. `createdAt` (Ascendente ou Descendente) - O Firestore geralmente sugere a ordem para `createdAt`
-    // O Firestore fornecerá um link para criar este índice se ele estiver faltando.
-    // Verifique os logs do servidor para este link se o erro "FAILED_PRECONDITION" ocorrer.
-    // Exemplo de índice que pode ser necessário: isApproved (Asc), pendingApproval (Asc), createdAt (Desc)
-    // =====================================================================================
     const snapshot = await adminFirestore_DefaultDB
       .collection('auth_users')
       .where('pendingApproval', '==', true)
@@ -101,9 +92,9 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
             uid: docSnap.id,
             email: data.email,
             name: data.name || 'N/A',
-            isApproved: data.isApproved === true, 
-            pendingApproval: data.pendingApproval === true, 
-            isAdmin: data.isAdmin === true, 
+            isApproved: data.isApproved === true,
+            pendingApproval: data.pendingApproval === true,
+            isAdmin: data.isAdmin === true,
             createdAt: createdAtVal, // Keep as object for client to parse if needed
             photoURL: data.photoURL,
         } as UserProfile;
@@ -113,7 +104,7 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
   } catch (error) {
     console.error('[Get Pending Users Action] Error fetching pending users from Firestore (Default DB):', error);
     const errorMessage = error instanceof Error ? error.message : "Erro desconhecido ao buscar usuários pendentes.";
-    
+
     if (error instanceof Error && (error as any).code === 5 /* FAILED_PRECONDITION for Firestore, was 9 */) {
         const firebaseErrorDetails = (error as any).details || "Índice composto necessário. Verifique os logs do servidor para o link de criação do índice.";
         console.error(`[Get Pending Users Action] Firestore Index Required (Default DB): ${firebaseErrorDetails}`);
@@ -210,7 +201,7 @@ export async function updateUserByAdmin(
   targetUserEmail: string,
   updates: { name?: string; password?: string; isApproved?: boolean; isAdmin?: boolean }
 ): Promise<AdminActionResult> {
-  console.log(`[Update User by Admin Action] Request from admin: ${adminUserEmail} for target: ${targetUserEmail}, Updates:`, updates);
+  console.log(`[Update User by Admin Action] Request from admin: ${adminUserEmail} for target: ${targetUserEmail}, Updates:`, JSON.stringify(updates).replace(/"password":"[^"]*"/, '"password":"***"'));
   if (adminSDKInitializationError) return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError}`, status: 'error' };
   if (!adminFirestore_DefaultDB) return { message: "Erro Crítico no Servidor: Firestore Admin (Default DB) não disponível.", status: 'error' };
   if (!adminUserEmail || !targetUserEmail) return { message: "Emails do administrador e do usuário alvo são obrigatórios.", status: 'error' };
@@ -227,16 +218,20 @@ export async function updateUserByAdmin(
 
   try {
     const userDocRef = adminFirestore_DefaultDB.collection('auth_users').doc(targetUserEmail.toLowerCase());
-    const updateData: Partial<UserProfile> = {};
+    const updateData: Partial<UserProfile> & { password?: string } = {};
+
 
     if (updates.name !== undefined) updateData.name = updates.name;
     if (updates.password !== undefined) {
-      if (updates.password.length < 6 && updates.password.length > 0) { // Allow empty password to mean "no change"
+      if (updates.password.length > 0 && updates.password.length < 6) {
         return { message: "Nova senha deve ter pelo menos 6 caracteres.", status: "error"};
       }
-      if (updates.password.length >= 6) { // Only update if a valid new password is provided
-         updateData.password = updates.password; // Storing plain text - DANGEROUS
+      if (updates.password.length >= 6) {
+         const salt = await bcrypt.genSalt(SALT_ROUNDS);
+         const hashedPassword = await bcrypt.hash(updates.password, salt);
+         updateData.password = hashedPassword; // Store hashed password
       }
+      // If password is an empty string, it means no change to password
     }
     if (updates.isApproved !== undefined) {
         updateData.isApproved = updates.isApproved;

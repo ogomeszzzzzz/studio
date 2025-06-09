@@ -4,14 +4,16 @@
 import { adminFirestore_DefaultDB, adminSDKInitializationError as adminSDKAuthError } from '@/lib/firebase/adminConfig';
 import { Timestamp } from 'firebase-admin/firestore';
 import type { UserProfile } from '@/types';
+import bcrypt from 'bcrypt';
 
 interface ActionResult {
   message: string;
   status: 'success' | 'error' | 'pending';
-  user?: UserProfile; 
+  user?: UserProfile;
 }
 
 const ADMIN_PRIMARY_EMAIL = process.env.ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br";
+const SALT_ROUNDS = 10;
 
 export async function registerUserInFirestore(prevState: any, formData: FormData): Promise<ActionResult> {
   if (adminSDKAuthError) {
@@ -40,13 +42,16 @@ export async function registerUserInFirestore(prevState: any, formData: FormData
       return { message: 'Este email já está registrado.', status: 'error' };
     }
 
+    const salt = await bcrypt.genSalt(SALT_ROUNDS);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
     const isAdmin = email.toLowerCase() === ADMIN_PRIMARY_EMAIL.toLowerCase();
     const newUserProfile: Omit<UserProfile, 'uid'> & { password?: string; createdAt: Timestamp } = {
       email: email.toLowerCase(),
       name,
-      password: password, // ATENÇÃO: Senha em texto plano!
-      isApproved: isAdmin, 
-      pendingApproval: !isAdmin, 
+      password: hashedPassword, // Store hashed password
+      isApproved: isAdmin,
+      pendingApproval: !isAdmin,
       isAdmin: isAdmin,
       createdAt: Timestamp.now(),
     };
@@ -89,19 +94,19 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
     }
 
     const userDataFromDb = userDocSnap.data();
-    if (!userDataFromDb) {
-        return { message: 'Dados do usuário não encontrados após o fetch.', status: 'error' };
+    if (!userDataFromDb || !userDataFromDb.password) { // Ensure password field exists
+        return { message: 'Dados do usuário inválidos ou senha não configurada.', status: 'error' };
     }
-    
-    // ATENÇÃO: Comparação de senha em texto plano!
-    if (userDataFromDb.password !== password) {
+
+    const isMatch = await bcrypt.compare(password, userDataFromDb.password);
+    if (!isMatch) {
       return { message: 'Senha incorreta.', status: 'error' };
     }
 
     if (!userDataFromDb.isApproved && userDataFromDb.pendingApproval) {
       return { message: 'Sua conta está pendente de aprovação pelo administrador.', status: 'pending' };
     }
-    
+
     if (!userDataFromDb.isApproved && !userDataFromDb.pendingApproval) {
       return { message: 'Sua conta não foi aprovada. Contate o administrador.', status: 'error'};
     }
@@ -114,6 +119,7 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
       pendingApproval: userDataFromDb.pendingApproval,
       isAdmin: userDataFromDb.isAdmin,
       createdAt: userDataFromDb.createdAt ? (userDataFromDb.createdAt as Timestamp).toDate() : new Date(),
+      photoURL: userDataFromDb.photoURL,
     };
 
     return { message: 'Login bem-sucedido!', status: 'success', user: userProfileToReturn };
