@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import {
   ShoppingBag, AlertTriangle, FileSpreadsheet,
   Layers, TrendingDown, PackageCheck, ClipboardList, Palette, Box, Ruler,
-  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon as PieChartLucide, ListFilter, Clock, BarChartHorizontal, SearchIcon, LineChart
+  Download, Loader2, Activity, Percent, Database, Filter, PieChartIcon as PieChartLucide, ListFilter, Clock, BarChartHorizontal, SearchIcon, LineChart, FileText, ChevronLeft, ChevronRight, TableIcon
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -22,10 +22,13 @@ import type { jsPDFDocumentProperties } from 'jspdf'; // For type safety with au
 import html2canvas from 'html2canvas';
 import { firestore, firestoreClientInitializationError } from '@/lib/firebase/config';
 import { collection, getDocs, writeBatch, doc, Timestamp, query, setDoc, getDoc, serverTimestamp, orderBy, addDoc, deleteDoc, collectionGroup } from 'firebase/firestore';
-import { format as formatDateFns, isValid as isDateValid } from 'date-fns';
+import { format as formatDateFns, isValid as isDateValid, parseISO, isBefore, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '@/contexts/AuthContext';
-import { useProducts } from '@/contexts/ProductsContext'; // Import useProducts
+import { useProducts } from '@/contexts/ProductsContext';
+import { ProductDataTableSection } from '@/components/domain/ProductDataTableSection'; // Import ProductDataTableSection
+import * as XLSX from 'xlsx';
+
 
 interface AggregatedCollectionData {
   name: string;
@@ -53,6 +56,7 @@ interface CollectionSkuStatusData {
 
 const ALL_COLLECTIONS_VALUE = "_ALL_DASHBOARD_COLLECTIONS_";
 const FIRESTORE_BATCH_LIMIT = 450; // Firestore batch limit
+const DASHBOARD_TABLE_ITEMS_PER_PAGE = 50;
 
 const chartConfigBase = {
   stock: { label: "Estoque", },
@@ -115,12 +119,11 @@ const stockHistoryEntryFromFirestore = (id: string, data: any): StockHistoryEntr
 
 
 export default function DashboardPage() {
-  // Use products and metadata from ProductsContext
-  const { products: dashboardProducts, 
-          lastDataUpdateTimestamp, 
-          isLoadingProducts: isLoadingFirestore, // Rename for clarity in this component
-          productsError, 
-          refetchProducts 
+  const { products: dashboardProducts,
+          lastDataUpdateTimestamp,
+          isLoadingProducts: isLoadingFirestore,
+          productsError,
+          refetchProducts
         } = useProducts();
 
   const [isProcessingExcel, setIsProcessingExcel] = useState(false);
@@ -129,11 +132,14 @@ export default function DashboardPage() {
 
   const { currentUser, isLoading: isAuthLoading } = useAuth();
   const [isSavingFirestore, setIsSavingFirestore] = useState(false);
-  
+
   const [selectedCollection, setSelectedCollection] = useState<string>(ALL_COLLECTIONS_VALUE);
-  
+
   const [stockHistory, setStockHistory] = useState<StockHistoryEntry[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+
+  const [currentProductTablePage, setCurrentProductTablePage] = useState(1);
+  const [isExportingFiltered, setIsExportingFiltered] = useState(false);
 
 
   const isAdmin = useMemo(() => currentUser?.email.toLowerCase() === (process.env.NEXT_PUBLIC_ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br").toLowerCase() && currentUser?.isAdmin, [currentUser]);
@@ -163,19 +169,17 @@ export default function DashboardPage() {
     if (isAuthLoading) return;
 
     if (firestoreClientInitializationError || !firestore) {
-      // Error already handled by ProductsContext or global error display
       setIsLoadingHistory(false);
       return;
     }
     if (productsError) {
-        // If product context has error, don't attempt history fetch
         setIsLoadingHistory(false);
         return;
     }
 
     if (currentUser) {
-      const fetchNeeded = 
-          stockHistory.length === 0 || 
+      const fetchNeeded =
+          stockHistory.length === 0 ||
           (lastDataUpdateTimestamp && stockHistory.length > 0 && stockHistory[stockHistory.length-1]?.date && lastDataUpdateTimestamp > stockHistory[stockHistory.length-1].date);
 
       if (!isSavingFirestore && fetchNeeded && !isLoadingFirestore) {
@@ -200,7 +204,7 @@ export default function DashboardPage() {
       return;
     }
     setIsSavingFirestore(true);
-    setIsLoadingHistory(true); // Set loading history to true here as new history will be added
+    setIsLoadingHistory(true);
 
     let totalDeleted = 0;
     let totalAdded = 0;
@@ -208,7 +212,7 @@ export default function DashboardPage() {
     try {
       const productsColPath = "shared_products";
       const productsColRef = collection(firestore, productsColPath);
-      
+
       const existingDocsSnapshot = await getDocs(query(productsColRef));
       const docsToDelete = existingDocsSnapshot.docs;
 
@@ -225,7 +229,7 @@ export default function DashboardPage() {
           const batch = writeBatch(firestore);
           const chunk = productsToSave.slice(i, i + FIRESTORE_BATCH_LIMIT);
           chunk.forEach(product => {
-            const newDocRef = doc(productsColRef); 
+            const newDocRef = doc(productsColRef);
             batch.set(newDocRef, productToFirestore(product));
           });
           await batch.commit();
@@ -245,25 +249,20 @@ export default function DashboardPage() {
 
       const metadataDocRef = doc(firestore, "app_metadata", "products_metadata");
       await setDoc(metadataDocRef, { lastUpdatedAt: serverTimestamp() }, { merge: true });
-      
-      await refetchProducts(); // Refetch products in context
-      // After products are refetched, fetchHistory will be called by its own useEffect logic
-      // if lastDataUpdateTimestamp (from refetchProducts) is newer than current history.
-      // No need to explicitly call fetchHistory here, let the existing useEffect handle it.
-      // Just ensure isLoadingHistory is correctly managed.
+
+      await refetchProducts();
+
 
       toast({ title: "Dados Globais Salvos!", description: `${totalAdded} produtos foram salvos. ${totalDeleted > 0 ? `${totalDeleted} antigos foram removidos.` : ''} Histórico de estoque atualizado.` });
 
     } catch (error) {
       const firestoreError = error as Error;
       toast({ title: "Erro ao Salvar", description: `Não foi possível salvar: ${firestoreError.message}`, variant: "destructive" });
-      setIsLoadingHistory(false); // Ensure loading stops on error
+      setIsLoadingHistory(false);
     } finally {
       setIsSavingFirestore(false);
-      // isLoadingHistory will be set to false by fetchHistory's finally block.
-      // Or, if no refetch of history is needed, it should already be false from ProductsContext.
     }
-  }, [currentUser, isAdmin, toast, refetchProducts]); 
+  }, [currentUser, isAdmin, toast, refetchProducts]);
 
   const handleExcelDataProcessed = useCallback(async (parsedProducts: Product[]) => {
     await saveProductsToFirestore(parsedProducts);
@@ -326,7 +325,7 @@ export default function DashboardPage() {
       const collectionKey = product.collection || 'Não Especificada';
       const typeKey = product.productType || 'Não Especificado';
       const sizeKey = product.size || 'Não Especificado';
-      const printKey = product.description || 'Não Especificada'; 
+      const printKey = product.description || 'Não Especificada';
 
       const currentCol = stockByCollectionMap.get(collectionKey) || { stock: 0, skus: 0 };
       currentCol.stock += (product.stock || 0);
@@ -357,14 +356,14 @@ export default function DashboardPage() {
         currentCollectionSkuData.zeroStockSkus += 1;
       }
       collectionSkuMap.set(collectionKey, currentCollectionSkuData);
-      
+
       if((product.stock || 0) === 0) totalZeroStockSkus++;
       totalStock += (product.stock || 0);
       totalReadyToShipStock += product.readyToShip || 0;
       totalRegulatorStock += product.regulatorStock || 0;
       totalOpenOrders += product.openOrders || 0;
     });
-    
+
     const collectionSkuStatusData: CollectionSkuStatusData[] = Array.from(collectionSkuMap.entries()).map(([name, data]) => ({
         name,
         activeSkus: data.activeSkus,
@@ -467,7 +466,7 @@ export default function DashboardPage() {
         ["Total SKUs Zerados", aggregatedData.totalZeroStockSkus.toLocaleString()],
       ];
 
-      doc.autoTable({ 
+      doc.autoTable({
         startY: yPos,
         head: [["Métrica", "Valor"]],
         body: summaryTableBody,
@@ -481,12 +480,12 @@ export default function DashboardPage() {
 
       const addChartToPdf = async (elementId: string, chartTitle: string) => {
         const chartElement = document.getElementById(elementId);
-        if (!chartElement || chartElement.offsetParent === null) { 
+        if (!chartElement || chartElement.offsetParent === null) {
           console.warn(`Elemento do gráfico ${elementId} não encontrado ou não visível. Pulando no PDF.`);
-          doc.setTextColor(150, 150, 150); 
+          doc.setTextColor(150, 150, 150);
           doc.setFontSize(10);
           doc.text(`Gráfico "${chartTitle}" não disponível ou sem dados.`, margin, yPos);
-          doc.setTextColor(0); 
+          doc.setTextColor(0);
           yPos += 8;
           return;
         }
@@ -567,6 +566,78 @@ export default function DashboardPage() {
     );
   };
 
+  // Helper function for getCollectionStatus - needed for Excel export
+  const getCollectionStatusForExport = (product: Product): string => {
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const endDateInput = product.collectionEndDate;
+      let endDate: Date | null = null;
+
+      if (endDateInput instanceof Date && isDateValid(endDateInput)) {
+        endDate = new Date(endDateInput.valueOf());
+      } else if (typeof endDateInput === 'string') {
+        const parsedDate = parseISO(endDateInput); // Use parseISO for better ISO string handling
+        if (isDateValid(parsedDate)) endDate = parsedDate;
+      } else if (typeof endDateInput === 'number' && !isNaN(endDateInput)) {
+          const excelBaseDate = new Date(Date.UTC(1899, 11, 30));
+          const d = new Date(excelBaseDate.getTime() + endDateInput * 24 * 60 * 60 * 1000);
+          if (isDateValid(d)) endDate = d;
+      }
+
+      if (endDate && isDateValid(endDate)) {
+        endDate.setHours(0,0,0,0);
+        if (isBefore(endDate, today)) {
+          return product.stock > 0 ? 'Coleção Passada (Em Estoque)' : 'Coleção Passada (Sem Estoque)';
+        }
+        if (isBefore(endDate, addDays(today, 30))) {
+          return 'Próximo ao Fim';
+        }
+      }
+      if (product.isCurrentCollection === false && product.stock > 0) {
+         return 'Não Atual (Em Estoque)';
+      }
+      if (product.isCurrentCollection === true) {
+        return 'Coleção Atual';
+      }
+      return 'Status N/A';
+  };
+
+  const handleExportFilteredToExcel = () => {
+    if (filteredProductsForDashboard.length === 0) {
+      toast({ title: "Nenhum Dado para Exportar", description: "Não há produtos filtrados para exportar.", variant: "default" });
+      return;
+    }
+    setIsExportingFiltered(true);
+    toast({ title: "Exportando Lista Filtrada...", description: "Gerando arquivo Excel." });
+
+    const dataToExport = filteredProductsForDashboard.map(p => ({
+      "ID VTEX": typeof p.vtexId === 'number' ? p.vtexId : String(p.vtexId ?? ''),
+      "Nome Produto": p.name,
+      "Produto-Derivação": p.productDerivation,
+      "Estoque Atual": p.stock,
+      "Coleção (Desc. Linha Comercial)": p.collection,
+      "Descrição (Estampa)": p.description,
+      "Tamanho": p.size,
+      "Tipo Produto": p.productType,
+      "Status Coleção": getCollectionStatusForExport(p),
+    }));
+
+    try {
+        const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "ProdutosFiltradosDashboard");
+        const collectionSuffix = selectedCollection === ALL_COLLECTIONS_VALUE ? 'TodasColecoes' : selectedCollection.replace(/[^a-zA-Z0-9]/g, '_');
+        XLSX.writeFile(workbook, `Dashboard_Produtos_${collectionSuffix}_${formatDateFns(new Date(), 'yyyy-MM-dd')}.xlsx`);
+        toast({ title: "Exportação Concluída", description: "A lista de produtos filtrados foi exportada." });
+    } catch (error) {
+        console.error("Erro ao exportar lista filtrada para Excel:", error);
+        toast({ title: "Erro na Exportação", description: "Não foi possível gerar o arquivo Excel da lista filtrada.", variant: "destructive" });
+    } finally {
+        setIsExportingFiltered(false);
+    }
+  };
+
+
   const displayLoader = (isLoadingFirestore || isAuthLoading) && dashboardProducts.length === 0 && !isSavingFirestore;
 
   if (displayLoader) {
@@ -589,8 +660,8 @@ export default function DashboardPage() {
           <h1 className="text-3xl font-bold tracking-tight text-foreground">Dashboard de Performance</h1>
           <p className="text-muted-foreground">Visão geral dos dados com base na coluna "Descrição Linha Comercial" e histórico de estoque.</p>
         </div>
-        <Button 
-          onClick={generateDashboardPdf} 
+        <Button
+          onClick={generateDashboardPdf}
           disabled={isGeneratingPdf || isSavingFirestore || isLoadingFirestore || (filteredProductsForDashboard.length === 0 && stockHistory.length === 0) || isAuthLoading }
         >
             {isGeneratingPdf ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
@@ -639,7 +710,7 @@ export default function DashboardPage() {
             <CardContent><p className="text-muted-foreground">Nenhum dado de produto foi carregado no sistema. Por favor, peça a um administrador para carregar uma planilha de dados.</p></CardContent>
          </Card>
       )}
-      {isSavingFirestore && ( 
+      {isSavingFirestore && (
         <Card className="shadow-lg"><CardHeader><CardTitle className="flex items-center"><Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" />Salvando dados...</CardTitle></CardHeader><CardContent><p className="text-muted-foreground">Por favor, aguarde.</p></CardContent></Card>
       )}
       {!isLoadingFirestore && !isAuthLoading && !isSavingFirestore && dashboardProducts.length === 0 && !isProcessingExcel && isAdmin && (
@@ -652,7 +723,7 @@ export default function DashboardPage() {
       {isLoadingHistory && (
         <Card className="shadow-lg"><CardHeader><CardTitle className="flex items-center"><Loader2 className="mr-2 h-6 w-6 animate-spin text-primary" />Carregando histórico...</CardTitle></CardHeader></Card>
       )}
-      
+
       {!isLoadingHistory && stockHistory.length > 0 && (
          <Card id="chart-stock-history" className="shadow-lg hover:shadow-xl transition-shadow">
             <CardHeader>
@@ -663,14 +734,14 @@ export default function DashboardPage() {
               <ChartContainer config={stockHistoryChartConfig} className="h-full w-full">
                 <RechartsLineChart data={stockHistory} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis 
-                    dataKey="date" 
+                  <XAxis
+                    dataKey="date"
                     tickFormatter={(value) => {
                         if (value === null || typeof value === 'undefined') return "N/A";
                         const dateToFormat = value instanceof Date ? value : new Date(value);
                         if (isDateValid(dateToFormat)) return formatDateFns(dateToFormat, "dd/MM/yy", { locale: ptBR });
                         return "Inválida";
-                    }} 
+                    }}
                   />
                   <YAxis yAxisId="left" stroke="hsl(var(--chart-1))" label={{ value: 'Unidades Totais', angle: -90, position: 'insideLeft', style: {textAnchor: 'middle', fill: 'hsl(var(--chart-1))'} }} />
                   <YAxis yAxisId="right" orientation="right" stroke="hsl(var(--chart-2))" label={{ value: 'SKUs c/ Estoque', angle: 90, position: 'insideRight', style: {textAnchor: 'middle', fill: 'hsl(var(--chart-2))'} }} />
@@ -699,7 +770,7 @@ export default function DashboardPage() {
                             console.error("ChartTooltip (History): dateToFormat became invalid unexpectedly. Original Label:", label);
                             return "Data Inválida";
                           }
-                        }} 
+                        }}
                         formatter={(value, name) => {
                           const valStr = (value as number).toLocaleString();
                           if (name === 'totalStockUnits') {
@@ -707,7 +778,7 @@ export default function DashboardPage() {
                           } else if (name === 'totalSkusWithStock') {
                             return [`${valStr} SKUs com Estoque`, 'SKUs c/ Estoque'];
                           }
-                          return [valStr, name as string]; 
+                          return [valStr, name as string];
                         }}
                     />}
                   />
@@ -786,9 +857,52 @@ export default function DashboardPage() {
                 <CardContent className="h-[400px]"><ChartContainer config={collectionSkuStatusChartConfig} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><RechartsBarChart data={aggregatedData.collectionSkuStatus} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} /><XAxis type="number" tickFormatter={(value) => value.toLocaleString()}/><YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}} interval={0} /><Tooltip content={<ChartTooltipContent />} /><RechartsLegend /><Bar dataKey="activeSkus" name="SKUs Ativos" fill="hsl(var(--chart-1))" stackId="collection" radius={[0, 4, 4, 0]}/><Bar dataKey="zeroStockSkus" name="SKUs Zerados" fill="hsl(var(--destructive))" stackId="collection" radius={[0, 4, 4, 0]}/></RechartsBarChart></ResponsiveContainer></ChartContainer></CardContent>
             </Card>
             )}
+
+          {filteredProductsForDashboard.length > 0 && (
+             <Card className="shadow-xl border-t-4 border-primary">
+                <CardHeader>
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                    <div>
+                      <CardTitle className="flex items-center text-xl"><TableIcon className="mr-2 h-6 w-6 text-primary"/>Lista de Produtos da Coleção Selecionada</CardTitle>
+                      <CardDescription>
+                        Detalhes dos produtos para: {selectedCollection === ALL_COLLECTIONS_VALUE ? "Todas as Coleções" : `Coleção "${selectedCollection}"`}.
+                        Total: {filteredProductsForDashboard.length.toLocaleString()} SKUs.
+                      </CardDescription>
+                    </div>
+                    <Button
+                      onClick={handleExportFilteredToExcel}
+                      disabled={isExportingFiltered || isLoadingFirestore || isSavingFirestore}
+                      size="sm"
+                      className="w-full sm:w-auto"
+                    >
+                      {isExportingFiltered ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+                      Exportar Lista para Excel
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <ProductDataTableSection
+                    products={filteredProductsForDashboard}
+                    isLoading={isLoadingFirestore || isSavingFirestore}
+                    itemsPerPage={DASHBOARD_TABLE_ITEMS_PER_PAGE}
+                    showVtexIdColumn={true}
+                    showNameColumn={true}
+                    showProductDerivationColumn={true}
+                    showStockColumn={true}
+                    showCollectionColumn={true}
+                    showDescriptionColumn={true}
+                    showSizeColumn={true}
+                    showProductTypeColumn={true}
+                    showStatusColumn={true}
+                    cardTitle="" // Title handled by parent Card
+                    cardDescription="" // Description handled by parent Card
+                    cardIcon={undefined} // Icon handled by parent Card
+                  />
+                </CardContent>
+              </Card>
+          )}
         </>
       )}
     </div>
   );
 }
-
