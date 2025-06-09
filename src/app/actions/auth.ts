@@ -90,29 +90,91 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
     const userDocSnap = await userDocRef.get();
 
     if (!userDocSnap.exists) {
+      console.log(`[Login User Firestore Action] User document not found for email: ${email.toLowerCase()}`);
       return { message: 'Email não encontrado.', status: 'error' };
     }
 
     const userDataFromDb = userDocSnap.data();
-    if (!userDataFromDb || !userDataFromDb.password) { // Ensure password field exists
+    if (!userDataFromDb || userDataFromDb.password === undefined || userDataFromDb.password === null) { // Check for undefined or null
+        console.warn(`[Login User Firestore Action] User ${email} has invalid or missing password data in DB.`);
         return { message: 'Dados do usuário inválidos ou senha não configurada.', status: 'error' };
     }
 
-    const isMatch = await bcrypt.compare(password, userDataFromDb.password);
+    const storedPasswordValue = userDataFromDb.password;
+    let storedPasswordString: string;
+
+    if (typeof storedPasswordValue !== 'string') {
+      storedPasswordString = String(storedPasswordValue);
+      console.warn(`[Login User Firestore Action] Stored password for user ${email} was not a string (type: ${typeof storedPasswordValue}). Converted to: '${storedPasswordString}'`);
+    } else {
+      storedPasswordString = storedPasswordValue;
+    }
+    
+    // Handle case where stored password might be an empty string after conversion or originally
+    if (storedPasswordString === "") {
+       console.warn(`[Login User Firestore Action] User ${email} has an empty string as stored password.`);
+       // If user also submits an empty password (though form validation should prevent this), it might match.
+       // However, our initial check `if (!email || !password)` should prevent empty submitted passwords.
+       // So, if stored is empty, and submitted is not, it will fail the match, which is correct.
+    }
+
+
+    let isMatch = false;
+    let needsPasswordUpdate = false;
+
+    try {
+      // bcrypt.compare will throw an error if storedPasswordString is not a valid hash.
+      console.log(`[Login User Firestore Action] Attempting bcrypt.compare for user ${email}.`);
+      isMatch = await bcrypt.compare(password, storedPasswordString);
+      if (isMatch) {
+         console.log(`[Login User Firestore Action] User ${email} logged in with hashed password.`);
+      } else {
+         console.log(`[Login User Firestore Action] Hashed password comparison failed for user ${email}.`);
+      }
+    } catch (e: any) {
+      // This block executes if storedPasswordString is NOT a valid bcrypt hash (e.g., it's plaintext)
+      console.warn(`[Login User Firestore Action] bcrypt.compare threw for user ${email}. Assuming plaintext or malformed stored password. Error: ${e.message}`);
+      if (password === storedPasswordString) { // Plaintext comparison
+        isMatch = true;
+        needsPasswordUpdate = true; // Mark for update to hash
+        console.log(`[Login User Firestore Action] User ${email} logged in with plaintext-equivalent password. Password will be updated to hash.`);
+      } else {
+        console.log(`[Login User Firestore Action] Plaintext-equivalent password comparison failed for user ${email}.`);
+      }
+    }
+
     if (!isMatch) {
+      console.log(`[Login User Firestore Action] Final isMatch is false for user ${email}. Returning 'Senha incorreta'.`);
       return { message: 'Senha incorreta.', status: 'error' };
     }
 
+    // If login was successful with a password that needs hashing (plaintext or malformed that matched plaintext)
+    if (needsPasswordUpdate) {
+      try {
+        console.log(`[Login User Firestore Action] Attempting to update password to hash for user ${email}.`);
+        const salt = await bcrypt.genSalt(SALT_ROUNDS);
+        const hashedPassword = await bcrypt.hash(password, salt);
+        await userDocRef.update({ password: hashedPassword });
+        console.log(`[Login User Firestore Action] Password for user ${email} successfully updated to hash in Firestore.`);
+      } catch (updateError: any) {
+        console.error(`[Login User Firestore Action] FAILED to update password to hash for user ${email}:`, updateError.message);
+        // Decide on policy: proceed with login or block? For now, proceed but log error.
+        // toast({ title: "Aviso de Segurança", description: "Não foi possível atualizar sua senha para o formato seguro. Contate o suporte.", variant: "destructive" }); // This toast won't work here.
+      }
+    }
+
     if (!userDataFromDb.isApproved && userDataFromDb.pendingApproval) {
+      console.log(`[Login User Firestore Action] User ${email} login attempt: pending approval.`);
       return { message: 'Sua conta está pendente de aprovação pelo administrador.', status: 'pending' };
     }
 
     if (!userDataFromDb.isApproved && !userDataFromDb.pendingApproval) {
+      console.log(`[Login User Firestore Action] User ${email} login attempt: not approved.`);
       return { message: 'Sua conta não foi aprovada. Contate o administrador.', status: 'error'};
     }
 
     const userProfileToReturn: UserProfile = {
-      uid: userDocSnap.id, // email é o ID
+      uid: userDocSnap.id, 
       email: userDataFromDb.email,
       name: userDataFromDb.name,
       isApproved: userDataFromDb.isApproved,
@@ -121,11 +183,12 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
       createdAt: userDataFromDb.createdAt ? (userDataFromDb.createdAt as Timestamp).toDate() : new Date(),
       photoURL: userDataFromDb.photoURL,
     };
-
+    console.log(`[Login User Firestore Action] User ${email} login successful. Status: Approved.`);
     return { message: 'Login bem-sucedido!', status: 'success', user: userProfileToReturn };
 
   } catch (error: any) {
-    console.error('[Login User Firestore Action] Error:', error);
-    return { message: `Erro no login: ${error.message || 'Erro desconhecido'}.`, status: 'error' };
+    console.error('[Login User Firestore Action] Outer catch block error:', error);
+    return { message: `Erro no login: ${error.message || 'Erro desconhecido no servidor.'}.`, status: 'error' };
   }
 }
+    
