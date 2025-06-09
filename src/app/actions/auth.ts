@@ -45,21 +45,21 @@ export async function registerUserInFirestore(prevState: any, formData: FormData
     const salt = await bcrypt.genSalt(SALT_ROUNDS);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    const isAdmin = email.toLowerCase() === ADMIN_PRIMARY_EMAIL.toLowerCase();
+    const isAdminUser = email.toLowerCase() === ADMIN_PRIMARY_EMAIL.toLowerCase();
     const newUserProfile: Omit<UserProfile, 'uid'> & { password?: string; createdAt: Timestamp } = {
       email: email.toLowerCase(),
       name,
       password: hashedPassword, // Store hashed password
-      isApproved: isAdmin,
-      pendingApproval: !isAdmin,
-      isAdmin: isAdmin,
+      isApproved: isAdminUser,
+      pendingApproval: !isAdminUser,
+      isAdmin: isAdminUser,
       createdAt: Timestamp.now(),
     };
 
     await userDocRef.set(newUserProfile);
 
     return {
-      message: isAdmin
+      message: isAdminUser
         ? 'Conta de administrador registrada e aprovada automaticamente!'
         : 'Registro realizado com sucesso! Sua conta está pendente de aprovação pelo administrador.',
       status: 'success'
@@ -82,16 +82,19 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
   }
 
   const email = formData.get('email') as string;
-  const password = formData.get('password') as string;
+  const rawSubmittedPassword = formData.get('password') as string;
   
   console.log(`[Login User Firestore Action] Email submitted: '${email}'`);
-  console.log(`[Login User Firestore Action] Submitted password type: ${typeof password}, length: ${password?.length}`);
+  console.log(`[Login User Firestore Action] Raw submitted password type: ${typeof rawSubmittedPassword}, length: ${rawSubmittedPassword?.length}`);
 
-
-  if (!email || !password) {
+  if (!email || !rawSubmittedPassword) {
     console.warn('[Login User Firestore Action] Email or password not provided.');
     return { message: 'Email e senha são obrigatórios.', status: 'error' };
   }
+
+  const submittedPasswordTrimmed = rawSubmittedPassword.trim();
+  console.log(`[Login User Firestore Action] Submitted password (trimmed) type: ${typeof submittedPasswordTrimmed}, length: ${submittedPasswordTrimmed.length}, value: '${submittedPasswordTrimmed}'`);
+
 
   try {
     const userDocRef = adminFirestore_DefaultDB.collection('auth_users').doc(email.toLowerCase());
@@ -109,15 +112,14 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
     }
 
     const storedPasswordValue = userDataFromDb.password;
-    console.log(`[Login User Firestore Action] User ${email}. Stored password (raw) type: ${typeof storedPasswordValue}, value (first 10 chars if string): '${String(storedPasswordValue).substring(0,10)}...'`);
+    console.log(`[Login User Firestore Action] User ${email}. Stored password (raw from DB) type: ${typeof storedPasswordValue}, value (first 10 chars if string): '${String(storedPasswordValue).substring(0,10)}...'`);
     
     let isMatch = false;
     let needsPasswordUpdate = false;
-    const submittedPasswordTrimmed = password.trim(); // Trim submitted password here
 
     try {
       console.log(`[Login User Firestore Action] Attempting bcrypt.compare for user ${email}.`);
-      // Ensure storedPasswordValue is a string for bcrypt.compare
+      // bcrypt.compare takes the raw password and the hash
       isMatch = await bcrypt.compare(submittedPasswordTrimmed, String(storedPasswordValue));
       if (isMatch) {
          console.log(`[Login User Firestore Action] User ${email} logged in with hashed password.`);
@@ -126,15 +128,18 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
       }
     } catch (e: any) {
       // This block is entered if bcrypt.compare throws, likely due to stored password not being a valid hash (i.e., it's plaintext)
-      console.warn(`[Login User Firestore Action] bcrypt.compare threw for user ${email}. Error: ${e.message}. Attempting plaintext comparison.`);
+      console.warn(`[Login User Firestore Action] bcrypt.compare threw for user ${email}. Error: ${e.message}. This indicates the stored password is likely plaintext. Attempting direct plaintext comparison.`);
       
       const storedPasswordStringTrimmed = String(storedPasswordValue).trim();
 
       console.log(`[Login User Firestore Action] Plaintext comparison details for user ${email}:`);
       console.log(`  - Submitted (trimmed) password type: ${typeof submittedPasswordTrimmed}, length: ${submittedPasswordTrimmed.length}, value: '${submittedPasswordTrimmed}'`);
-      console.log(`  - Stored (trimmed) password type: ${typeof storedPasswordStringTrimmed}, length: ${storedPasswordStringTrimmed.length}, value: '${storedPasswordStringTrimmed}'`);
+      console.log(`  - Stored (trimmed from DB) password type: ${typeof storedPasswordStringTrimmed}, length: ${storedPasswordStringTrimmed.length}, value: '${storedPasswordStringTrimmed}'`);
 
-      if (submittedPasswordTrimmed === storedPasswordStringTrimmed) {
+      const directComparisonResult = submittedPasswordTrimmed === storedPasswordStringTrimmed;
+      console.log(`[Login User Firestore Action] Result of direct trimmed string comparison (submittedPasswordTrimmed === storedPasswordStringTrimmed): ${directComparisonResult}`);
+
+      if (directComparisonResult) {
         isMatch = true;
         needsPasswordUpdate = true;
         console.log(`[Login User Firestore Action] User ${email} logged in with plaintext-equivalent password (after trimming both). Password will be updated to hash.`);
@@ -148,6 +153,7 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
       return { message: 'Senha incorreta.', status: 'error' };
     }
 
+    // If login was successful and password needs update (was plaintext)
     if (needsPasswordUpdate) {
       try {
         console.log(`[Login User Firestore Action] Attempting to update password to hash for user ${email}.`);
@@ -161,6 +167,7 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
       }
     }
 
+    // Post-authentication checks
     if (!userDataFromDb.isApproved && userDataFromDb.pendingApproval) {
       console.log(`[Login User Firestore Action] User ${email} login attempt: pending approval.`);
       return { message: 'Sua conta está pendente de aprovação pelo administrador.', status: 'pending' };
@@ -189,3 +196,4 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
     return { message: `Erro no login: ${error.message || 'Erro desconhecido no servidor.'}.`, status: 'error' };
   }
 }
+    
