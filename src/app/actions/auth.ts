@@ -71,7 +71,7 @@ export async function registerUserInFirestore(prevState: any, formData: FormData
 }
 
 export async function loginUserWithFirestore(prevState: any, formData: FormData): Promise<ActionResult> {
-  console.log('[Login User Firestore Action] Attempting login...');
+  console.log('[Login User Firestore Action - Definitive Fix Attempt] Attempting login...');
   if (adminSDKAuthError) {
     console.error('[Login User Firestore Action] Admin SDK Error:', adminSDKAuthError);
     return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKAuthError}`, status: 'error' };
@@ -91,9 +91,8 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
     return { message: 'Email e senha são obrigatórios.', status: 'error' };
   }
 
-  // Trim the submitted password ONCE here
   const submittedPasswordTrimmed = rawSubmittedPassword.trim();
-  console.log(`[Login User Firestore Action] Submitted password (trimmed once at start) type: ${typeof submittedPasswordTrimmed}, length: ${submittedPasswordTrimmed.length}, value: '${submittedPasswordTrimmed}'`);
+  console.log(`[Login User Firestore Action] Submitted password (trimmed): type: ${typeof submittedPasswordTrimmed}, length: ${submittedPasswordTrimmed.length}, value: '${submittedPasswordTrimmed}'`);
 
   try {
     const userDocRef = adminFirestore_DefaultDB.collection('auth_users').doc(email.toLowerCase());
@@ -116,53 +115,57 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
     let isMatch = false;
     let needsPasswordUpdate = false;
 
+    // Step 1: Try bcrypt.compare
+    console.log(`[Login User Firestore Action] Attempting bcrypt.compare for user ${email}.`);
     try {
-      console.log(`[Login User Firestore Action] Attempting bcrypt.compare for user ${email} with submitted (trimmed) password.`);
-      // bcrypt.compare takes the raw (submitted) password and the hash
-      isMatch = await bcrypt.compare(submittedPasswordTrimmed, String(storedPasswordValue));
-      if (isMatch) {
-         console.log(`[Login User Firestore Action] User ${email} logged in with hashed password.`);
-      } else {
-         console.log(`[Login User Firestore Action] Hashed password comparison FAILED for user ${email}.`);
-      }
-    } catch (e: any) {
-      console.warn(`[Login User Firestore Action] bcrypt.compare threw for user ${email}. Error: ${e.message}. This indicates the stored password is likely plaintext. Attempting direct plaintext comparison.`);
-      
-      const dbPassAsString = String(storedPasswordValue);
-      const dbPassTrimmed = dbPassAsString.trim();
-
-      // Enhanced logging for plaintext comparison
-      console.log(`[Login User Firestore Action] --- PLAINTEXT COMPARISON BLOCK FOR USER: ${email} ---`);
-      console.log(`  - Submitted (already trimmed): '${submittedPasswordTrimmed}' (Length: ${submittedPasswordTrimmed.length})`);
-      console.log(`  - Stored from DB (raw):      '${storedPasswordValue}' (Type: ${typeof storedPasswordValue}, Length: ${String(storedPasswordValue).length})`);
-      console.log(`  - Stored from DB (as str):   '${dbPassAsString}' (Length: ${dbPassAsString.length})`);
-      console.log(`  - Stored from DB (trimmed):  '${dbPassTrimmed}' (Length: ${dbPassTrimmed.length})`);
-
-      const directComparisonResult = submittedPasswordTrimmed === dbPassTrimmed;
-      console.log(`  - RESULT OF ('${submittedPasswordTrimmed}' === '${dbPassTrimmed}'): ${directComparisonResult}`);
-      console.log(`[Login User Firestore Action] --- END PLAINTEXT COMPARISON BLOCK ---`);
-
-
-      if (directComparisonResult) {
-        isMatch = true;
-        needsPasswordUpdate = true;
-        console.log(`[Login User Firestore Action] Plaintext match SUCCESS for ${email}. Password will be updated to hash.`);
-      } else {
-        console.log(`[Login User Firestore Action] Plaintext match FAILED for ${email}. isMatch remains false.`);
-      }
+        // bcrypt.compare expects the first argument to be plaintext and the second to be the hash.
+        // If storedPasswordValue is plaintext, bcrypt.compare will likely return false, not throw an error, unless storedPasswordValue is not a string or malformed for bcrypt.
+        isMatch = await bcrypt.compare(submittedPasswordTrimmed, String(storedPasswordValue));
+        if (isMatch) {
+            console.log(`[Login User Firestore Action] Hashed password match SUCCESS for user ${email}.`);
+        } else {
+            console.log(`[Login User Firestore Action] bcrypt.compare returned false for user ${email}. Proceeding to plaintext check.`);
+        }
+    } catch (bcryptError: any) {
+        // This catch block is for errors during bcrypt.compare itself (e.g., if storedPasswordValue is not a string or is too short to be a hash)
+        // It doesn't mean the stored password is plaintext, just that bcrypt.compare failed to execute.
+        console.warn(`[Login User Firestore Action] bcrypt.compare threw an error for user ${email}: ${bcryptError.message}. This is unexpected if storedPasswordValue is a simple string. Will proceed to plaintext check anyway.`);
+        isMatch = false; // Ensure isMatch is false if bcrypt.compare fails catastrophically
     }
+
+    // Step 2: If bcrypt.compare did not find a match, try direct plaintext comparison
+    if (!isMatch) {
+        console.log(`[Login User Firestore Action] --- PLAINTEXT COMPARISON BLOCK FOR USER: ${email} ---`);
+        const storedPasswordStringTrimmed = String(storedPasswordValue).trim();
+
+        console.log(`  - Submitted (already trimmed): '${submittedPasswordTrimmed}' (Length: ${submittedPasswordTrimmed.length})`);
+        console.log(`  - Stored from DB (trimmed):  '${storedPasswordStringTrimmed}' (Length: ${storedPasswordStringTrimmed.length})`);
+
+        const plaintextMatch = submittedPasswordTrimmed === storedPasswordStringTrimmed;
+        console.log(`  - RESULT OF ('${submittedPasswordTrimmed}' === '${storedPasswordStringTrimmed}'): ${plaintextMatch}`);
+        
+        if (plaintextMatch) {
+            isMatch = true;
+            needsPasswordUpdate = true;
+            console.log(`[Login User Firestore Action] Plaintext match SUCCESS for user ${email}. Password will be updated to hash.`);
+        } else {
+            console.log(`[Login User Firestore Action] Plaintext match FAILED for user ${email}.`);
+        }
+        console.log(`[Login User Firestore Action] --- END PLAINTEXT COMPARISON BLOCK ---`);
+    }
+
 
     if (!isMatch) {
       console.log(`[Login User Firestore Action] Final isMatch is false for user ${email}. Returning 'Senha incorreta'.`);
       return { message: 'Senha incorreta.', status: 'error' };
     }
 
-    // If login was successful and password needs update (was plaintext)
+    // If login was successful and password needs update (was plaintext and matched)
     if (needsPasswordUpdate) {
       try {
         console.log(`[Login User Firestore Action] Attempting to update password to hash for user ${email}.`);
         const salt = await bcrypt.genSalt(SALT_ROUNDS);
-        const hashedPassword = await bcrypt.hash(submittedPasswordTrimmed, salt); // Hash the submitted (and now verified) password
+        const hashedPassword = await bcrypt.hash(submittedPasswordTrimmed, salt); 
         await userDocRef.update({ password: hashedPassword });
         console.log(`[Login User Firestore Action] Password for user ${email} successfully updated to hash in Firestore.`);
       } catch (updateError: any) {
