@@ -83,7 +83,9 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
 
   const email = formData.get('email') as string;
   const password = formData.get('password') as string;
-  console.log(`[Login User Firestore Action] Email submitted: '${email}', Password submitted length: ${password?.length}`);
+  
+  console.log(`[Login User Firestore Action] Email submitted: '${email}'`);
+  console.log(`[Login User Firestore Action] Submitted password type: ${typeof password}, length: ${password?.length}`);
 
 
   if (!email || !password) {
@@ -107,45 +109,37 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
     }
 
     const storedPasswordValue = userDataFromDb.password;
-    console.log(`[Login User Firestore Action] User ${email}. Stored password type: ${typeof storedPasswordValue}, Stored password value (first 10 chars if string): '${String(storedPasswordValue).substring(0,10)}...'`);
-
-    let storedPasswordString: string;
-    if (typeof storedPasswordValue !== 'string') {
-      storedPasswordString = String(storedPasswordValue);
-      console.warn(`[Login User Firestore Action] Stored password for user ${email} was not a string (original type: ${typeof storedPasswordValue}). Converted to string for comparison. Converted value (first 10 chars): '${storedPasswordString.substring(0,10)}...'`);
-    } else {
-      storedPasswordString = storedPasswordValue;
-    }
+    console.log(`[Login User Firestore Action] User ${email}. Stored password (raw) type: ${typeof storedPasswordValue}, value (first 10 chars if string): '${String(storedPasswordValue).substring(0,10)}...'`);
     
     let isMatch = false;
     let needsPasswordUpdate = false;
+    const submittedPasswordTrimmed = password.trim(); // Trim submitted password here
 
     try {
       console.log(`[Login User Firestore Action] Attempting bcrypt.compare for user ${email}.`);
-      isMatch = await bcrypt.compare(password, storedPasswordString);
+      // Ensure storedPasswordValue is a string for bcrypt.compare
+      isMatch = await bcrypt.compare(submittedPasswordTrimmed, String(storedPasswordValue));
       if (isMatch) {
          console.log(`[Login User Firestore Action] User ${email} logged in with hashed password.`);
       } else {
          console.log(`[Login User Firestore Action] Hashed password comparison FAILED for user ${email}.`);
       }
     } catch (e: any) {
-      console.warn(`[Login User Firestore Action] bcrypt.compare threw for user ${email}. Error: ${e.message}. This usually means the stored password is NOT a valid hash. Attempting plaintext comparison.`);
+      // This block is entered if bcrypt.compare throws, likely due to stored password not being a valid hash (i.e., it's plaintext)
+      console.warn(`[Login User Firestore Action] bcrypt.compare threw for user ${email}. Error: ${e.message}. Attempting plaintext comparison.`);
       
-      if (typeof storedPasswordString === 'undefined') {
-          console.error(`[Login User Firestore Action] CRITICAL: storedPasswordString is undefined in catch block for user ${email}. This should not happen.`);
-          return { message: 'Erro interno do servidor ao verificar a senha.', status: 'error' };
-      }
+      const storedPasswordStringTrimmed = String(storedPasswordValue).trim();
 
       console.log(`[Login User Firestore Action] Plaintext comparison details for user ${email}:`);
-      console.log(`  - Submitted password type: ${typeof password}, length: ${password.length}, value: '${password}'`);
-      console.log(`  - Stored password (as string) type: ${typeof storedPasswordString}, length: ${storedPasswordString.length}, value: '${storedPasswordString}'`);
+      console.log(`  - Submitted (trimmed) password type: ${typeof submittedPasswordTrimmed}, length: ${submittedPasswordTrimmed.length}, value: '${submittedPasswordTrimmed}'`);
+      console.log(`  - Stored (trimmed) password type: ${typeof storedPasswordStringTrimmed}, length: ${storedPasswordStringTrimmed.length}, value: '${storedPasswordStringTrimmed}'`);
 
-      if (password === storedPasswordString) {
+      if (submittedPasswordTrimmed === storedPasswordStringTrimmed) {
         isMatch = true;
         needsPasswordUpdate = true;
-        console.log(`[Login User Firestore Action] User ${email} logged in with plaintext-equivalent password. Password will be updated to hash.`);
+        console.log(`[Login User Firestore Action] User ${email} logged in with plaintext-equivalent password (after trimming both). Password will be updated to hash.`);
       } else {
-        console.log(`[Login User Firestore Action] Plaintext-equivalent password comparison FAILED for user ${email}. isMatch remains false.`);
+        console.log(`[Login User Firestore Action] Plaintext-equivalent password comparison (after trimming both) FAILED for user ${email}. isMatch remains false.`);
       }
     }
 
@@ -158,11 +152,12 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
       try {
         console.log(`[Login User Firestore Action] Attempting to update password to hash for user ${email}.`);
         const salt = await bcrypt.genSalt(SALT_ROUNDS);
-        const hashedPassword = await bcrypt.hash(password, salt); // Hash the submitted (and now verified) password
+        const hashedPassword = await bcrypt.hash(submittedPasswordTrimmed, salt); // Hash the submitted (and now verified) password
         await userDocRef.update({ password: hashedPassword });
         console.log(`[Login User Firestore Action] Password for user ${email} successfully updated to hash in Firestore.`);
       } catch (updateError: any) {
         console.error(`[Login User Firestore Action] FAILED to update password to hash for user ${email}:`, updateError.message);
+        // Non-critical error for login flow, user is already authenticated. Log and continue.
       }
     }
 
@@ -194,5 +189,3 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
     return { message: `Erro no login: ${error.message || 'Erro desconhecido no servidor.'}.`, status: 'error' };
   }
 }
-
-    
