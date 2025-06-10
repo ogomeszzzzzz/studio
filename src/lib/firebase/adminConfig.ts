@@ -3,9 +3,12 @@ import * as admin from 'firebase-admin';
 import fs from 'fs';
 import path from 'path';
 
-console.log('--- [ADMIN SDK INIT - ATTEMPTING INITIALIZATION V24] ---');
+console.log('--- [ADMIN SDK INIT - ATTEMPTING INITIALIZATION V25 - Cloud Run Debug] ---');
 console.log(`[Admin SDK] Node Env: ${process.env.NODE_ENV}`);
 console.log(`[Admin SDK] Initial admin.apps.length: ${admin.apps ? admin.apps.length : 'admin.apps is undefined/null'}`);
+console.log(`[Admin SDK] Trying to read env var FIREBASE_ADMIN_SDK_CONFIG: ${process.env.FIREBASE_ADMIN_SDK_CONFIG ? 'SET (length: ' + process.env.FIREBASE_ADMIN_SDK_CONFIG.length + ')' : 'NOT SET'}`);
+console.log(`[Admin SDK] Trying to read env var FIREBASE_ADMIN_SDK_CONFIG_PATH: ${process.env.FIREBASE_ADMIN_SDK_CONFIG_PATH || 'NOT SET'}`);
+
 
 let adminApp: admin.app.App | undefined;
 export let adminSDKInitializationError: string | null = null;
@@ -67,17 +70,22 @@ if (!admin || !admin.credential || typeof admin.credential.cert !== 'function' |
     }
 
     if (!serviceAccountCredentials && !adminSDKInitializationError) {
-      adminSDKInitializationError = 'Neither FIREBASE_ADMIN_SDK_CONFIG_PATH nor FIREBASE_ADMIN_SDK_CONFIG environment variables are set or provided valid credentials.';
+      adminSDKInitializationError = 'Neither FIREBASE_ADMIN_SDK_CONFIG_PATH nor FIREBASE_ADMIN_SDK_CONFIG environment variables are set or provided valid credentials for Admin SDK.';
       console.error(`[Admin SDK Init Error] ${adminSDKInitializationError}`);
     }
 
     if (serviceAccountCredentials && !adminSDKInitializationError) {
       console.log(`[Admin SDK] Service account credentials loaded via ${loadedFrom}. Project ID from credentials: ${serviceAccountCredentials.project_id}, Client Email: ${serviceAccountCredentials.client_email}`);
-      console.log(`[Admin SDK] Private key (first 30): "${String(serviceAccountCredentials.private_key).substring(0, 30)}...", Private key (last 30): "...${String(serviceAccountCredentials.private_key).substring(String(serviceAccountCredentials.private_key).length - 30)}"`);
-
-      if (!serviceAccountCredentials.private_key?.startsWith("-----BEGIN PRIVATE KEY-----") || !serviceAccountCredentials.private_key?.trim().endsWith("-----END PRIVATE KEY-----")) {
-        console.warn("[Admin SDK Warning] Private key from credentials (after potential newline replacement) does not seem to start/end with standard PEM headers/footers.");
+      
+      if (serviceAccountCredentials.private_key) {
+        console.log(`[Admin SDK] Private key (first 30): "${String(serviceAccountCredentials.private_key).substring(0, 30)}...", Private key (last 30): "...${String(serviceAccountCredentials.private_key).substring(String(serviceAccountCredentials.private_key).length - 30)}"`);
+        if (!serviceAccountCredentials.private_key?.startsWith("-----BEGIN PRIVATE KEY-----") || !serviceAccountCredentials.private_key?.trim().endsWith("-----END PRIVATE KEY-----")) {
+          console.warn("[Admin SDK Warning] Private key from credentials (after potential newline replacement) does not seem to start/end with standard PEM headers/footers.");
+        }
+      } else {
+         console.warn("[Admin SDK Warning] Private key is missing or empty in the service account credentials.");
       }
+
 
       const essentialFields = ['type', 'project_id', 'private_key', 'client_email'];
       const missingFields = essentialFields.filter(field => !(field in serviceAccountCredentials) || !serviceAccountCredentials[field]);
@@ -153,4 +161,4 @@ if (adminApp && !adminSDKInitializationError) {
   console.error(`[Admin SDK] FINAL INITIALIZATION ERROR STATE: ${adminSDKInitializationError}`);
 }
 
-console.log('--- [ADMIN SDK INIT END V24] ---');
+console.log('--- [ADMIN SDK INIT END V25] ---');
