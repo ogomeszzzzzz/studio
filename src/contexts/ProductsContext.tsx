@@ -30,32 +30,37 @@ const productFromFirestore = (data: any): Product => {
 export function ProductsProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [lastDataUpdateTimestamp, setLastDataUpdateTimestamp] = useState<Date | null>(null);
-  const [isLoadingProducts, setIsLoadingProducts] = useState(true);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(true); // Start true
   const [productsError, setProductsError] = useState<string | null>(null);
   const { currentUser, isLoading: isAuthLoading } = useAuth();
   const { toast } = useToast();
 
   const fetchProductsAndMetadata = useCallback(async (showToastOnRefetch = false) => {
+    console.log("ProductsContext: fetchProductsAndMetadata called. CurrentUser:", !!currentUser);
     if (!currentUser) {
-      console.log("ProductsContext: No current user, clearing product data.");
+      console.log("ProductsContext: No current user, clearing product data and stopping load.");
       setProducts([]);
       setLastDataUpdateTimestamp(null);
-      setIsLoadingProducts(false); // Ensure loading stops if no user
+      setIsLoadingProducts(false); 
       setProductsError(null);
       return;
     }
 
     if (firestoreClientInitializationError) {
-      toast({ title: "Erro Crítico de Configuração Firebase (Contexto Produtos)", description: `Cliente Firebase não inicializado: ${firestoreClientInitializationError}.`, variant: "destructive", duration: Infinity });
+      const errorMsg = `Cliente Firebase não inicializado: ${firestoreClientInitializationError}.`;
+      console.error("ProductsContext: Firebase client init error:", errorMsg);
+      toast({ title: "Erro Crítico de Configuração Firebase (Contexto Produtos)", description: errorMsg, variant: "destructive", duration: Infinity });
       setIsLoadingProducts(false);
       setProductsError(firestoreClientInitializationError);
       setProducts([]);
       return;
     }
     if (!firestore) {
-      toast({ title: "Erro Crítico de Conexão (Contexto Produtos)", description: "Instância do Firestore não está disponível.", variant: "destructive", duration: Infinity });
+      const errorMsg = "Instância do Firestore não está disponível.";
+      console.error("ProductsContext: Firestore instance not available:", errorMsg);
+      toast({ title: "Erro Crítico de Conexão (Contexto Produtos)", description: errorMsg, variant: "destructive", duration: Infinity });
       setIsLoadingProducts(false);
-      setProductsError("Instância do Firestore não disponível.");
+      setProductsError(errorMsg);
       setProducts([]);
       return;
     }
@@ -97,34 +102,44 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
       console.error("ProductsContext: Error fetching products or metadata:", error);
       toast({ title: "Erro ao Carregar Dados de Produtos (Contexto)", description: `Não foi possível buscar os produtos: ${errorMessage}`, variant: "destructive" });
       setProductsError(errorMessage);
-      setProducts([]); // Clear products on error
+      setProducts([]); 
     } finally {
       setIsLoadingProducts(false);
       console.log("ProductsContext: Finished fetching products and metadata, isLoadingProducts set to false.");
     }
-  }, [currentUser, toast]);
+  }, [currentUser, toast]); // Removed firestoreClientInitializationError, firestore from deps as they are module-level constants
 
   useEffect(() => {
-    console.log(`ProductsContext useEffect: isAuthLoading: ${isAuthLoading}, currentUser: ${!!currentUser}`);
-    if (!isAuthLoading && currentUser) {
-      // Fetch only if products haven't been loaded yet or user changed
-      // This simple check might need refinement if user switching is frequent without page reload
-      if (products.length === 0 && !productsError) { // Only fetch if no products and no prior error
+    console.log(`ProductsContext useEffect trigger: isAuthLoading: ${isAuthLoading}, currentUser: ${!!currentUser}, productsError: ${productsError}`);
+    if (!isAuthLoading) {
+      if (currentUser) {
+        // Only fetch if products haven't been loaded yet OR if there was a previous error and we might want to retry
+        if (products.length === 0 || productsError) { 
+          console.log("ProductsContext useEffect: Auth loaded, user present. Fetching products (initial load or retry).");
           fetchProductsAndMetadata();
-      } else if (products.length > 0 && !isLoadingProducts) {
-          setIsLoadingProducts(false); // Already loaded
+        } else {
+           console.log("ProductsContext useEffect: Auth loaded, user present. Products already loaded and no error.");
+           setIsLoadingProducts(false); // Ensure loading is false if data already exists
+        }
+      } else {
+        // No user, clear data and stop loading
+        console.log("ProductsContext useEffect: Auth loaded, no user. Clearing data.");
+        setProducts([]);
+        setLastDataUpdateTimestamp(null);
+        setIsLoadingProducts(false);
+        setProductsError(null);
       }
-    } else if (!isAuthLoading && !currentUser) {
-      // Clear data if user logs out or session ends
-      setProducts([]);
-      setLastDataUpdateTimestamp(null);
-      setIsLoadingProducts(false); // Not loading if no user
-      setProductsError(null);
+    } else {
+      console.log("ProductsContext useEffect: Auth still loading. isLoadingProducts remains:", isLoadingProducts);
+      // If auth is loading, we typically want isLoadingProducts to remain true until auth is resolved.
+      // However, if it was already false from a previous state, keep it false unless a new fetch is triggered.
+      // This usually means: if (isLoadingProducts) { /* keep true */ }
     }
-  }, [currentUser, isAuthLoading, fetchProductsAndMetadata, products.length, productsError, isLoadingProducts]);
+  }, [currentUser, isAuthLoading, fetchProductsAndMetadata, products.length, productsError]);
+
 
   const refetchProducts = useCallback(async () => {
-    console.log("ProductsContext: refetchProducts called.");
+    console.log("ProductsContext: refetchProducts called explicitly.");
     await fetchProductsAndMetadata(true); // showToastOnRefetch = true
   }, [fetchProductsAndMetadata]);
 

@@ -63,7 +63,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
       console.log("AppLayout: User data processed. Email:", currentUser.email, "IsAdmin(Effective):", effectiveIsAdmin, "IsApproved(Effective):", effectiveIsAdmin || currentUser.isApproved === true);
 
     } else if (!authContextLoading && !currentUser) {
-      console.log("AppLayout: No current user, and auth not loading. Redirecting to login.");
+      console.log("AppLayout: No current user, and auth not loading. Setting isUserDataLoaded to true and redirecting to login if necessary.");
       setIsUserAdmin(false);
       setIsUserApproved(false);
       setIsUserDataLoaded(true); 
@@ -71,7 +71,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
         router.replace('/login');
       }
     } else if (authContextLoading) {
-      console.log("AppLayout: Auth context is still loading...");
+      console.log("AppLayout: Auth context is still loading... setting isUserDataLoaded to false.");
       setIsUserDataLoaded(false); 
     }
   }, [authContextLoading, currentUser, router, pathname]);
@@ -90,8 +90,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
           const userData = docSnap.data() as UserProfile;
           console.log("AppLayout: Real-time update for user:", currentUser.email, "isApproved:", userData.isApproved);
           if (userData.isApproved === false) {
-            // Check if the user in context is still considered logged in and approved (by old state)
-            // This prevents multiple logout calls if the state is already reflecting the disapproval
             if (authContextLoading === false && isUserApproved === true) { 
               toast({
                 title: "Acesso Revogado",
@@ -99,17 +97,14 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 variant: "destructive",
                 duration: 7000,
               });
-              logout(); // This will clear context and localStorage, leading to redirect
+              logout(); 
             }
           } else if (userData.isApproved === true && isUserApproved === false && authContextLoading === false) {
-            // If user was previously not approved and now is, update context
-            // This helps if approval happens while user is on "Pending" screen
              console.log("AppLayout: User was approved in real-time. Updating context.");
              setCurrentUser({ ...currentUser, isApproved: true, pendingApproval: false });
-             setIsUserApproved(true); // Update local state as well
+             setIsUserApproved(true); 
           }
         } else {
-          // User document was deleted, which is an unexpected state for a logged-in user
           console.warn("AppLayout: Current user's document in Firestore was deleted. Forcing logout.");
           if (authContextLoading === false && isUserApproved === true) {
             logout();
@@ -117,11 +112,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
         }
       }, (error) => {
         console.error("AppLayout: Error listening to user document changes:", error);
-        // Optionally, handle this error, e.g., by logging out the user if connection is lost
-        // For now, we'll just log it to avoid aggressive logouts on temporary network issues.
       });
 
-      return () => unsubscribe(); // Cleanup listener on component unmount or currentUser change
+      return () => unsubscribe(); 
     }
   }, [currentUser, firestore, logout, toast, isUserApproved, authContextLoading, setCurrentUser]);
 
@@ -142,6 +135,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
     toast({ title: 'Logout', description: 'Você foi desconectado.' });
   };
 
+  console.log(`AppLayout rendering check: authContextLoading=${authContextLoading}, isUserDataLoaded=${isUserDataLoaded}`);
+
   if (authContextLoading || !isUserDataLoaded) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
@@ -152,7 +147,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
   }
 
   if (isUserDataLoaded && !currentUser && (pathname !== '/login' && pathname !== '/register')) {
-     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Redirecionando...</p></div>;
+     console.log("AppLayout: User data loaded, no current user, not on login/register. Redirecting to login.");
+     // router.replace('/login'); // Already handled in the first useEffect, but kept as a safeguard
+     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Redirecionando para login...</p></div>;
   }
   
   const effectivelyApproved = (currentUser?.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase()) || isUserApproved;
@@ -257,19 +254,20 @@ export default function AppLayout({ children }: AppLayoutProps) {
   );
 
   if (!authContextLoading && !currentUser && (pathname === '/login' || pathname === '/register')) {
-    console.log("AppLayout: Rendering public page (login/register).");
+    console.log("AppLayout: Rendering public page (login/register) as no user is present and not loading.");
     return <>{children}</>;
   }
   
   if (!authContextLoading && !currentUser) {
-     console.warn("AppLayout: Reached unexpected state - no user, not loading, not on public page. Forcing redirect.");
+     console.warn("AppLayout: Reached unexpected state - no user, not loading, not on public page. Forcing redirect to /login.");
      router.replace('/login'); 
-     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Redirecionando...</p></div>;
+     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Redirecionando para login (inesperado)...</p></div>;
   }
   
   if (currentUser && effectivelyApproved) {
+    console.log("AppLayout: User is authenticated and approved. Rendering ProductsProvider and children for path:", pathname);
     return (
-      <ProductsProvider> {/* Wrap with ProductsProvider */}
+      <ProductsProvider> 
         <div className="flex min-h-screen">
         <nav className="w-64 bg-card border-r border-border p-4 space-y-1 hidden md:flex flex-col shadow-md">
             <Accordion type="single" collapsible className="w-full" value={activeAccordionItem} onValueChange={setActiveAccordionItem}>
@@ -335,7 +333,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     <span className="font-medium text-sm">Inteligência de Estoque</span>
                 </Link>
                 <Link href="/linha-branca-ecosystem" className={cn("flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors pl-5", pathname === "/linha-branca-ecosystem" && "bg-muted text-primary font-semibold")}>
-                    <ShieldHalf className="h-5 w-5" /> {/* Using ShieldHalf for Linha Branca */}
+                    <ShieldHalf className="h-5 w-5" /> 
                     <span className="font-medium text-sm">Ecossistema Linha Branca</span>
                 </Link>
                 <Link href="/pillow-stock" className={cn("flex items-center gap-3 text-foreground p-3 rounded-md hover:bg-muted hover:text-primary transition-colors pl-5", pathname === "/pillow-stock" && "bg-muted text-primary font-semibold")}>
@@ -373,11 +371,11 @@ export default function AppLayout({ children }: AppLayoutProps) {
     );
   }
 
-  console.log("AppLayout: Reached fallback loader. State: authContextLoading", authContextLoading, "isUserDataLoaded", isUserDataLoaded, "currentUser", !!currentUser, "effectivelyApproved", effectivelyApproved);
+  console.log("AppLayout: Reached fallback loader at the end. State: authContextLoading", authContextLoading, "isUserDataLoaded", isUserDataLoaded, "currentUser", !!currentUser, "effectivelyApproved", effectivelyApproved, "pathname", pathname);
   return (
     <div className="flex items-center justify-center min-h-screen bg-background">
       <Loader2 className="h-12 w-12 animate-spin text-primary" />
-      <p className="ml-4 text-lg text-foreground">Verificando status da conta...</p>
+      <p className="ml-4 text-lg text-foreground">Verificando status da conta (final)...</p>
     </div>
   );
 }
