@@ -43,71 +43,73 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const pathname = usePathname();
   const { toast } = useToast();
   const { currentUser, logout, isLoading: authContextLoading, setCurrentUser } = useAuth();
+  
   const [activeAccordionItem, setActiveAccordionItem] = useState<string | undefined>(undefined);
   const [isUserAdmin, setIsUserAdmin] = useState(false);
   const [isUserApproved, setIsUserApproved] = useState(false);
-  const [isUserDataLoaded, setIsUserDataLoaded] = useState(false); // Crucial state
+  const [isUserDataLoaded, setIsUserDataLoaded] = useState(false);
 
+  // Effect 1: Process currentUser from AuthContext to set local admin/approval states and isUserDataLoaded
   useEffect(() => {
-    console.log(`[AppLayout] Auth effect. authContextLoading: ${authContextLoading}, currentUser: ${!!currentUser}, currentPath: ${pathname}`);
+    console.log(`[AppLayout] Auth processing effect. authContextLoading: ${authContextLoading}, currentUser: ${!!currentUser}`);
     if (!authContextLoading) {
       if (currentUser) {
         const isAdminByFlag = currentUser.isAdmin === true;
         const isAdminByEmail = currentUser.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase();
-        const effectiveIsAdmin = isAdminByEmail || isAdminByFlag;
+        const effectiveIsAdmin = isAdminByFlag || isAdminByEmail;
         
         setIsUserAdmin(effectiveIsAdmin);
+        // User is approved if they are an admin OR their isApproved flag is true
         setIsUserApproved(effectiveIsAdmin || currentUser.isApproved === true);
         console.log(`[AppLayout] User data processed. Email: ${currentUser.email}, IsAdmin(Effective): ${effectiveIsAdmin}, IsApproved(State): ${effectiveIsAdmin || currentUser.isApproved === true}`);
       } else {
-        // No current user, auth check is complete
+        // No current user, auth check is complete for setting local states
         setIsUserAdmin(false);
         setIsUserApproved(false);
-        console.log("[AppLayout] No current user after auth check. Redirecting to login.");
-        if (pathname !== '/login' && pathname !== '/register') {
-          router.replace('/login');
-        }
+        console.log("[AppLayout] No current user after auth check (for local state setting).");
       }
-      setIsUserDataLoaded(true); // Mark user data as "loaded" (or determined to be absent)
+      setIsUserDataLoaded(true); // Mark data processing as complete
     } else {
-      // Auth is still loading, keep user data as not loaded
-      setIsUserDataLoaded(false);
+      setIsUserDataLoaded(false); // Auth still loading
       console.log("[AppLayout] Auth context is still loading...");
     }
-  }, [authContextLoading, currentUser, router, pathname]);
+  }, [authContextLoading, currentUser]); // Dependencies for processing user data
 
 
+  // Effect 2: Firestore listener for real-time user approval changes (and potential forced logout)
   useEffect(() => {
     if (currentUser && currentUser.email && firestore && !firestoreClientInitializationError) {
       if (currentUser.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase()) {
+        // Primary admin's approval status is not externally managed by this listener
         return;
       }
       const userDocRef = doc(firestore, "auth_users", currentUser.email.toLowerCase());
       const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
         if (docSnap.exists()) {
           const userData = docSnap.data() as UserProfile;
-          console.log(`[AppLayout] Real-time Firestore update for user: ${currentUser.email}, isApproved: ${userData.isApproved}`);
+          console.log(`[AppLayout] Real-time Firestore update for user: ${currentUser.email}, DB isApproved: ${userData.isApproved}, current local isUserApproved: ${isUserApproved}`);
           
-          // If user was approved, but now is not (and not primary admin)
-          if (isUserApproved && userData.isApproved === false) {
+          const currentEffectiveApproval = (currentUser.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase()) || isUserApproved;
+
+          // If user was effectively approved, but now DB says not approved (and not primary admin)
+          if (currentEffectiveApproval && userData.isApproved === false) {
             toast({
               title: "Acesso Revogado",
               description: "Sua conta foi desaprovada pelo administrador. Você será desconectado.",
               variant: "destructive",
               duration: 7000,
             });
-            logout();
+            logout(); // This will trigger context update and subsequent redirection via Effect 3
           } 
-          // If user was not approved, but now is
+          // If user was not approved locally, but now DB says approved
           else if (!isUserApproved && userData.isApproved === true) {
-             console.log("[AppLayout] User was approved in real-time. Updating context and local state.");
-             // Update context first, then local state if needed
-             setCurrentUser({ ...currentUser, isApproved: true, pendingApproval: false });
-             setIsUserApproved(true); 
+             console.log("[AppLayout] User was approved in real-time via Firestore. Updating context and local state.");
+             setCurrentUser({ ...currentUser, isApproved: true, pendingApproval: false }); // Update context
+             setIsUserApproved(true); // Update local state
           }
         } else {
-          console.warn("[AppLayout] Current user's document in Firestore was deleted. Forcing logout.");
-          if (isUserApproved) { // Only logout if they were previously considered approved
+          console.warn("[AppLayout] Current user's document in Firestore was deleted. Forcing logout if they were previously considered approved.");
+           if ((currentUser.email.toLowerCase() !== ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase()) && isUserApproved) { // Only logout if they were previously approved and not primary admin
             logout();
           }
         }
@@ -119,6 +121,27 @@ export default function AppLayout({ children }: AppLayoutProps) {
   }, [currentUser, firestore, logout, toast, isUserApproved, setCurrentUser]);
 
 
+  // Effect 3: Handle all page redirections based on auth state, approval, and current path
+  useEffect(() => {
+    console.log(`[AppLayout] Redirection effect. Conditions: !authContextLoading=${!authContextLoading}, isUserDataLoaded=${isUserDataLoaded}, currentUser=${!!currentUser}, pathname=${pathname}`);
+    
+    if (!authContextLoading && isUserDataLoaded) { // Only act once auth state and initial user data processing is settled
+      const effectivelyApprovedCheck = currentUser ? ((currentUser.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase()) || isUserApproved) : false;
+
+      if (!currentUser && pathname !== '/login' && pathname !== '/register') {
+        console.warn(`[AppLayout] Redirection: No user on protected path '${pathname}'. Redirecting to /login.`);
+        router.replace('/login');
+      } else if (currentUser && effectivelyApprovedCheck && (pathname === '/login' || pathname === '/register')) {
+        // If user is logged in and approved, but somehow on login/register, redirect to dashboard
+        console.log(`[AppLayout] Redirection: Approved user on '${pathname}'. Redirecting to /dashboard.`);
+        router.replace('/dashboard');
+      }
+      // Other redirection logic (e.g., for pending/denied users if they land on a generic page) is handled by the render logic below.
+    }
+  }, [authContextLoading, isUserDataLoaded, currentUser, isUserApproved, pathname, router]);
+
+
+  // Effect 4: Set active accordion item (UI only)
   useEffect(() => {
     if (pathname?.startsWith('/admin')) setActiveAccordionItem("admin-category");
     else if (pathname?.startsWith('/dashboard') || pathname?.startsWith('/restock-opportunities') || pathname?.startsWith('/pillow-stock') || pathname?.startsWith('/abc-analysis') || pathname?.startsWith('/collection-stock-intelligence') || pathname?.startsWith('/linha-branca-ecosystem')) setActiveAccordionItem("ecommerce-category");
@@ -128,12 +151,14 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const handleSignOut = () => {
     logout();
     toast({ title: 'Logout', description: 'Você foi desconectado.' });
+    // Redirection to /login will be handled by Effect 3 after currentUser becomes null
   };
 
-  console.log(`[AppLayout] Rendering. authContextLoading: ${authContextLoading}, isUserDataLoaded: ${isUserDataLoaded}, currentUser: ${!!currentUser}`);
+  // ----- Render Logic -----
+  console.log(`[AppLayout] Render. authContextLoading: ${authContextLoading}, isUserDataLoaded: ${isUserDataLoaded}, currentUser: ${!!currentUser}, isUserApproved (local state): ${isUserApproved}`);
 
   if (authContextLoading || !isUserDataLoaded) {
-    console.log("[AppLayout] Showing main loading screen (auth or user data not ready).");
+    console.log("[AppLayout] Render: Showing main loading screen (auth or user data processing not ready).");
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -142,17 +167,23 @@ export default function AppLayout({ children }: AppLayoutProps) {
     );
   }
 
-  // After initial loading, if no user but on a protected path (should have been caught by useEffect redirect)
-  if (!currentUser && (pathname !== '/login' && pathname !== '/register')) {
-     console.warn(`[AppLayout] No user, but on protected path ${pathname} after load. Should have redirected. Forcing redirect to login.`);
-     router.replace('/login');
-     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Redirecionando para login (safeguard)...</p></div>;
+  // If no user, and on a public page like /login or /register, allow children to render (these pages handle their own logic if user gets authenticated)
+  if (!currentUser && (pathname === '/login' || pathname === '/register')) {
+    console.log(`[AppLayout] Render: No user, on public path ${pathname}. Allowing children (Login/Register page).`);
+    return <>{children}</>;
   }
   
-  const effectivelyApproved = (currentUser?.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase()) || isUserApproved;
+  // If no user, and on a protected path, show a redirecting message (Effect 3 handles actual redirect)
+  if (!currentUser && (pathname !== '/login' && pathname !== '/register')) {
+     console.warn(`[AppLayout] Render: No user, on protected path ${pathname}. Displaying 'Redirecionando...' (useEffect handles actual redirect).`);
+     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Redirecionando para login...</p></div>;
+  }
+  
+  // At this point, currentUser should exist. Now check approval status.
+  const effectivelyApproved = currentUser ? ((currentUser.email.toLowerCase() === ADMIN_PRIMARY_EMAIL_CLIENT.toLowerCase()) || isUserApproved) : false;
 
   if (currentUser && !effectivelyApproved && currentUser.pendingApproval) {
-    console.log("[AppLayout] User is pending approval. Showing pending message.");
+    console.log("[AppLayout] Render: User is pending approval. Showing pending message.");
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6">
         <Card className="w-full max-w-md text-center shadow-lg">
@@ -165,7 +196,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   }
 
   if (currentUser && !effectivelyApproved && !currentUser.pendingApproval) {
-      console.log("[AppLayout] User is not approved and not pending (denied). Showing access denied message.");
+      console.log("[AppLayout] Render: User is not approved and not pending (denied). Showing access denied message.");
       return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6">
         <Card className="w-full max-w-md text-center shadow-lg">
@@ -218,14 +249,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
       </div>
     </header>
   );
-
-  if (!authContextLoading && !currentUser && (pathname === '/login' || pathname === '/register')) {
-    console.log("[AppLayout] Rendering public page (login/register) as no user is present and auth not loading.");
-    return <>{children}</>; // This case should ideally not be hit if page.tsx redirects correctly.
-  }
   
   if (currentUser && effectivelyApproved) {
-    console.log(`[AppLayout] User '${currentUser.email}' is authenticated and approved. Rendering protected content for path: ${pathname}`);
+    console.log(`[AppLayout] Render: User '${currentUser.email}' is authenticated and approved. Rendering protected content for path: ${pathname}`);
     return (
       <ProductsProvider> 
         <div className="flex min-h-screen">
@@ -266,7 +292,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
     );
   }
 
-  console.warn(`[AppLayout] Reached final fallback loader. This indicates an issue in state resolution. Path: ${pathname}, authLoading: ${authContextLoading}, userDataLoaded: ${isUserDataLoaded}, currentUser: ${!!currentUser}, effectivelyApproved: ${effectivelyApproved}`);
+  // Fallback loader if none of the above conditions are met (should ideally not be reached if logic is sound)
+  console.warn(`[AppLayout] Render: Reached final fallback loader. This indicates an issue in state resolution or unexpected path. Path: ${pathname}, authLoading: ${authContextLoading}, userDataLoaded: ${isUserDataLoaded}, currentUser: ${!!currentUser}, effectivelyApproved: ${effectivelyApproved}`);
   return (
     <div className="flex items-center justify-center min-h-screen bg-background">
       <Loader2 className="h-12 w-12 animate-spin text-primary" />
