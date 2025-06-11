@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Tooltip, TooltipProvider, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Eye, PackageX, Zap, TrendingDown, ThumbsUp, Repeat, MinusCircle, HelpCircle, PlusCircle, ShoppingBag, Inbox, Layers, Tag, Ruler, DollarSign, BarChart } from 'lucide-react';
+import { Eye, PackageX, Zap, TrendingDown, ThumbsUp, Repeat, MinusCircle, HelpCircle, PlusCircle, ShoppingBag, Inbox, Layers, Tag, Ruler, DollarSign, BarChart, PackageCheck, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface LinhaBrancaItemCardProps {
@@ -76,6 +76,9 @@ export function LinhaBrancaItemCard({ item, onViewDetailsClick, targetCoverageDa
             <Ruler className="h-3 w-3 mr-1 text-purple-600 flex-shrink-0" /> {item.size || 'N/A'}
           </div>
         </div>
+        {item.vtexIdSample && (
+          <p className="text-xxs text-muted-foreground truncate" title={`ID VTEX Exemplo: ${item.vtexIdSample}`}>ID Exemplo: {String(item.vtexIdSample)}</p>
+        )}
       </CardHeader>
       <CardContent className="p-3 pt-0 space-y-1.5 text-xs flex-grow flex flex-col justify-between">
         <div className="space-y-0.5">
@@ -85,6 +88,15 @@ export function LinhaBrancaItemCard({ item, onViewDetailsClick, targetCoverageDa
           {item.avgPrice !== undefined && <InfoRow icon={DollarSign} label="Preço Médio SKU:" value={item.avgPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} />}
           {item.totalOpenOrders > 0 && (
             <InfoRow icon={Inbox} label="Ped. Abertos:" value={`${item.totalOpenOrders.toLocaleString()} un.`} iconColor="text-blue-600" />
+          )}
+          {(item.totalReadyToShip > 0 || item.totalRegulatorStock > 0) && (
+             <div className="mt-1.5 pt-1 border-t border-dashed">
+                <span className="text-xxs font-semibold text-muted-foreground flex items-center mb-0.5">
+                    <PackageCheck className="h-3.5 w-3.5 mr-1 text-green-600"/> Disponível p/ Consumo Interno:
+                </span>
+                {item.totalReadyToShip > 0 && <InfoRow icon={PackageCheck} label="Pronta Entrega:" value={`${item.totalReadyToShip.toLocaleString()} un.`} iconColor="text-green-600"/>}
+                {item.totalRegulatorStock > 0 && <InfoRow icon={Activity} label="Regulador:" value={`${item.totalRegulatorStock.toLocaleString()} un.`} iconColor="text-orange-600"/>}
+             </div>
           )}
         </div>
         <div className="mt-auto space-y-2 pt-1.5">
@@ -140,3 +152,4 @@ const InfoRow: React.FC<InfoRowProps> = ({ icon: Icon, label, value, iconColor, 
     <span className={cn("font-medium text-foreground", valueColor)}>{value}</span>
   </div>
 );
+

@@ -125,6 +125,8 @@ export interface AggregatedLinhaBrancaItem {
   totalStock: number;
   totalSales30d: number;
   totalOpenOrders: number;
+  totalReadyToShip: number; // Added
+  totalRegulatorStock: number; // Added
   
   dailyAverageSales: number;
   daysOfStock: number | null;
@@ -144,4 +146,3 @@ export interface AggregatedLinhaBrancaItem {
 //   overallHarmonyStatus: 'Good' | 'NeedsAttention' | 'Critical';
 // }
     
-```

@@ -98,6 +98,7 @@ export default function LinhaBrancaEcosystemPage() {
           itemType: itemType,
           size: p.size || 'Sem Tamanho',
           totalStock: 0, totalSales30d: 0, totalOpenOrders: 0,
+          totalReadyToShip: 0, totalRegulatorStock: 0,
           dailyAverageSales: 0, daysOfStock: null, targetStock: 0,
           replenishmentSuggestion: 0, status: 'N/A', contributingSkus: [],
           vtexIdSample: p.vtexId,
@@ -107,6 +108,8 @@ export default function LinhaBrancaEcosystemPage() {
       entry.totalStock += (p.stock || 0);
       entry.totalSales30d += (p.sales30d || 0);
       entry.totalOpenOrders += (p.openOrders || 0);
+      entry.totalReadyToShip += (p.readyToShip || 0);
+      entry.totalRegulatorStock += (p.regulatorStock || 0);
       entry.contributingSkus.push(p);
       itemsMap.set(aggregationId, entry);
     });
@@ -407,6 +410,8 @@ export default function LinhaBrancaEcosystemPage() {
                       <TableHead className="min-w-[250px] whitespace-nowrap">Nome Produto (SKU)</TableHead>
                       <TableHead className="whitespace-nowrap">ID VTEX</TableHead>
                       <TableHead className="text-right whitespace-nowrap">Estoque</TableHead>
+                      <TableHead className="text-right whitespace-nowrap">Pronta Ent.</TableHead>
+                      <TableHead className="text-right whitespace-nowrap">Regulador</TableHead>
                       <TableHead className="text-right whitespace-nowrap">Venda 30d</TableHead>
                       <TableHead className="text-right whitespace-nowrap">VMD</TableHead>
                       <TableHead className="text-right whitespace-nowrap">Ped. Abertos</TableHead>
@@ -419,6 +424,8 @@ export default function LinhaBrancaEcosystemPage() {
                         <TableCell className="text-xs font-medium py-1.5" title={sku.name}>{sku.name} ({sku.productDerivation || 'SKU Base'})</TableCell>
                         <TableCell className="text-xs py-1.5">{String(sku.vtexId)}</TableCell>
                         <TableCell className="text-right text-xs py-1.5">{sku.stock.toLocaleString()}</TableCell>
+                        <TableCell className="text-right text-xs py-1.5 text-green-700">{(sku.readyToShip || 0).toLocaleString()}</TableCell>
+                        <TableCell className="text-right text-xs py-1.5 text-orange-700">{(sku.regulatorStock || 0).toLocaleString()}</TableCell>
                         <TableCell className="text-right text-xs py-1.5">{(sku.sales30d || 0).toLocaleString()}</TableCell>
                         <TableCell className="text-right text-xs py-1.5">{((sku.sales30d || 0) / 30).toFixed(1)}</TableCell>
                         <TableCell className="text-right text-xs py-1.5">{(sku.openOrders || 0).toLocaleString()}</TableCell>
@@ -460,4 +467,5 @@ const KpiCardSmall: React.FC<KpiCardSmallProps> = ({ title, value, icon: Icon, c
     </Card>
   );
 };
+
 
