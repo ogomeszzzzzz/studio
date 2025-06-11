@@ -27,7 +27,7 @@ export const metadata: Metadata = {
     template: `%s - ${APP_NAME}`,
   },
   description: APP_DESCRIPTION,
-  manifest: "/manifest.json",
+  // manifest: "/manifest.json", // Removido para evitar erro 404 no console
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
