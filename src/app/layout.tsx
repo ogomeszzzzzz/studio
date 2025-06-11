@@ -1,10 +1,11 @@
 
 import type {Metadata} from 'next';
-import {Geist, Geist_Mono} from 'next/font/google';
+// import {Geist, Geist_Mono} from 'next/font/google'; // REMOVED Geist font
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
-import { AuthProvider } from '@/contexts/AuthContext'; // Import AuthProvider
+import { AuthProvider } from '@/contexts/AuthContext';
 
+/* // REMOVED Geist font
 const geistSans = Geist({
   variable: '--font-geist-sans',
   subsets: ['latin'],
@@ -14,6 +15,7 @@ const geistMono = Geist_Mono({
   variable: '--font-geist-mono',
   subsets: ['latin'],
 });
+*/
 
 const APP_NAME = "Painel Altenburg";
 const APP_DESCRIPTION = "Análise de estoque, dashboards de performance e oportunidades de reabastecimento.";
@@ -47,7 +49,7 @@ export const metadata: Metadata = {
     url: APP_BASE_URL,
     images: [
       {
-        url: `${APP_BASE_URL}/og-image.png`, // Example: /og-image.png in your public folder
+        url: `${APP_BASE_URL}/og-image.png`, 
         width: 1200,
         height: 630,
         alt: `Preview do ${APP_NAME}`,
@@ -61,7 +63,7 @@ export const metadata: Metadata = {
       template: `%s - ${APP_NAME}`,
     },
     description: APP_DESCRIPTION,
-    images: [`${APP_BASE_URL}/twitter-image.png`], // Example: /twitter-image.png
+    images: [`${APP_BASE_URL}/twitter-image.png`], 
   },
 };
 
@@ -72,8 +74,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased font-sans bg-background text-foreground`}>
-        <AuthProvider> {/* Wrap children with AuthProvider */}
+      {/* <body className={`${geistSans.variable} ${geistMono.variable} antialiased font-sans bg-background text-foreground`}> // MODIFIED to remove Geist vars */}
+      <body className={`antialiased font-sans bg-background text-foreground`}>
+        <AuthProvider> 
           {children}
         </AuthProvider>
         <Toaster />
