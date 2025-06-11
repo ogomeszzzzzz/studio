@@ -140,4 +140,3 @@ const InfoRow: React.FC<InfoRowProps> = ({ icon: Icon, label, value, iconColor, 
     <span className={cn("font-medium text-foreground", valueColor)}>{value}</span>
   </div>
 );
-```
