@@ -1,216 +1,142 @@
 
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useProducts } from '@/contexts/ProductsContext';
-import type { Product, AggregatedLinhaBrancaItem, LinhaBrancaStockStatus, LinhaBrancaItemType, LinhaBrancaBedSizeSummary } from '@/types';
+import type { Product, AggregatedLinhaBrancaItem, LinhaBrancaStockStatus, LinhaBrancaItemType, SortCriteria, SortOrder } from '@/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Loader2, AlertTriangle, ShieldHalf, ShoppingBag, TrendingDown, PackageX, BarChart3, ListFilter, HelpCircle, Repeat, ThumbsUp, PlusCircle, MinusCircle, Layers, Percent, Eye, Inbox, Activity, TrendingUp as TrendingUpIcon, PackageCheck, CalendarDays } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Loader2, AlertTriangle, ShieldHalf, ShoppingBag, TrendingDown, PackageX, BarChart3, ListFilter, HelpCircle, Repeat, ThumbsUp, PlusCircle, MinusCircle, Layers, Percent, Eye, Inbox, Activity, TrendingUp as TrendingUpIcon, PackageCheck, CalendarDays, Search, ArrowUpDown, Zap } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { Progress } from '@/components/ui/progress';
-import { Tooltip, TooltipProvider, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { format as formatDateFns } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { LinhaBrancaItemCard } from '@/components/domain/LinhaBrancaItemCard';
 import { cn } from '@/lib/utils';
 
 const LINHA_BRANCA_COLLECTION_NAME = "Linha Branca";
 const LINHA_BRANCA_TARGET_COVERAGE_DAYS = 45;
 const LINHA_BRANCA_MIN_SIGNIFICANT_DAILY_SALES = 0.1;
-const LINHA_BRANCA_OVERSTOCK_FACTOR = 1.75; // Estoque > 175% do alvo = excesso
-const LINHA_BRANCA_LOW_STOCK_DAYS = 15;
-const LINHA_BRANCA_CRITICAL_STOCK_DAYS = 5;
+const LINHA_BRANCA_OVERSTOCK_FACTOR = 1.75;
+const LINHA_BRANCA_LOW_STOCK_DAYS_THRESHOLD = 15;
+const LINHA_BRANCA_CRITICAL_STOCK_DAYS_THRESHOLD = 5;
+const LINHA_BRANCA_URGENT_STOCK_DAYS_THRESHOLD = 7;
+const PILLOW_SALES_BASED_HIGH_SALES_THRESHOLD = 10;
 
-const COMMON_SIZES_ORDER = ['Solteiro', 'Solteiro King', 'Casal', 'Queen', 'King', 'Super King', 'Berço'];
+const ALL_FILTER_VALUE = "_ALL_";
 
-const getItemTypeAndCleanName = (productName: string, productType?: string): { itemType: LinhaBrancaItemType, cleanedName: string } => {
-  const pNameLower = productName.toLowerCase();
-  const pTypeLower = productType?.toLowerCase() || '';
-
-  if ((pNameLower.includes('protetor') && pNameLower.includes('colchão')) || pTypeLower.includes('protetor de colchao')) {
-     return { itemType: 'Protetor de Colchão', cleanedName: productName.replace(/protetor de colchão/gi, '').trim() };
-  }
-  if ((pNameLower.includes('protetor') && pNameLower.includes('travesseiro')) || pTypeLower.includes('protetor de travesseiro')) {
-     return { itemType: 'Protetor de Travesseiro', cleanedName: productName.replace(/protetor de travesseiro/gi, '').trim() };
-  }
-  if ((pNameLower.includes('saia') && pNameLower.includes('box')) || pTypeLower.includes('saia box')) {
-     return { itemType: 'Saia Box', cleanedName: productName.replace(/saia box/gi, '').trim() };
-  }
-  if (pTypeLower.includes('protetor') && pTypeLower.includes('colchao')) {
-    return { itemType: 'Protetor de Colchão', cleanedName: productName };
-  }
-  if (pTypeLower.includes('protetor') && pTypeLower.includes('travesseiro')) {
-    return { itemType: 'Protetor de Travesseiro', cleanedName: productName };
-  }
-  if (pTypeLower.includes('saia')) {
-    return { itemType: 'Saia Box', cleanedName: productName };
-  }
-
-  return { itemType: 'Outros', cleanedName: productName };
-};
-
-interface LinhaBrancaItemWidgetProps {
-  item: AggregatedLinhaBrancaItem;
-  onViewDetailsClick: (item: AggregatedLinhaBrancaItem) => void;
-}
-
-const LinhaBrancaItemWidget: React.FC<LinhaBrancaItemWidgetProps> = ({ item, onViewDetailsClick }) => {
-  let statusText = item.status;
-  let StatusIconComponent = HelpCircle;
-  let badgeVariant: "default" | "destructive" | "outline" | "secondary" = 'secondary';
-  let badgeClasses = "bg-gray-400 hover:bg-gray-500 text-white";
-  let progressBarColor = "bg-gray-400";
-
-  switch (item.status) {
+const getStatusProps = (status: LinhaBrancaStockStatus, daysOfStock?: number | null) => {
+  switch (status) {
     case 'Critical':
-      StatusIconComponent = PackageX; badgeClasses = "bg-red-600 hover:bg-red-700 text-white"; badgeVariant = 'destructive'; progressBarColor = "bg-red-600";
-      break;
+      return { icon: PackageX, text: "CRÍTICO", color: "bg-red-600 text-white", tooltip: "Ruptura de estoque com VENDA RELEVANTE e sem pedidos em aberto ou reposição insuficiente." };
+    case 'Urgent':
+      return { icon: Zap, text: "URGENTE", color: "bg-orange-500 text-white", tooltip: `VENDA ALTA e cobertura de estoque muito baixa (<${daysOfStock?.toFixed(0) ?? '7'} dias). Ação rápida necessária.` };
     case 'Low':
-      StatusIconComponent = TrendingDown; badgeClasses = "bg-yellow-500 hover:bg-yellow-600 text-black"; badgeVariant = 'destructive'; progressBarColor = "bg-yellow-500";
-      break;
+      return { icon: TrendingDown, text: "BAIXO", color: "bg-yellow-500 text-black", tooltip: "Estoque baixo em relação à meta de cobertura de vendas. Monitorar/Repor." };
     case 'Healthy':
-      StatusIconComponent = ThumbsUp; badgeClasses = "bg-green-600 hover:bg-green-700 text-white"; badgeVariant = 'default'; progressBarColor = "bg-green-600";
-      break;
+      return { icon: ThumbsUp, text: "SAUDÁVEL", color: "bg-green-500 text-white", tooltip: "Estoque alinhado com a demanda de vendas." };
     case 'Overstocked':
-      StatusIconComponent = Repeat; badgeClasses = "bg-blue-500 hover:bg-blue-600 text-white"; badgeVariant = 'default'; progressBarColor = "bg-blue-500";
-      break;
+      return { icon: Repeat, text: "EXCESSO", color: "bg-blue-500 text-white", tooltip: "Estoque significativamente acima do ideal para a demanda atual." };
     case 'NoSales':
-      StatusIconComponent = MinusCircle; badgeClasses = "bg-slate-500 hover:bg-slate-600 text-white"; badgeVariant = 'secondary'; progressBarColor = "bg-slate-500";
-      break;
+      return { icon: MinusCircle, text: "ESTAGNADO", color: "bg-slate-500 text-white", tooltip: "Produto com estoque, mas sem vendas significativas recentes." };
+    default: // N/A
+      return { icon: HelpCircle, text: "N/A", color: "bg-gray-400 text-white", tooltip: "Estoque zerado e sem vendas significativas recentes, ou dados insuficientes." };
   }
-
-  const stockPercentageOfTarget = item.targetStock > 0 ? Math.min((item.totalStock / item.targetStock) * 100, 150) : (item.totalStock > 0 ? 5 : 0); // Cap at 150% for visual sanity
-
-  return (
-      <Card className="hover:shadow-lg transition-shadow flex flex-col h-full border-l-4" style={{ borderColor: progressBarColor }}>
-        <CardHeader className="p-3 pb-1 space-y-1">
-            <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                    <TooltipTrigger className="w-full">
-                        <Badge variant={badgeVariant} className={cn("text-xs font-semibold w-full justify-center py-1", badgeClasses)}>
-                            <StatusIconComponent className="h-4 w-4 mr-1.5" /> {statusText.toUpperCase()}
-                        </Badge>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                        <p>{item.status === 'Critical' ? `Risco Crítico de Ruptura! Cobertura: ${item.daysOfStock?.toFixed(0) ?? 'N/A'} dias.` : 
-                            item.status === 'Low' ? `Estoque Baixo! Cobertura: ${item.daysOfStock?.toFixed(0) ?? 'N/A'} dias.` :
-                            item.status === 'Healthy' ? `Estoque Saudável. Cobertura: ${item.daysOfStock?.toFixed(0) ?? 'N/A'} dias.` :
-                            item.status === 'Overstocked' ? `Excesso de Estoque! Cobertura: ${item.daysOfStock?.toFixed(0) ?? 'N/A'} dias.` :
-                            item.status === 'NoSales' ? `Estoque Estagnado (sem vendas significativas).` : `Status não aplicável (sem estoque e sem vendas).`}</p>
-                    </TooltipContent>
-                </Tooltip>
-            </TooltipProvider>
-          <CardTitle className="text-base font-bold leading-tight truncate pt-1" title={item.displayName}>
-            {item.displayName}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-3 pt-0 space-y-1.5 text-xs flex-grow flex flex-col justify-between">
-          <div className="space-y-0.5">
-            <div className="flex justify-between"><span>Estoque Agreg.:</span><span className="font-bold">{item.totalStock.toLocaleString()} un.</span></div>
-            <div className="flex justify-between"><span>VMD Agreg.:</span><span className="font-medium">{item.dailyAverageSales.toFixed(1)} un/dia</span></div>
-            <div className="flex justify-between"><span>Cob (dias) Agreg.:</span><span className="font-medium">{item.daysOfStock === null ? 'N/A' : Number.isFinite(item.daysOfStock) ? item.daysOfStock.toFixed(0) : '∞'}</span></div>
-            {item.totalOpenOrders > 0 && <div className="flex justify-between text-blue-600"><span><Inbox className="inline h-3 w-3 mr-1"/>Ped. Abertos:</span><span className="font-medium">{item.totalOpenOrders.toLocaleString()} un.</span></div>}
-          </div>
-          <div className="mt-auto space-y-1.5">
-            {item.replenishmentSuggestion > 0 && (
-              <Badge variant="default" className="w-full justify-center bg-green-600 hover:bg-green-700 text-white text-xs py-1">
-                <PlusCircle className="mr-1 h-3.5 w-3.5" /> Repor Agreg.: {item.replenishmentSuggestion.toLocaleString()} un.
-              </Badge>
-            )}
-             <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                    <TooltipTrigger className="w-full">
-                        <Progress value={stockPercentageOfTarget} className={cn("h-2.5", progressBarColor)} />
-                    </TooltipTrigger>
-                    <TooltipContent>
-                        <p>Estoque Atual: {item.totalStock.toLocaleString()} un.</p>
-                        <p>Estoque Alvo ({LINHA_BRANCA_TARGET_COVERAGE_DAYS} dias): {item.targetStock.toLocaleString()} un.</p>
-                        <p>{stockPercentageOfTarget.toFixed(0)}% do Alvo</p>
-                    </TooltipContent>
-                </Tooltip>
-            </TooltipProvider>
-            <Button onClick={() => onViewDetailsClick(item)} variant="outline" size="xs" className="w-full mt-1 text-xs">
-                <Eye className="mr-1.5 h-3.5 w-3.5" /> Ver SKUs Detalhados
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-  );
 };
-
 
 export default function LinhaBrancaEcosystemPage() {
   const { products: allProducts, isLoadingProducts, productsError, refetchProducts, lastDataUpdateTimestamp } = useProducts();
   const { toast } = useToast();
-  const [processedLinhaBrancaData, setProcessedLinhaBrancaData] = useState<LinhaBrancaBedSizeSummary[]>([]);
+  
+  const [aggregatedItems, setAggregatedItems] = useState<AggregatedLinhaBrancaItem[]>([]);
+  const [filteredItems, setFilteredItems] = useState<AggregatedLinhaBrancaItem[]>([]);
   const [detailedItemForModal, setDetailedItemForModal] = useState<AggregatedLinhaBrancaItem | null>(null);
 
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedItemType, setSelectedItemType] = useState<string>(ALL_FILTER_VALUE);
+  const [selectedSize, setSelectedSize] = useState<string>(ALL_FILTER_VALUE);
+  const [selectedStatus, setSelectedStatus] = useState<LinhaBrancaStockStatus | typeof ALL_FILTER_VALUE>(ALL_FILTER_VALUE);
+  const [sortCriteria, setSortCriteria] = useState<SortCriteria>('status');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+
+  const linhaBrancaProducts = useMemo(() => {
+    return allProducts.filter(p => p.collection === LINHA_BRANCA_COLLECTION_NAME);
+  }, [allProducts]);
 
   useEffect(() => {
     if (isLoadingProducts || productsError) {
-        if(productsError && !isLoadingProducts) {
-            toast({title: "Erro ao carregar dados de Linha Branca", description: productsError, variant: "destructive"});
-        }
-        setProcessedLinhaBrancaData([]);
-        return;
-    }
-
-    const linhaBrancaProducts = allProducts.filter(p => p.collection === LINHA_BRANCA_COLLECTION_NAME);
-
-    if (linhaBrancaProducts.length === 0) {
-      setProcessedLinhaBrancaData([]);
+      if (productsError && !isLoadingProducts) {
+        toast({ title: "Erro ao carregar dados de Linha Branca", description: productsError, variant: "destructive" });
+      }
+      setAggregatedItems([]);
       return;
     }
 
-    const aggregatedMap = new Map<string, AggregatedLinhaBrancaItem>();
+    if (linhaBrancaProducts.length === 0) {
+      setAggregatedItems([]);
+      return;
+    }
+
+    const itemsMap = new Map<string, AggregatedLinhaBrancaItem>();
 
     linhaBrancaProducts.forEach(p => {
-      const { itemType } = getItemTypeAndCleanName(p.name, p.productType);
-      const size = p.size || 'Tamanho Único'; // Default if size is undefined/empty
-      const id = `${itemType}-${size}`;
+      const productNameNormalized = (p.name || 'desconhecido').toLowerCase().trim();
+      const productSizeNormalized = (p.size || 'sem-tamanho').toLowerCase().trim();
+      const aggregationId = `${productNameNormalized}-${productSizeNormalized}`;
+      const itemType = p.productType || 'Outros';
 
-      let entry = aggregatedMap.get(id);
+      let entry = itemsMap.get(aggregationId);
       if (!entry) {
         entry = {
-          id, itemType, size, displayName: `${itemType} ${size}`,
+          id: aggregationId,
+          productName: p.name || 'Produto Desconhecido',
+          itemType: itemType,
+          size: p.size || 'Sem Tamanho',
           totalStock: 0, totalSales30d: 0, totalOpenOrders: 0,
           dailyAverageSales: 0, daysOfStock: null, targetStock: 0,
           replenishmentSuggestion: 0, status: 'N/A', contributingSkus: [],
+          vtexIdSample: p.vtexId,
+          avgPrice: 0,
         };
       }
       entry.totalStock += (p.stock || 0);
       entry.totalSales30d += (p.sales30d || 0);
       entry.totalOpenOrders += (p.openOrders || 0);
       entry.contributingSkus.push(p);
-      aggregatedMap.set(id, entry);
+      itemsMap.set(aggregationId, entry);
     });
 
     const finalAggregatedItems: AggregatedLinhaBrancaItem[] = [];
-    aggregatedMap.forEach(item => {
+    itemsMap.forEach(item => {
       item.dailyAverageSales = item.totalSales30d > 0 ? item.totalSales30d / 30 : 0;
       item.targetStock = Math.round(item.dailyAverageSales * LINHA_BRANCA_TARGET_COVERAGE_DAYS);
       item.daysOfStock = item.dailyAverageSales > 0 ? item.totalStock / item.dailyAverageSales : (item.totalStock > 0 ? Infinity : 0);
-
-      const neededForTarget = item.targetStock - (item.totalStock + item.totalOpenOrders);
-      item.replenishmentSuggestion = item.dailyAverageSales > 0 ? Math.max(0, Math.round(neededForTarget)) : 0;
       
-      const hasSignificantZeroStockSku = item.contributingSkus.some(
-        sku => (sku.stock || 0) === 0 && ((sku.sales30d || 0) / 30) >= LINHA_BRANCA_MIN_SIGNIFICANT_DAILY_SALES
-      );
+      const totalEffectiveStock = item.totalStock + item.totalOpenOrders;
+      item.replenishmentSuggestion = item.dailyAverageSales > 0 ? Math.max(0, Math.round(item.targetStock - totalEffectiveStock)) : 0;
+      
+      const skusWithPrice = item.contributingSkus.filter(s => typeof s.price === 'number');
+      item.avgPrice = skusWithPrice.length > 0 ? skusWithPrice.reduce((sum, s) => sum + (s.price!), 0) / skusWithPrice.length : 0;
 
       if (item.dailyAverageSales < LINHA_BRANCA_MIN_SIGNIFICANT_DAILY_SALES) {
         item.status = item.totalStock > 0 ? 'NoSales' : 'N/A';
       } else {
-        const effectiveCoverageWithOC = item.dailyAverageSales > 0 ? (item.totalStock + item.totalOpenOrders) / item.dailyAverageSales : Infinity;
-
-        if (item.daysOfStock !== null && item.daysOfStock < LINHA_BRANCA_CRITICAL_STOCK_DAYS && effectiveCoverageWithOC < LINHA_BRANCA_LOW_STOCK_DAYS) {
+        const effectiveCoverageWithOC = item.dailyAverageSales > 0 ? totalEffectiveStock / item.dailyAverageSales : (totalEffectiveStock > 0 ? Infinity : 0);
+        
+        if (item.totalStock === 0 && item.totalOpenOrders === 0) {
+            item.status = 'Critical';
+        } else if (item.daysOfStock < LINHA_BRANCA_CRITICAL_STOCK_DAYS_THRESHOLD && effectiveCoverageWithOC < LINHA_BRANCA_LOW_STOCK_DAYS_THRESHOLD) {
           item.status = 'Critical';
-        } else if ((item.daysOfStock !== null && item.daysOfStock < LINHA_BRANCA_LOW_STOCK_DAYS) || hasSignificantZeroStockSku) {
+        } else if (item.daysOfStock < LINHA_BRANCA_URGENT_STOCK_DAYS_THRESHOLD && item.totalSales30d > PILLOW_SALES_BASED_HIGH_SALES_THRESHOLD) {
+          item.status = 'Urgent';
+        } else if (item.daysOfStock < LINHA_BRANCA_LOW_STOCK_DAYS_THRESHOLD) {
           item.status = 'Low';
-        } else if (item.targetStock > 0 && (item.totalStock / item.targetStock) > LINHA_BRANCA_OVERSTOCK_FACTOR && item.daysOfStock && item.daysOfStock > (LINHA_BRANCA_TARGET_COVERAGE_DAYS * LINHA_BRANCA_OVERSTOCK_FACTOR)) {
+        } else if (item.targetStock > 0 && (item.totalStock / item.targetStock) > LINHA_BRANCA_OVERSTOCK_FACTOR && item.daysOfStock > (LINHA_BRANCA_TARGET_COVERAGE_DAYS * LINHA_BRANCA_OVERSTOCK_FACTOR)) {
           item.status = 'Overstocked';
         } else {
           item.status = 'Healthy';
@@ -218,80 +144,98 @@ export default function LinhaBrancaEcosystemPage() {
       }
       finalAggregatedItems.push(item);
     });
+    setAggregatedItems(finalAggregatedItems);
+  }, [linhaBrancaProducts, isLoadingProducts, productsError, toast]);
 
-    const bySize: Record<string, AggregatedLinhaBrancaItem[]> = {};
-    finalAggregatedItems.forEach(item => {
-      if (!bySize[item.size]) bySize[item.size] = [];
-      bySize[item.size].push(item);
+  useEffect(() => {
+    let tempFiltered = [...aggregatedItems];
+
+    if (searchTerm) {
+      tempFiltered = tempFiltered.filter(item =>
+        item.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.itemType.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+    if (selectedItemType !== ALL_FILTER_VALUE) {
+      tempFiltered = tempFiltered.filter(item => item.itemType === selectedItemType);
+    }
+    if (selectedSize !== ALL_FILTER_VALUE) {
+      tempFiltered = tempFiltered.filter(item => item.size === selectedSize);
+    }
+    if (selectedStatus !== ALL_FILTER_VALUE) {
+      tempFiltered = tempFiltered.filter(item => item.status === selectedStatus);
+    }
+
+    tempFiltered.sort((a, b) => {
+      let comparison = 0;
+      const valA = a[sortCriteria as keyof AggregatedLinhaBrancaItem];
+      const valB = b[sortCriteria as keyof AggregatedLinhaBrancaItem];
+
+      if (sortCriteria === 'status') {
+        const orderMap: Record<LinhaBrancaStockStatus, number> = { 'Critical': 1, 'Urgent': 2, 'Low': 3, 'Healthy': 4, 'Overstocked': 5, 'NoSales': 6, 'N/A': 7 };
+        comparison = (orderMap[a.status] || 99) - (orderMap[b.status] || 99);
+      } else if (sortCriteria === 'daysOfStock') {
+        const daysA = a.daysOfStock === null ? -1 : (Number.isFinite(a.daysOfStock) ? a.daysOfStock : Infinity);
+        const daysB = b.daysOfStock === null ? -1 : (Number.isFinite(b.daysOfStock) ? b.daysOfStock : Infinity);
+        comparison = daysA - daysB;
+      } else if (typeof valA === 'number' && typeof valB === 'number') {
+        comparison = (valA || 0) - (valB || 0);
+      } else if (typeof valA === 'string' && typeof valB === 'string') {
+        comparison = (valA || '').localeCompare(valB || '');
+      }
+      return sortOrder === 'asc' ? comparison : -comparison;
     });
 
-    const bedSizeSummaries: LinhaBrancaBedSizeSummary[] = Object.entries(bySize)
-      .map(([size, items]) => {
-        let criticalCount = 0;
-        let lowCount = 0;
-        items.forEach(it => {
-          if (it.status === 'Critical') criticalCount++;
-          if (it.status === 'Low') lowCount++;
-        });
+    setFilteredItems(tempFiltered);
+  }, [searchTerm, selectedItemType, selectedSize, selectedStatus, sortCriteria, sortOrder, aggregatedItems]);
 
-        let overallHarmonyStatus: LinhaBrancaBedSizeSummary['overallHarmonyStatus'] = 'Good';
-        if (criticalCount > 0) overallHarmonyStatus = 'Critical';
-        else if (lowCount > 0) overallHarmonyStatus = 'NeedsAttention';
-
-        return { size, items: items.sort((a,b) => a.itemType.localeCompare(b.itemType)), overallHarmonyStatus };
-      })
-      .sort((a, b) => {
-        const indexA = COMMON_SIZES_ORDER.indexOf(a.size);
-        const indexB = COMMON_SIZES_ORDER.indexOf(b.size);
-        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
-        if (indexA !== -1) return -1;
-        if (indexB !== -1) return 1;
-        return a.size.localeCompare(b.size);
-      });
-
-    setProcessedLinhaBrancaData(bedSizeSummaries);
-
-  }, [allProducts, isLoadingProducts, productsError, toast]);
+  const availableItemTypes = useMemo(() => Array.from(new Set(aggregatedItems.map(item => item.itemType))).sort(), [aggregatedItems]);
+  const availableSizes = useMemo(() => Array.from(new Set(aggregatedItems.map(item => item.size))).sort(), [aggregatedItems]);
+  const availableStatuses: LinhaBrancaStockStatus[] = ['Critical', 'Urgent', 'Low', 'Healthy', 'Overstocked', 'NoSales', 'N/A'];
 
   const kpis = useMemo(() => {
-    const allAggregatedItems = processedLinhaBrancaData.flatMap(s => s.items);
-    if (allAggregatedItems.length === 0) {
-      return { criticalCount: 0, lowCount: 0, overstockedCount: 0, noSalesCount: 0, replenishmentNeededUnits: 0, totalValueInStock:0 };
+    if (filteredItems.length === 0 && aggregatedItems.length > 0 && !isLoadingProducts) {
+      return { criticalCount: 0, urgentCount: 0, lowCount: 0, healthyCount: 0, overstockedCount: 0, noSalesCount: 0, naCount:0, replenishmentNeededUnits: 0, totalItems: 0};
     }
-    const totalValue = allAggregatedItems.reduce((sum, item) => {
-        const itemValue = item.contributingSkus.reduce((skuSum, sku) => skuSum + (sku.stock * (sku.price || 0)),0);
-        return sum + itemValue;
-    }, 0);
-
     return {
-      criticalCount: allAggregatedItems.filter(i => i.status === 'Critical').length,
-      lowCount: allAggregatedItems.filter(i => i.status === 'Low').length,
-      overstockedCount: allAggregatedItems.filter(i => i.status === 'Overstocked').length,
-      noSalesCount: allAggregatedItems.filter(i => i.status === 'NoSales').length,
-      replenishmentNeededUnits: allAggregatedItems.reduce((sum, item) => sum + item.replenishmentSuggestion, 0),
-      totalValueInStock: totalValue,
+      criticalCount: filteredItems.filter(i => i.status === 'Critical').length,
+      urgentCount: filteredItems.filter(i => i.status === 'Urgent').length,
+      lowCount: filteredItems.filter(i => i.status === 'Low').length,
+      healthyCount: filteredItems.filter(i => i.status === 'Healthy').length,
+      overstockedCount: filteredItems.filter(i => i.status === 'Overstocked').length,
+      noSalesCount: filteredItems.filter(i => i.status === 'NoSales').length,
+      naCount: filteredItems.filter(i => i.status === 'N/A').length,
+      replenishmentNeededUnits: filteredItems.reduce((sum, item) => sum + item.replenishmentSuggestion, 0),
+      totalItems: filteredItems.length,
     };
-  }, [processedLinhaBrancaData]);
+  }, [filteredItems, aggregatedItems, isLoadingProducts]);
 
   const urgentActions = useMemo(() => {
-    return processedLinhaBrancaData
-      .flatMap(s => s.items)
-      .filter(item => (item.status === 'Critical' || (item.status === 'Low' && item.dailyAverageSales >= LINHA_BRANCA_MIN_SIGNIFICANT_DAILY_SALES * 5)) && item.replenishmentSuggestion > 0)
+    return aggregatedItems
+      .filter(item => (item.status === 'Critical' || item.status === 'Urgent') && item.replenishmentSuggestion > 0)
       .sort((a, b) => {
-        const statusOrderVal = (status: LinhaBrancaStockStatus) => ({ 'Critical': 1, 'Low': 2, 'Healthy': 3, 'Overstocked': 4, 'NoSales': 5, 'N/A': 6 }[status] || 6);
+        const statusOrderVal = (status: LinhaBrancaStockStatus) => ({ 'Critical': 1, 'Urgent': 2, 'Low': 3, 'Healthy': 4, 'Overstocked': 5, 'NoSales': 6, 'N/A': 7 }[status] || 7);
         const statusComparison = statusOrderVal(a.status) - statusOrderVal(b.status);
         if (statusComparison !== 0) return statusComparison;
         return (b.dailyAverageSales) - (a.dailyAverageSales);
       })
-      .slice(0, 5); // Limit to top 5 urgent actions
-  }, [processedLinhaBrancaData]);
+      .slice(0, 5);
+  }, [aggregatedItems]);
 
+  const handleSort = (key: SortCriteria) => {
+    if (sortCriteria === key) {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortCriteria(key);
+      setSortOrder('asc');
+    }
+  };
 
-  if (isLoadingProducts && allProducts.length === 0 && !productsError) {
+  if (isLoadingProducts && linhaBrancaProducts.length === 0 && !productsError) {
     return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-3">Carregando dados da Linha Branca...</p></div>;
   }
 
-  if (productsError && allProducts.length === 0 && !isLoadingProducts) {
+  if (productsError && linhaBrancaProducts.length === 0 && !isLoadingProducts) {
     return (
       <Card className="m-auto mt-10 max-w-lg text-center shadow-xl">
         <CardHeader><AlertTriangle className="mx-auto h-16 w-16 text-destructive mb-4" /><CardTitle className="text-2xl">Erro ao Carregar Dados</CardTitle></CardHeader>
@@ -299,18 +243,18 @@ export default function LinhaBrancaEcosystemPage() {
       </Card>
     );
   }
-
-  const linhaBrancaOriginalProducts = allProducts.filter(p => p.collection === LINHA_BRANCA_COLLECTION_NAME);
+  
+  const noLinhaBrancaProductsFound = allProducts.length > 0 && linhaBrancaProducts.length === 0 && !isLoadingProducts && !productsError;
 
   return (
     <div className="space-y-6">
       <Card className="shadow-lg border-t-4 border-primary">
         <CardHeader>
           <CardTitle className="flex items-center text-2xl font-bold">
-            <ShieldHalf className="mr-3 h-8 w-8 text-primary" /> Ecossistema de Estoque Linha Branca
+            <ShieldHalf className="mr-3 h-8 w-8 text-primary" /> Análise Detalhada de Estoque: Linha Branca
           </CardTitle>
           <CardDescription>
-            Análise integrada da saúde do estoque, vendas e necessidades de reposição para Protetores e Saias Box, agrupados por tamanho de cama.
+            Visão granular da saúde do estoque, vendas e necessidades de reposição para cada item da Linha Branca.
             {lastDataUpdateTimestamp && (
                 <span className="block text-xs text-muted-foreground mt-1 flex items-center"><CalendarDays className="h-3.5 w-3.5 mr-1.5"/>Dados atualizados em: {formatDateFns(lastDataUpdateTimestamp, 'dd/MM/yyyy HH:mm', { locale: ptBR })}</span>
             )}
@@ -318,45 +262,49 @@ export default function LinhaBrancaEcosystemPage() {
         </CardHeader>
       </Card>
 
-      {linhaBrancaOriginalProducts.length === 0 && !isLoadingProducts && !productsError && (
+      {noLinhaBrancaProductsFound && (
          <Card className="shadow-md text-center py-10 border-l-4 border-blue-500">
             <CardHeader><CardTitle className="flex items-center justify-center text-xl"><Layers className="mr-2 h-7 w-7 text-primary" />Nenhum Produto "{LINHA_BRANCA_COLLECTION_NAME}"</CardTitle></CardHeader>
             <CardContent><p className="text-muted-foreground">Não foram encontrados produtos com a coleção "{LINHA_BRANCA_COLLECTION_NAME}" nos dados carregados. Verifique a planilha no Dashboard.</p></CardContent>
          </Card>
       )}
 
-      {linhaBrancaOriginalProducts.length > 0 && !productsError && (
+      {linhaBrancaProducts.length > 0 && !productsError && (
         <>
           <Card>
-            <CardHeader><CardTitle className="text-lg font-semibold flex items-center"><BarChart3 className="mr-2 h-5 w-5 text-primary"/>Painel de Controle Agregado - Linha Branca</CardTitle></CardHeader>
-            <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-                <KpiCard title="Itens Críticos" value={kpis.criticalCount.toLocaleString()} icon={PackageX} color="text-red-600" description={`Venda relevante, cob. < ${LINHA_BRANCA_CRITICAL_STOCK_DAYS}d`} />
-                <KpiCard title="Itens Baixo Estoque" value={kpis.lowCount.toLocaleString()} icon={TrendingDown} color="text-yellow-600" description={`Cob. < ${LINHA_BRANCA_LOW_STOCK_DAYS}d ou SKU chave zerado`} />
-                <KpiCard title="Itens em Excesso" value={kpis.overstockedCount.toLocaleString()} icon={Repeat} color="text-blue-600" description={`Estoque > ${LINHA_BRANCA_OVERSTOCK_FACTOR * 100}% do alvo`} />
-                <KpiCard title="Itens Estagnados" value={kpis.noSalesCount.toLocaleString()} icon={MinusCircle} color="text-slate-600" description="Estoque s/ vendas signif." />
-                <KpiCard title="Total Reposição Sug." value={`${kpis.replenishmentNeededUnits.toLocaleString()} un.`} icon={PlusCircle} color="text-green-600" description={`Para cobrir ${LINHA_BRANCA_TARGET_COVERAGE_DAYS} dias`} />
+            <CardHeader><CardTitle className="text-lg font-semibold flex items-center"><BarChart3 className="mr-2 h-5 w-5 text-primary"/>Painel de Controle Agregado (Filtros Aplicados)</CardTitle></CardHeader>
+            <CardContent className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-5 gap-3 text-xs">
+                <KpiCardSmall title="Itens Exibidos" value={kpis.totalItems.toLocaleString()} icon={Eye} />
+                <KpiCardSmall title="Críticos" value={kpis.criticalCount.toLocaleString()} icon={PackageX} color="text-red-600" />
+                <KpiCardSmall title="Urgentes" value={kpis.urgentCount.toLocaleString()} icon={Zap} color="text-orange-500" />
+                <KpiCardSmall title="Baixo Estoque" value={kpis.lowCount.toLocaleString()} icon={TrendingDown} color="text-yellow-600" />
+                <KpiCardSmall title="Saudáveis" value={kpis.healthyCount.toLocaleString()} icon={ThumbsUp} color="text-green-600" />
+                <KpiCardSmall title="Excesso" value={kpis.overstockedCount.toLocaleString()} icon={Repeat} color="text-blue-600" />
+                <KpiCardSmall title="Estagnados" value={kpis.noSalesCount.toLocaleString()} icon={MinusCircle} color="text-slate-600" />
+                <KpiCardSmall title="N/A" value={kpis.naCount.toLocaleString()} icon={HelpCircle} color="text-gray-500" />
+                <KpiCardSmall title="Reposição Sug. (Total)" value={`${kpis.replenishmentNeededUnits.toLocaleString()} un.`} icon={PlusCircle} color="text-teal-600" className="xl:col-span-2"/>
             </CardContent>
           </Card>
 
           {urgentActions.length > 0 && (
             <Card className="border-red-600 shadow-lg">
-              <CardHeader className="bg-red-600/10">
-                <CardTitle className="text-red-700 flex items-center text-xl"><AlertTriangle className="mr-2.5 h-6 w-6"/>Ações Urgentes Sugeridas ({urgentActions.length})</CardTitle>
-                <CardDescription className="text-red-700/90">Itens agregados críticos ou com baixo estoque, alta VMD e necessidade de reposição. Clique para ver detalhes dos SKUs.</CardDescription>
+              <CardHeader className="bg-red-600/5">
+                <CardTitle className="text-red-700 flex items-center text-lg"><AlertTriangle className="mr-2 h-5 w-5"/>Top Ações Urgentes Sugeridas (Geral)</CardTitle>
+                <CardDescription className="text-red-700/80 text-xs">Itens críticos ou urgentes com maior VMD e necessidade de reposição (baseado em todos os dados, não apenas nos filtros atuais).</CardDescription>
               </CardHeader>
-              <CardContent className="pt-4 space-y-2">
+              <CardContent className="pt-3 space-y-1.5">
                   {urgentActions.map(item => (
-                    <div key={item.id} className="p-2.5 border border-red-400/50 rounded-md bg-red-500/5 hover:bg-red-500/10 transition-colors">
+                    <div key={item.id} className="p-2 border border-red-400/30 rounded-md bg-red-500/5 hover:bg-red-500/10 transition-colors">
                         <div className="flex justify-between items-center">
-                            <span className="font-semibold text-red-800 text-sm">{item.displayName}</span>
-                             <Badge variant="destructive" className="text-xs">{item.status.toUpperCase()}</Badge>
+                            <span className="font-semibold text-red-800 text-xs truncate" title={item.productName}>{item.productName}</span>
+                             <Badge variant="destructive" className="text-xxs flex-shrink-0">{item.status.toUpperCase()}</Badge>
                         </div>
-                        <p className="text-xs text-red-700/90">
+                        <p className="text-xxs text-red-700/80">
                             Repor: <span className="font-bold">{item.replenishmentSuggestion.toLocaleString()} un.</span>
                             (Est.Agreg: {item.totalStock.toLocaleString()}, VMD Agreg: {item.dailyAverageSales.toFixed(1)})
                         </p>
-                        <Button onClick={() => setDetailedItemForModal(item)} variant="link" size="xs" className="text-red-600 hover:text-red-700 p-0 h-auto text-xs mt-1">
-                           <Eye className="mr-1 h-3.5 w-3.5"/> Ver SKUs para {item.itemType} {item.size}
+                        <Button onClick={() => setDetailedItemForModal(item)} variant="link" size="xs" className="text-red-600 hover:text-red-700 p-0 h-auto text-xxs mt-0.5">
+                           <Eye className="mr-1 h-3 w-3"/> Ver SKUs
                         </Button>
                     </div>
                   ))}
@@ -364,48 +312,77 @@ export default function LinhaBrancaEcosystemPage() {
             </Card>
           )}
 
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg font-semibold flex items-center"><ListFilter className="mr-2 h-5 w-5 text-primary"/>Filtros e Ordenação</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="searchTermLBE">Buscar por Nome/Tipo do Item</Label>
+                <Input id="searchTermLBE" placeholder="Digite para buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="mt-1"/>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div>
+                  <Label htmlFor="itemTypeFilter">Tipo de Item</Label>
+                  <Select value={selectedItemType} onValueChange={setSelectedItemType}><SelectTrigger id="itemTypeFilter" className="mt-1"><SelectValue/></SelectTrigger>
+                    <SelectContent><SelectItem value={ALL_FILTER_VALUE}>Todos os Tipos</SelectItem>{availableItemTypes.map(type => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="sizeFilter">Tamanho</Label>
+                  <Select value={selectedSize} onValueChange={setSelectedSize}><SelectTrigger id="sizeFilter" className="mt-1"><SelectValue/></SelectTrigger>
+                    <SelectContent><SelectItem value={ALL_FILTER_VALUE}>Todos os Tamanhos</SelectItem>{availableSizes.map(size => <SelectItem key={size} value={size}>{size}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="statusFilter">Status de Vendas</Label>
+                  <Select value={selectedStatus} onValueChange={(val) => setSelectedStatus(val as any)}><SelectTrigger id="statusFilter" className="mt-1"><SelectValue/></SelectTrigger>
+                    <SelectContent><SelectItem value={ALL_FILTER_VALUE}>Todos os Status</SelectItem>{availableStatuses.map(s => <SelectItem key={s} value={s}>{getStatusProps(s).text}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                 <div>
+                    <Label htmlFor="sortCriteriaLBE">Ordenar Por</Label>
+                    <Select value={sortCriteria} onValueChange={(v) => setSortCriteria(v as SortCriteria)}><SelectTrigger id="sortCriteriaLBE" className="mt-1"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="status">Status de Vendas</SelectItem>
+                            <SelectItem value="productName">Nome do Produto</SelectItem>
+                            <SelectItem value="daysOfStock">Dias de Cobertura</SelectItem>
+                            <SelectItem value="replenishmentSuggestion">Sugestão de Reposição</SelectItem>
+                            <SelectItem value="dailyAverageSales">VMD</SelectItem>
+                            <SelectItem value="totalStock">Estoque Total</SelectItem>
+                            <SelectItem value="itemType">Tipo de Item</SelectItem>
+                            <SelectItem value="size">Tamanho</SelectItem>
+                        </SelectContent>
+                    </Select>
+                 </div>
+                 <div>
+                    <Label htmlFor="sortOrderLBE">Ordem</Label>
+                    <Button variant="outline" className="w-full mt-1" onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}>
+                        {sortOrder === 'asc' ? "Crescente" : "Decrescente"} <ArrowUpDown className="ml-2 h-4 w-4 opacity-70"/>
+                    </Button>
+                 </div>
+              </div>
+            </CardContent>
+          </Card>
 
-          {processedLinhaBrancaData.length === 0 && linhaBrancaOriginalProducts.length > 0 && !isLoadingProducts && (
-             <Card className="shadow-md text-center py-10 border-l-4 border-gray-300">
-                <CardHeader><CardTitle className="flex items-center justify-center text-xl"><Activity className="mr-2 h-7 w-7 text-muted-foreground" />Processando Dados...</CardTitle></CardHeader>
-                <CardContent><p className="text-muted-foreground">Aguarde enquanto os dados da Linha Branca são agregados e analisados.</p><Loader2 className="mx-auto mt-3 h-6 w-6 animate-spin text-primary" /></CardContent>
-             </Card>
+          {isLoadingProducts && aggregatedItems.length === 0 && <div className="text-center py-6"><Loader2 className="mx-auto h-8 w-8 animate-spin text-primary"/><p className="mt-2 text-muted-foreground">Processando itens da Linha Branca...</p></div>}
+          
+          {!isLoadingProducts && filteredItems.length === 0 && aggregatedItems.length > 0 && (
+            <Card className="text-center py-10 shadow-sm">
+              <CardHeader><CardTitle className="flex items-center justify-center text-lg"><Search className="mr-2 h-6 w-6 text-muted-foreground"/>Nenhum Item Encontrado</CardTitle></CardHeader>
+              <CardContent><p className="text-muted-foreground">Nenhum item da Linha Branca corresponde aos filtros selecionados.</p></CardContent>
+            </Card>
           )}
 
-          <div className="space-y-8 mt-6">
-            {processedLinhaBrancaData.map(bedSizeSummary => (
-              <Card key={bedSizeSummary.size} className="overflow-hidden shadow-lg border-t-4" style={{borderColor: bedSizeSummary.overallHarmonyStatus === 'Critical' ? 'hsl(var(--destructive))' : bedSizeSummary.overallHarmonyStatus === 'NeedsAttention' ? 'hsl(var(--chart-4))' : 'hsl(var(--chart-2))'}}>
-                <CardHeader className={cn("p-4",
-                    bedSizeSummary.overallHarmonyStatus === 'Critical' ? 'bg-destructive/10' :
-                    bedSizeSummary.overallHarmonyStatus === 'NeedsAttention' ? 'bg-yellow-400/10' :
-                    'bg-green-500/5'
-                  )}>
-                  <CardTitle className="text-xl flex items-center font-bold" style={{color: bedSizeSummary.overallHarmonyStatus === 'Critical' ? 'hsl(var(--destructive))' : bedSizeSummary.overallHarmonyStatus === 'NeedsAttention' ? 'hsl(var(--chart-4))' : 'hsl(var(--chart-2))'}}>
-                    {bedSizeSummary.overallHarmonyStatus === 'Critical' ? <AlertTriangle className="mr-2.5 h-6 w-6" /> :
-                     bedSizeSummary.overallHarmonyStatus === 'NeedsAttention' ? <Eye className="mr-2.5 h-6 w-6" /> :
-                     <PackageCheck className="mr-2.5 h-6 w-6" /> }
-                    Ecossistema Cama: {bedSizeSummary.size}
-                  </CardTitle>
-                  <CardDescription style={{color: bedSizeSummary.overallHarmonyStatus === 'Critical' ? 'hsl(var(--destructive)/0.9)' : bedSizeSummary.overallHarmonyStatus === 'NeedsAttention' ? 'hsl(var(--chart-4)/0.9)' : 'hsl(var(--chart-2)/0.9)'}}>
-                    {bedSizeSummary.overallHarmonyStatus === 'Critical' ? "Pelo menos um item crítico. Atenção máxima necessária!" :
-                     bedSizeSummary.overallHarmonyStatus === 'NeedsAttention' ? "Pelo menos um item com estoque baixo. Requer atenção." :
-                     "Todos os itens parecem saudáveis ou em excesso gerenciável."}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="p-4">
-                  {bedSizeSummary.items.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                      {bedSizeSummary.items.map(item => (
-                        <LinhaBrancaItemWidget key={item.id} item={item} onViewDetailsClick={setDetailedItemForModal} />
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-muted-foreground text-center py-4">Nenhum item da Linha Branca encontrado para este tamanho de cama.</p>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          {filteredItems.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {filteredItems.map(item => (
+                <LinhaBrancaItemCard key={item.id} item={item} onViewDetailsClick={setDetailedItemForModal} targetCoverageDays={LINHA_BRANCA_TARGET_COVERAGE_DAYS} />
+              ))}
+            </div>
+          )}
         </>
       )}
 
@@ -413,20 +390,21 @@ export default function LinhaBrancaEcosystemPage() {
         <Dialog open={!!detailedItemForModal} onOpenChange={(isOpen) => { if (!isOpen) setDetailedItemForModal(null); }}>
           <DialogContent className="sm:max-w-3xl md:max-w-4xl lg:max-w-5xl">
             <DialogHeader>
-              <DialogTitle className="text-xl">SKUs Detalhados para: {detailedItemForModal.displayName}</DialogTitle>
+              <DialogTitle className="text-xl">SKUs Detalhados para: {detailedItemForModal.productName}</DialogTitle>
               <DialogDescription>
-                Lista de SKUs individuais que compõem o item agregado. Métricas Agregadas: 
-                Estoque {detailedItemForModal.totalStock}, VMD {detailedItemForModal.dailyAverageSales.toFixed(1)}, 
+                Tipo: {detailedItemForModal.itemType}, Tamanho: {detailedItemForModal.size}.
+                <br/>
+                Métricas Agregadas: Estoque {detailedItemForModal.totalStock}, VMD {detailedItemForModal.dailyAverageSales.toFixed(1)}, 
                 Ped. Abertos {detailedItemForModal.totalOpenOrders}, Sug. Repor {detailedItemForModal.replenishmentSuggestion}. 
-                Status: <span className="font-semibold">{detailedItemForModal.status}</span>.
+                Status: <span className="font-semibold">{getStatusProps(detailedItemForModal.status).text}</span>.
               </DialogDescription>
             </DialogHeader>
-            <div className="max-h-[65vh] overflow-y-auto mt-4 rounded-md border">
+            <div className="max-h-[60vh] overflow-y-auto mt-4 rounded-md border">
               {detailedItemForModal.contributingSkus.length > 0 ? (
                 <Table>
                   <TableHeader className="sticky top-0 bg-card z-10">
                     <TableRow>
-                      <TableHead className="min-w-[280px] whitespace-nowrap">Nome Produto (SKU)</TableHead>
+                      <TableHead className="min-w-[250px] whitespace-nowrap">Nome Produto (SKU)</TableHead>
                       <TableHead className="whitespace-nowrap">ID VTEX</TableHead>
                       <TableHead className="text-right whitespace-nowrap">Estoque</TableHead>
                       <TableHead className="text-right whitespace-nowrap">Venda 30d</TableHead>
@@ -437,8 +415,8 @@ export default function LinhaBrancaEcosystemPage() {
                   </TableHeader>
                   <TableBody>
                     {detailedItemForModal.contributingSkus.map(sku => (
-                      <TableRow key={String(sku.vtexId) + '-' + sku.name}>
-                        <TableCell className="text-xs font-medium py-1.5">{sku.name}</TableCell>
+                      <TableRow key={String(sku.vtexId) + '-' + sku.name + '-' + sku.productDerivation}>
+                        <TableCell className="text-xs font-medium py-1.5" title={sku.name}>{sku.name} ({sku.productDerivation || 'SKU Base'})</TableCell>
                         <TableCell className="text-xs py-1.5">{String(sku.vtexId)}</TableCell>
                         <TableCell className="text-right text-xs py-1.5">{sku.stock.toLocaleString()}</TableCell>
                         <TableCell className="text-right text-xs py-1.5">{(sku.sales30d || 0).toLocaleString()}</TableCell>
@@ -463,26 +441,22 @@ export default function LinhaBrancaEcosystemPage() {
   );
 }
 
-interface KpiCardProps {
+interface KpiCardSmallProps {
   title: string;
   value: string | number;
   icon: React.ElementType;
   color?: string;
-  description?: string;
-  isLoading?: boolean;
+  className?: string;
 }
 
-const KpiCard: React.FC<KpiCardProps> = ({ title, value, icon: Icon, color = "text-foreground", description, isLoading }) => {
+const KpiCardSmall: React.FC<KpiCardSmallProps> = ({ title, value, icon: Icon, color = "text-foreground", className }) => {
   return (
-    <Card className="shadow-sm hover:shadow-md transition-shadow border-l-4" style={{ borderColor: color.startsWith('text-') ? `var(--${color.substring(5)})` : color }}>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1.5 pt-3 px-4">
-        <CardTitle className="text-xs font-medium text-muted-foreground">{title}</CardTitle>
-        <Icon className={cn("h-4 w-4", color)} />
-      </CardHeader>
-      <CardContent className="px-4 pb-3">
-        {isLoading ? <Loader2 className="h-6 w-6 animate-spin" /> : <div className={`text-2xl font-bold ${color}`}>{value}</div>}
-        {description && <p className="text-xxs text-muted-foreground pt-0.5 truncate" title={description}>{description}</p>}
-      </CardContent>
+    <Card className={cn("shadow-sm hover:shadow transition-shadow p-2", className)}>
+      <div className="flex items-center justify-between space-x-1">
+        <p className="text-xxs font-medium text-muted-foreground truncate" title={title}>{title}</p>
+        <Icon className={cn("h-3.5 w-3.5 flex-shrink-0", color)} />
+      </div>
+      <p className={`text-base font-bold ${color} truncate`} title={String(value)}>{value}</p>
     </Card>
   );
 };

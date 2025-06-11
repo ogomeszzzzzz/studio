@@ -75,7 +75,12 @@ export interface AggregatedPillow {
   salesBasedStatus?: SalesBasedPillowStatus;
 }
 
-export type SortCriteria = 'name' | 'stock' | 'fillPercentage' | 'sales30d' | 'openOrders' | 'dailyAverageSales' | 'estimatedCoverageDays' | 'daysOfStock' | 'stockVsIdealFactor'; // Added for new page
+export type SortCriteria = 
+  | 'name' | 'stock' | 'fillPercentage' | 'sales30d' | 'openOrders' 
+  | 'dailyAverageSales' | 'daysOfStock' | 'stockVsIdealFactor'
+  | 'itemType' | 'size' | 'status' | 'replenishmentSuggestion' // Added for Linha Branca
+  | 'salesBasedStatus'; // Added for Pillows & Linha Branca
+
 export type SortOrder = 'asc' | 'desc';
 export type StockStatusFilter = 'all' | 'critical' | 'empty' | 'low' | 'medium' | 'good' | 'overstocked' | 'salesCritical' | 'salesUrgent' | 'salesLow' | 'salesHealthy' | 'salesOverstocked' | 'salesNoSales' | 'salesN/A';
 
@@ -108,34 +113,35 @@ export interface EnhancedProductForStockIntelligence extends Product {
 }
 
 // For Linha Branca Ecosystem Page
-export type LinhaBrancaItemType = 'Protetor de Colchão' | 'Protetor de Travesseiro' | 'Saia Box' | 'Outros';
-export type LinhaBrancaStockStatus = 'Critical' | 'Low' | 'Healthy' | 'Overstocked' | 'NoSales' | 'N/A';
+export type LinhaBrancaItemType = string; // Now generic string from productType
+export type LinhaBrancaStockStatus = SalesBasedPillowStatus; // Reuse from Pillows
 
 export interface AggregatedLinhaBrancaItem {
-  id: string; // e.g., "Protetor de Colchão-Queen"
-  itemType: LinhaBrancaItemType;
-  size: string;
-  displayName: string; // e.g., "Protetor Colchão Queen"
+  id: string; // Ex: "protetor-colchao-casal-impermeavel-altenburg" (generated from product name + size)
+  productName: string; // Original product name
+  itemType: LinhaBrancaItemType; // From product.productType
+  size: string; // From product.size
+  
   totalStock: number;
   totalSales30d: number;
   totalOpenOrders: number;
+  
   dailyAverageSales: number;
   daysOfStock: number | null;
-  targetStock: number;
-  replenishmentSuggestion: number;
+  targetStock: number; // (dailyAverageSales * LINHA_BRANCA_TARGET_COVERAGE_DAYS)
+  replenishmentSuggestion: number; // (targetStock - (totalStock + totalOpenOrders))
   status: LinhaBrancaStockStatus;
-  contributingSkus: Product[]; // Changed to store full Product objects, or at least essential fields
+  
+  contributingSkus: Product[];
+  vtexIdSample?: string | number; // An example VTEX ID from one of the SKUs
+  avgPrice?: number; // Average price of contributing SKUs
 }
 
-export interface LinhaBrancaBedSizeSummary {
-  size: string;
-  items: AggregatedLinhaBrancaItem[];
-  overallHarmonyStatus: 'Good' | 'NeedsAttention' | 'Critical'; // Example overall status
-}
-
-// SalesRecord type was removed as the related panel was deleted.
-// If Component 6 (daily sales upload) is fully implemented later, this might be revived.
-
-
-
+// Removed LinhaBrancaBedSizeSummary as we are moving to a flat list of items
+// export interface LinhaBrancaBedSizeSummary {
+//   size: string;
+//   items: AggregatedLinhaBrancaItem[];
+//   overallHarmonyStatus: 'Good' | 'NeedsAttention' | 'Critical';
+// }
     
+```
