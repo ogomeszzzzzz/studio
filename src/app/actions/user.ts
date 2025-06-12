@@ -1,8 +1,7 @@
 
 'use server';
 
-// Imports direto das instâncias configuradas
-import { adminFirestore_DefaultDB, adminAuth } from '@/lib/firebase/adminConfig'; // Removed adminSDKInitializationError
+import { getAdminAuthInstance, getAdminFirestoreInstance, getAdminSDKInitializationError } from '@/lib/firebase/adminConfig';
 import type { UserProfile } from '@/types';
 
 interface UserActionResult {
@@ -17,22 +16,20 @@ export async function updateUserProfile(
   currentUserEmail: string,
   updates: { name?: string; photoURL?: string }
 ): Promise<UserActionResult> {
-  console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null:`, adminAuth === null);
-  console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null:`, adminFirestore_DefaultDB === null);
+  const adminAuth = getAdminAuthInstance();
+  const adminFirestore_DefaultDB = getAdminFirestoreInstance();
+  const adminSDKInitError = getAdminSDKInitializationError();
 
-  if (!adminAuth) {
-    const errorMsg = `Erro Crítico no Servidor: Serviço de autenticação Admin SDK não disponível. Verifique logs de inicialização V36. (REF: AUTH_SVC_UNAVAILABLE_IN_ACTION_UUP_${LOG_VERSION_TAG_ACTION})`;
+  console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitError: ${adminSDKInitError}`);
+  console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null: ${adminAuth === null}`);
+  console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
+
+  if (adminSDKInitError || !adminAuth || !adminFirestore_DefaultDB) {
+    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${adminSDKInitError || 'Serviços Admin não disponíveis'}. Verifique os logs V36 do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_UUP_${LOG_VERSION_TAG_ACTION})`;
     console.error(`[Update User Profile Action - CRITICAL_FAILURE] ${errorMsg}`);
     return { message: errorMsg, status: 'error' };
   }
-  if (!adminFirestore_DefaultDB) {
-    const errorMsg = `Erro Crítico no Servidor: Serviço Firestore Admin SDK não disponível. Verifique logs de inicialização V36. (REF: FS_SVC_UNAVAILABLE_IN_ACTION_UUP_${LOG_VERSION_TAG_ACTION})`;
-    console.error(`[Update User Profile Action - CRITICAL_FAILURE] ${errorMsg}`);
-    return { message: errorMsg, status: 'error' };
-  }
-  console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB.app.options.projectId:`, adminFirestore_DefaultDB?.app?.options?.projectId);
-
-
+  
   if (!currentUserEmail) {
     console.error(`[Update User Profile Action ${LOG_VERSION_TAG_ACTION}] Failing because currentUserEmail was not provided.`);
     return { message: "Email do usuário não fornecido para a ação.", status: "error" };
@@ -41,7 +38,6 @@ export async function updateUserProfile(
     return { message: "Nenhuma atualização fornecida.", status: "error" };
   }
 
-  // Check Firestore instance integrity before use (already done in adminConfig.ts, but good for explicit check here too)
   if (!adminFirestore_DefaultDB.app || !adminFirestore_DefaultDB.app.options || adminFirestore_DefaultDB.app.options.projectId !== "ecommerce-db-75f77") {
     console.error(`[Update User Profile Action ${LOG_VERSION_TAG_ACTION} - CRITICAL FAILURE AT FS CHECK] Firestore instance is invalid or for wrong project.`);
     return { message: `Erro crítico: Configuração do banco de dados inválida no servidor (Update). (REF: FS_INTEGRITY_FAIL_UUP_${LOG_VERSION_TAG_ACTION})`, status: 'error' };
