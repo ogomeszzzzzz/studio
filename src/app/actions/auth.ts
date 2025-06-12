@@ -14,19 +14,19 @@ interface ActionResult {
 
 const ADMIN_PRIMARY_EMAIL = process.env.ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br";
 const SALT_ROUNDS = 10;
-const LOG_VERSION_TAG_ACTION = "V37"; 
+const LOG_VERSION_TAG_ACTION = "V38"; 
 
 export async function registerUserInFirestore(prevState: any, formData: FormData): Promise<ActionResult> {
+  const initErrorMsg = await getAdminSDKInitializationError();
   const adminAuth = await getAdminAuthInstance();
   const adminFirestore_DefaultDB = await getAdminFirestoreInstance();
-  const adminSDKInitError = await getAdminSDKInitializationError();
 
-  console.log(`[Register User Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitError (from getter): ${adminSDKInitError}`);
+  console.log(`[Register User Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitializationError (from getter): ${initErrorMsg}`);
   console.log(`[Register User Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null: ${adminAuth === null}`);
   console.log(`[Register User Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
 
-  if (adminSDKInitError || !adminAuth || !adminFirestore_DefaultDB) {
-    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${adminSDKInitError || 'Serviços Admin não disponíveis'}. Verifique os logs V37 do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_REG_${LOG_VERSION_TAG_ACTION})`;
+  if (initErrorMsg || !adminAuth || !adminFirestore_DefaultDB) {
+    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${initErrorMsg || 'Serviços Admin não disponíveis'}. Verifique os logs ${LOG_VERSION_TAG_ACTION} do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_REG_${LOG_VERSION_TAG_ACTION})`;
     console.error(`[Register User Action - CRITICAL_FAILURE] ${errorMsg}`);
     return { message: errorMsg, status: 'error' };
   }
@@ -79,16 +79,16 @@ export async function registerUserInFirestore(prevState: any, formData: FormData
 }
 
 export async function loginUserWithFirestore(prevState: any, formData: FormData): Promise<ActionResult> {
+  const initErrorMsg = await getAdminSDKInitializationError();
   const adminAuth = await getAdminAuthInstance();
   const adminFirestore_DefaultDB = await getAdminFirestoreInstance();
-  const adminSDKInitError = await getAdminSDKInitializationError();
-
-  console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminSDKInitError (from getter): ${adminSDKInitError}`);
+  
+  console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminSDKInitializationError (from getter): ${initErrorMsg}`);
   console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminAuth is null: ${adminAuth === null}`);
   console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
   
-  if (adminSDKInitError || !adminAuth || !adminFirestore_DefaultDB) {
-    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${adminSDKInitError || 'Serviços Admin não disponíveis'}. Verifique os logs V37 do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_LOGIN_${LOG_VERSION_TAG_ACTION})`;
+  if (initErrorMsg || !adminAuth || !adminFirestore_DefaultDB) {
+    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${initErrorMsg || 'Serviços Admin não disponíveis'}. Verifique os logs ${LOG_VERSION_TAG_ACTION} do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_LOGIN_${LOG_VERSION_TAG_ACTION})`;
     console.error(`[Login Action ${LOG_VERSION_TAG_ACTION} - CRITICAL_FAILURE] ${errorMsg}`);
     return { message: errorMsg, status: 'error' };
   }
@@ -107,20 +107,14 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
   const submittedPasswordTrimmed = rawSubmittedPassword.trim();
   console.log(`[Login User Firestore Action ${LOG_VERSION_TAG_ACTION}] Submitted password (trimmed): type: string, length: ${submittedPasswordTrimmed.length}, value: 'Log Redacted'`);
   
-  // --- FINAL CHECK BEFORE Firestore .get() call ---
-  console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - DETAIL CHECK 1] adminFirestore_DefaultDB is null/undefined: ${!adminFirestore_DefaultDB}`);
-  if (adminFirestore_DefaultDB) {
-    console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - DETAIL CHECK 2] adminFirestore_DefaultDB.app is null/undefined: ${!adminFirestore_DefaultDB.app}`);
-    if (adminFirestore_DefaultDB.app) {
-      console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - DETAIL CHECK 3] adminFirestore_DefaultDB.app.options is null/undefined: ${!adminFirestore_DefaultDB.app.options}`);
-      if (adminFirestore_DefaultDB.app.options) {
-        console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - DETAIL CHECK 4] adminFirestore_DefaultDB.app.options.projectId value: '${adminFirestore_DefaultDB.app.options.projectId}'`);
-      }
-    }
-  }
-
-  if (!adminFirestore_DefaultDB || !adminFirestore_DefaultDB.app || !adminFirestore_DefaultDB.app.options || adminFirestore_DefaultDB.app.options.projectId !== "ecommerce-db-75f77") {
-      console.error(`[Login Action ${LOG_VERSION_TAG_ACTION} - CRITICAL FAILURE AT GET] Firestore instance is invalid or for wrong project. Expected 'ecommerce-db-75f77', got '${adminFirestore_DefaultDB?.app?.options?.projectId}'.`);
+  console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - DETAIL CHECK 1] adminFirestore_DefaultDB.app.options.projectId (before usage): '${adminFirestore_DefaultDB.app?.options?.projectId}'`);
+  console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - DETAIL CHECK 2] adminFirestore_DefaultDB.app is null/undefined: ${!adminFirestore_DefaultDB.app}`);
+  console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - DETAIL CHECK 3] adminFirestore_DefaultDB.app.options is null/undefined: ${!adminFirestore_DefaultDB.app?.options}`);
+  console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - DETAIL CHECK 4] typeof adminFirestore_DefaultDB.app.options.projectId is string: ${typeof adminFirestore_DefaultDB.app?.options?.projectId === 'string'}`);
+  console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - DETAIL CHECK 5] adminFirestore_DefaultDB.app.options.projectId.trim() === '': ${adminFirestore_DefaultDB.app?.options?.projectId?.trim() === ''}`);
+  
+  if (!adminFirestore_DefaultDB.app || !adminFirestore_DefaultDB.app.options || typeof adminFirestore_DefaultDB.app.options.projectId !== 'string' || adminFirestore_DefaultDB.app.options.projectId.trim() === '' || adminFirestore_DefaultDB.app.options.projectId !== "ecommerce-db-75f77") {
+      console.error(`[Login Action ${LOG_VERSION_TAG_ACTION} - CRITICAL FAILURE AT GET] Firestore instance is invalid or for wrong project. Expected 'ecommerce-db-75f77', got '${adminFirestore_DefaultDB.app?.options?.projectId}'.`);
       return { message: `Erro crítico: Configuração do banco de dados inválida no servidor. Contate o suporte. (REF: FS_GET_PRECHECK_FAIL_${LOG_VERSION_TAG_ACTION})`, status: 'error' };
   }
 
@@ -207,3 +201,4 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
     return { message: `Erro no login: ${error.message || 'Erro desconhecido no servidor.'}. (Code: ${error.code || 'N/A'})`, status: 'error' };
   }
 }
+

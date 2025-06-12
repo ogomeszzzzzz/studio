@@ -2,15 +2,14 @@
 'use server';
 
 import * as admin from 'firebase-admin';
-// Changed to use getAuth and getFirestore directly from admin.app.App instance
-import type { Auth } from 'firebase-admin/auth';
-import type { Firestore } from 'firebase-admin/firestore';
+import { getAuth, type Auth } from 'firebase-admin/auth'; // Modular import for Auth
+import { getFirestore, type Firestore, Timestamp } from 'firebase-admin/firestore'; // Modular import for Firestore
 import fs from 'fs';
 import path from 'path';
 
-const LOG_VERSION_TAG_CONFIG = "V37"; // Updated version tag
+const LOG_VERSION_TAG_CONFIG = "V38"; 
 
-console.log(`--- [ADMIN SDK INIT ${LOG_VERSION_TAG_CONFIG} - adminApp.firestore()] ---`);
+console.log(`--- [ADMIN SDK INIT ${LOG_VERSION_TAG_CONFIG} - Modular getFirestore/getAuth] ---`);
 console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] Node Env: ${process.env.NODE_ENV}`);
 console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] Initial admin.apps.length: ${admin.apps ? admin.apps.length : 'admin.apps is undefined/null'}`);
 
@@ -133,30 +132,48 @@ if (!admin || !admin.credential || typeof admin.credential.cert !== 'function' |
 }
 
 if (adminAppInstance && !_adminSDKInitializationErrorMsg) {
-  console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] App instance '${adminAppInstance.name}' valid. Getting services...`);
+  console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] App instance '${adminAppInstance.name}' valid. Getting services using modular getAuth/getFirestore...`);
   try {
-    adminAuthService = adminAppInstance.auth(); // Using app.auth()
-    console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] adminAuthService obtained for app: ${adminAppInstance.name}.`);
+    adminAuthService = getAuth(adminAppInstance); // Use modular getAuth
+    console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] adminAuthService obtained via getAuth() for app: ${adminAppInstance.name}.`);
   } catch (e: any) {
-    const authError = `Error getting Auth service: ${e.message}. (REF: GET_AUTH_FAIL_${LOG_VERSION_TAG_CONFIG})`;
+    const authError = `Error getting Auth service via getAuth(): ${e.message}. (REF: MODULAR_GET_AUTH_FAIL_${LOG_VERSION_TAG_CONFIG})`;
     console.error(`[Admin SDK Init Error ${LOG_VERSION_TAG_CONFIG}] ${authError}`);
     _adminSDKInitializationErrorMsg = (_adminSDKInitializationErrorMsg ? `${_adminSDKInitializationErrorMsg}; ` : '') + authError;
   }
 
   try {
-    const fsInstance = adminAppInstance.firestore(); // Using app.firestore()
-    console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] Candidate Firestore instance obtained for app: ${adminAppInstance.name}. Checking integrity...`);
-    if (fsInstance && fsInstance.app && fsInstance.app.options && typeof fsInstance.app.options.projectId === 'string' && fsInstance.app.options.projectId.trim() !== '' && fsInstance.app.options.projectId === expectedProjectId) {
-      adminFirestoreDefaultDBInstance = fsInstance;
-      console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] Firestore instance integrity check PASSED. Project ID from instance: ${adminFirestoreDefaultDBInstance.app.options.projectId}`);
-    } else {
-      const problematicPart = !fsInstance ? "is null" : !fsInstance.app ? ".app is missing" : !fsInstance.app.options ? ".app.options is missing" : typeof fsInstance.app.options.projectId !== 'string' ? ".app.options.projectId is not a string" : fsInstance.app.options.projectId.trim() === '' ? ".app.options.projectId is empty" : `project ID mismatch (expected '${expectedProjectId}', got '${fsInstance.app.options.projectId}')`;
-      _adminSDKInitializationErrorMsg = `Firestore instance integrity check failed: ${problematicPart}. (REF: FS_INSTANCE_INTEGRITY_FAIL_${LOG_VERSION_TAG_CONFIG})`;
+    const fsInstance = getFirestore(adminAppInstance); // Use modular getFirestore
+    console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] Candidate Firestore instance obtained via getFirestore(). Checking integrity... Type: ${typeof fsInstance}, IsNull: ${fsInstance === null}`);
+    
+    if (fsInstance) {
+        console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] Modular Firestore instance .app property: ${typeof fsInstance.app}`);
+        if (fsInstance.app) {
+            console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] Modular Firestore instance .app.options property: ${typeof fsInstance.app.options}`);
+            if (fsInstance.app.options) {
+                 console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] Modular Firestore instance .app.options.projectId property: ${typeof fsInstance.app.options.projectId}, Value: ${fsInstance.app.options.projectId}`);
+            }
+        }
+    }
+
+    if (!fsInstance || !fsInstance.app || !fsInstance.app.options || typeof fsInstance.app.options.projectId !== 'string' || fsInstance.app.options.projectId.trim() === '') {
+      const problem = !fsInstance ? "is null/undefined" 
+                    : !fsInstance.app ? ".app is missing" 
+                    : !fsInstance.app.options ? ".app.options is missing" 
+                    : ".app.options.projectId is invalid";
+      _adminSDKInitializationErrorMsg = `Firestore instance (from modular getFirestore) integrity check failed: ${problem}. (REF: FS_INSTANCE_INTEGRITY_FAIL_${LOG_VERSION_TAG_CONFIG})`;
       console.error(`[Admin SDK Init Error ${LOG_VERSION_TAG_CONFIG}] ${_adminSDKInitializationErrorMsg}`);
       adminFirestoreDefaultDBInstance = null;
+    } else if (fsInstance.app.options.projectId !== expectedProjectId) {
+      _adminSDKInitializationErrorMsg = `CRITICAL MISMATCH: Project ID in Firestore instance ('${fsInstance.app.options.projectId}') != expected ('${expectedProjectId}'). (REF: FS_INSTANCE_PID_MISMATCH_${LOG_VERSION_TAG_CONFIG})`;
+      console.error(`[Admin SDK Init Error ${LOG_VERSION_TAG_CONFIG}] ${_adminSDKInitializationErrorMsg}`);
+      adminFirestoreDefaultDBInstance = null;
+    } else {
+      adminFirestoreDefaultDBInstance = fsInstance;
+      console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] Firestore instance (from modular getFirestore) integrity check PASSED. Project ID from instance: ${adminFirestoreDefaultDBInstance.app.options.projectId}`);
     }
   } catch (e: any) {
-    const firestoreError = `Error getting Firestore (default) service: ${e.message}. (REF: GET_FIRESTORE_FAIL_${LOG_VERSION_TAG_CONFIG})`;
+    const firestoreError = `Error getting Firestore service via getFirestore(): ${e.message}. (REF: MODULAR_GET_FIRESTORE_FAIL_${LOG_VERSION_TAG_CONFIG})`;
     console.error(`[Admin SDK Init Error ${LOG_VERSION_TAG_CONFIG}] ${firestoreError}`);
     _adminSDKInitializationErrorMsg = (_adminSDKInitializationErrorMsg ? `${_adminSDKInitializationErrorMsg}; ` : '') + firestoreError;
   }
@@ -164,15 +181,16 @@ if (adminAppInstance && !_adminSDKInitializationErrorMsg) {
 
 if (_adminSDKInitializationErrorMsg) {
   console.error(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] Finalizing with initialization error: ${_adminSDKInitializationErrorMsg}`);
-  adminAuthService = null;
-  adminFirestoreDefaultDBInstance = null;
+  if (!adminAuthService) console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] adminAuthService remains null due to error.`);
+  if (!adminFirestoreDefaultDBInstance) console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] adminFirestoreDefaultDBInstance remains null due to error.`);
+  // No need to explicitly set them to null again if they were never assigned or already nulled due to the error.
 }
 
 console.log(`[Admin SDK Final Status ${LOG_VERSION_TAG_CONFIG}] Initialization Error: ${_adminSDKInitializationErrorMsg || 'None'}. adminAuthService is ${adminAuthService ? 'CONFIGURED' : 'NULL'}. adminFirestoreDefaultDBInstance is ${adminFirestoreDefaultDBInstance ? `CONFIGURED for project: ${adminFirestoreDefaultDBInstance?.app?.options?.projectId}` : 'NULL'}.`);
 console.log(`--- [ADMIN SDK INIT END ${LOG_VERSION_TAG_CONFIG}] ---`);
     
 export async function getAdminAuthInstance(): Promise<Auth | null> {
-  return adminAuthService;
+    return adminAuthService;
 }
     
 export async function getAdminFirestoreInstance(): Promise<Firestore | null> {
@@ -182,3 +200,4 @@ export async function getAdminFirestoreInstance(): Promise<Firestore | null> {
 export async function getAdminSDKInitializationError(): Promise<string | null> {
       return _adminSDKInitializationErrorMsg;
 }
+

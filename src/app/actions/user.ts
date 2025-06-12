@@ -10,22 +10,22 @@ interface UserActionResult {
   user?: UserProfile;
 }
 
-const LOG_VERSION_TAG_ACTION = "V37"; 
+const LOG_VERSION_TAG_ACTION = "V38"; 
 
 export async function updateUserProfile(
   currentUserEmail: string,
   updates: { name?: string; photoURL?: string }
 ): Promise<UserActionResult> {
+  const initErrorMsg = await getAdminSDKInitializationError();
   const adminAuth = await getAdminAuthInstance();
   const adminFirestore_DefaultDB = await getAdminFirestoreInstance();
-  const adminSDKInitError = await getAdminSDKInitializationError();
 
-  console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitError (from getter): ${adminSDKInitError}`);
+  console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitializationError (from getter): ${initErrorMsg}`);
   console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null: ${adminAuth === null}`);
   console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
 
-  if (adminSDKInitError || !adminAuth || !adminFirestore_DefaultDB) {
-    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${adminSDKInitError || 'Serviços Admin não disponíveis'}. Verifique os logs V37 do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_UUP_${LOG_VERSION_TAG_ACTION})`;
+  if (initErrorMsg || !adminAuth || !adminFirestore_DefaultDB) {
+    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${initErrorMsg || 'Serviços Admin não disponíveis'}. Verifique os logs ${LOG_VERSION_TAG_ACTION} do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_UUP_${LOG_VERSION_TAG_ACTION})`;
     console.error(`[Update User Profile Action - CRITICAL_FAILURE] ${errorMsg}`);
     return { message: errorMsg, status: 'error' };
   }
@@ -89,3 +89,4 @@ export async function updateUserProfile(
     return { message: `Erro ao atualizar perfil: ${errorMessage.substring(0, 200)}`, status: 'error' };
   }
 }
+
