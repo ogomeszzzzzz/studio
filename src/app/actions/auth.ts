@@ -14,7 +14,7 @@ interface ActionResult {
 
 const ADMIN_PRIMARY_EMAIL = process.env.ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br";
 const SALT_ROUNDS = 10;
-const LOG_VERSION_TAG_ACTION = "V36"; 
+const LOG_VERSION_TAG_ACTION = "V37"; 
 
 export async function registerUserInFirestore(prevState: any, formData: FormData): Promise<ActionResult> {
   const adminAuth = await getAdminAuthInstance();
@@ -26,7 +26,7 @@ export async function registerUserInFirestore(prevState: any, formData: FormData
   console.log(`[Register User Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
 
   if (adminSDKInitError || !adminAuth || !adminFirestore_DefaultDB) {
-    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${adminSDKInitError || 'Serviços Admin não disponíveis'}. Verifique os logs V36 do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_REG_${LOG_VERSION_TAG_ACTION})`;
+    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${adminSDKInitError || 'Serviços Admin não disponíveis'}. Verifique os logs V37 do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_REG_${LOG_VERSION_TAG_ACTION})`;
     console.error(`[Register User Action - CRITICAL_FAILURE] ${errorMsg}`);
     return { message: errorMsg, status: 'error' };
   }
@@ -88,7 +88,7 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
   console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
   
   if (adminSDKInitError || !adminAuth || !adminFirestore_DefaultDB) {
-    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${adminSDKInitError || 'Serviços Admin não disponíveis'}. Verifique os logs V36 do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_LOGIN_${LOG_VERSION_TAG_ACTION})`;
+    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${adminSDKInitError || 'Serviços Admin não disponíveis'}. Verifique os logs V37 do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_LOGIN_${LOG_VERSION_TAG_ACTION})`;
     console.error(`[Login Action ${LOG_VERSION_TAG_ACTION} - CRITICAL_FAILURE] ${errorMsg}`);
     return { message: errorMsg, status: 'error' };
   }
@@ -109,10 +109,14 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
   
   // --- FINAL CHECK BEFORE Firestore .get() call ---
   console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - DETAIL CHECK 1] adminFirestore_DefaultDB is null/undefined: ${!adminFirestore_DefaultDB}`);
-  console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - DETAIL CHECK 2] adminFirestore_DefaultDB.app is null/undefined: ${adminFirestore_DefaultDB ? !adminFirestore_DefaultDB.app : 'N/A (adminFirestore_DefaultDB is null)'}`);
-  console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - DETAIL CHECK 3] adminFirestore_DefaultDB.app.options is null/undefined: ${adminFirestore_DefaultDB && adminFirestore_DefaultDB.app ? !adminFirestore_DefaultDB.app.options : 'N/A (app or adminFirestore_DefaultDB is null)'}`);
-  if (adminFirestore_DefaultDB && adminFirestore_DefaultDB.app && adminFirestore_DefaultDB.app.options) {
-      console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - DETAIL CHECK 4] adminFirestore_DefaultDB.app.options.projectId value: '${adminFirestore_DefaultDB.app.options.projectId}'`);
+  if (adminFirestore_DefaultDB) {
+    console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - DETAIL CHECK 2] adminFirestore_DefaultDB.app is null/undefined: ${!adminFirestore_DefaultDB.app}`);
+    if (adminFirestore_DefaultDB.app) {
+      console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - DETAIL CHECK 3] adminFirestore_DefaultDB.app.options is null/undefined: ${!adminFirestore_DefaultDB.app.options}`);
+      if (adminFirestore_DefaultDB.app.options) {
+        console.log(`[Login Action ${LOG_VERSION_TAG_ACTION} - DETAIL CHECK 4] adminFirestore_DefaultDB.app.options.projectId value: '${adminFirestore_DefaultDB.app.options.projectId}'`);
+      }
+    }
   }
 
   if (!adminFirestore_DefaultDB || !adminFirestore_DefaultDB.app || !adminFirestore_DefaultDB.app.options || adminFirestore_DefaultDB.app.options.projectId !== "ecommerce-db-75f77") {

@@ -2,14 +2,15 @@
 'use server';
 
 import * as admin from 'firebase-admin';
-import { getAuth as getFirebaseAdminAuth, type Auth } from 'firebase-admin/auth';
-import { getFirestore as getFirebaseAdminFirestore, type Firestore } from 'firebase-admin/firestore';
+// Changed to use getAuth and getFirestore directly from admin.app.App instance
+import type { Auth } from 'firebase-admin/auth';
+import type { Firestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 import path from 'path';
 
-const LOG_VERSION_TAG_CONFIG = "V36"; // Keep this version tag for now
+const LOG_VERSION_TAG_CONFIG = "V37"; // Updated version tag
 
-console.log(`--- [ADMIN SDK INIT ${LOG_VERSION_TAG_CONFIG} - Getter Functions, Explicit Instance Checks] ---`);
+console.log(`--- [ADMIN SDK INIT ${LOG_VERSION_TAG_CONFIG} - adminApp.firestore()] ---`);
 console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] Node Env: ${process.env.NODE_ENV}`);
 console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] Initial admin.apps.length: ${admin.apps ? admin.apps.length : 'admin.apps is undefined/null'}`);
 
@@ -134,7 +135,7 @@ if (!admin || !admin.credential || typeof admin.credential.cert !== 'function' |
 if (adminAppInstance && !_adminSDKInitializationErrorMsg) {
   console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] App instance '${adminAppInstance.name}' valid. Getting services...`);
   try {
-    adminAuthService = getFirebaseAdminAuth(adminAppInstance);
+    adminAuthService = adminAppInstance.auth(); // Using app.auth()
     console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] adminAuthService obtained for app: ${adminAppInstance.name}.`);
   } catch (e: any) {
     const authError = `Error getting Auth service: ${e.message}. (REF: GET_AUTH_FAIL_${LOG_VERSION_TAG_CONFIG})`;
@@ -143,17 +144,16 @@ if (adminAppInstance && !_adminSDKInitializationErrorMsg) {
   }
 
   try {
-    const fsInstance = getFirebaseAdminFirestore(adminAppInstance);
+    const fsInstance = adminAppInstance.firestore(); // Using app.firestore()
     console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] Candidate Firestore instance obtained for app: ${adminAppInstance.name}. Checking integrity...`);
     if (fsInstance && fsInstance.app && fsInstance.app.options && typeof fsInstance.app.options.projectId === 'string' && fsInstance.app.options.projectId.trim() !== '' && fsInstance.app.options.projectId === expectedProjectId) {
       adminFirestoreDefaultDBInstance = fsInstance;
       console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] Firestore instance integrity check PASSED. Project ID from instance: ${adminFirestoreDefaultDBInstance.app.options.projectId}`);
     } else {
       const problematicPart = !fsInstance ? "is null" : !fsInstance.app ? ".app is missing" : !fsInstance.app.options ? ".app.options is missing" : typeof fsInstance.app.options.projectId !== 'string' ? ".app.options.projectId is not a string" : fsInstance.app.options.projectId.trim() === '' ? ".app.options.projectId is empty" : `project ID mismatch (expected '${expectedProjectId}', got '${fsInstance.app.options.projectId}')`;
-      const integrityError = `Firestore instance integrity check failed: ${problematicPart}. (REF: FS_INSTANCE_INTEGRITY_FAIL_${LOG_VERSION_TAG_CONFIG})`;
-      console.error(`[Admin SDK Init Error ${LOG_VERSION_TAG_CONFIG}] ${integrityError}`);
-      _adminSDKInitializationErrorMsg = (_adminSDKInitializationErrorMsg ? `${_adminSDKInitializationErrorMsg}; ` : '') + integrityError;
-      adminFirestoreDefaultDBInstance = null; // Explicitly nullify on integrity fail
+      _adminSDKInitializationErrorMsg = `Firestore instance integrity check failed: ${problematicPart}. (REF: FS_INSTANCE_INTEGRITY_FAIL_${LOG_VERSION_TAG_CONFIG})`;
+      console.error(`[Admin SDK Init Error ${LOG_VERSION_TAG_CONFIG}] ${_adminSDKInitializationErrorMsg}`);
+      adminFirestoreDefaultDBInstance = null;
     }
   } catch (e: any) {
     const firestoreError = `Error getting Firestore (default) service: ${e.message}. (REF: GET_FIRESTORE_FAIL_${LOG_VERSION_TAG_CONFIG})`;
@@ -170,16 +170,15 @@ if (_adminSDKInitializationErrorMsg) {
 
 console.log(`[Admin SDK Final Status ${LOG_VERSION_TAG_CONFIG}] Initialization Error: ${_adminSDKInitializationErrorMsg || 'None'}. adminAuthService is ${adminAuthService ? 'CONFIGURED' : 'NULL'}. adminFirestoreDefaultDBInstance is ${adminFirestoreDefaultDBInstance ? `CONFIGURED for project: ${adminFirestoreDefaultDBInstance?.app?.options?.projectId}` : 'NULL'}.`);
 console.log(`--- [ADMIN SDK INIT END ${LOG_VERSION_TAG_CONFIG}] ---`);
-
+    
 export async function getAdminAuthInstance(): Promise<Auth | null> {
   return adminAuthService;
 }
-
+    
 export async function getAdminFirestoreInstance(): Promise<Firestore | null> {
   return adminFirestoreDefaultDBInstance;
 }
-
-// Getter for the initialization error message (still logged, but not directly causing "use server" issues if not exported)
+    
 export async function getAdminSDKInitializationError(): Promise<string | null> {
-  return _adminSDKInitializationErrorMsg;
+      return _adminSDKInitializationErrorMsg;
 }
