@@ -1,7 +1,7 @@
 
 'use server';
 
-import { adminFirestore_DefaultDB, adminSDKInitializationError } from '@/lib/firebase/adminConfig';
+import { adminFirestore_DefaultDB, adminSDKInitializationError, adminAuth } from '@/lib/firebase/adminConfig';
 import type { UserProfile } from '@/types';
 
 interface UserActionResult {
@@ -14,15 +14,25 @@ export async function updateUserProfile(
   currentUserEmail: string,
   updates: { name?: string; photoURL?: string }
 ): Promise<UserActionResult> {
-  console.log(`[Update User Profile Action] Request for user: ${currentUserEmail}, Updates:`, updates);
+  console.log(`[Update User Profile Action - PRE-CHECK V33] adminSDKInitializationError: ${adminSDKInitializationError}`);
+  console.log(`[Update User Profile Action - PRE-CHECK V33] adminAuth is null: ${adminAuth === null}`);
+  console.log(`[Update User Profile Action - PRE-CHECK V33] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
+  if (adminFirestore_DefaultDB) {
+    console.log('[Update User Profile Action - PRE-CHECK V33] adminFirestore_DefaultDB.app.options.projectId:', adminFirestore_DefaultDB?.app?.options?.projectId);
+  }
+
 
   if (adminSDKInitializationError) {
-    console.error(`[Update User Profile Action] Failing due to Admin SDK init error: ${adminSDKInitializationError}`);
-    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError}`, status: 'error' };
+    console.error('[Update User Profile Action - CRITICAL_FAILURE] Aborting due to Admin SDK init error:', adminSDKInitializationError, '(REF: SDK_INIT_FAIL_UUP)');
+    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,100)} (REF: SDK_INIT_FAIL_UUP)`, status: 'error' };
   }
   if (!adminFirestore_DefaultDB) {
-    console.error("[Update User Profile Action] Failing because Firestore Admin (Default DB) is not available.");
-    return { message: "Erro Crítico no Servidor: Firestore Admin (Default DB) não está disponível.", status: 'error' };
+    console.error("[Update User Profile Action - CRITICAL_FAILURE] adminFirestore_DefaultDB is null. (REF: FS_INSTANCE_NULL_UUP)");
+    return { message: "Erro Crítico no Servidor: Acesso ao banco de dados não está disponível. (REF: FS_INSTANCE_NULL_UUP)", status: 'error' };
+  }
+  if (!adminAuth) { // Added this check as well
+    console.error('[Update User Profile Action - CRITICAL_FAILURE] adminAuth is null. (REF: AUTH_SVC_NULL_UUP)');
+    return { message: 'Erro crítico na configuração do servidor: Serviço de autenticação não disponível. (REF: AUTH_SVC_NULL_UUP)', status: 'error' };
   }
   if (!currentUserEmail) {
     console.error("[Update User Profile Action] Failing because currentUserEmail was not provided.");
@@ -52,7 +62,6 @@ export async function updateUserProfile(
     await userDocRef.update(updateData);
     console.log(`[Update User Profile Action] Profile updated successfully for: ${currentUserEmail}`);
 
-    // Fetch the updated user data to return
     const updatedUserDocSnap = await userDocRef.get();
     const updatedUserData = updatedUserDocSnap.data();
 
@@ -79,3 +88,5 @@ export async function updateUserProfile(
     return { message: `Erro ao atualizar perfil: ${errorMessage.substring(0, 200)}`, status: 'error' };
   }
 }
+
+    

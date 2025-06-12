@@ -1,7 +1,7 @@
 
 'use server';
 
-import { adminFirestore_DefaultDB, adminSDKInitializationError as adminSDKAuthError } from '@/lib/firebase/adminConfig';
+import { adminFirestore_DefaultDB, adminSDKInitializationError, adminAuth } from '@/lib/firebase/adminConfig';
 import { Timestamp } from 'firebase-admin/firestore';
 import type { UserProfile } from '@/types';
 import bcrypt from 'bcrypt';
@@ -16,11 +16,25 @@ const ADMIN_PRIMARY_EMAIL = process.env.ADMIN_EMAIL || "gustavo.cordeiro@altenbu
 const SALT_ROUNDS = 10;
 
 export async function registerUserInFirestore(prevState: any, formData: FormData): Promise<ActionResult> {
-  if (adminSDKAuthError) {
-    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKAuthError}`, status: 'error' };
+  console.log('[Register User Firestore Action - PRE-CHECK V33] adminSDKInitializationError:', adminSDKInitializationError);
+  console.log('[Register User Firestore Action - PRE-CHECK V33] adminAuth is null:', adminAuth === null);
+  console.log('[Register User Firestore Action - PRE-CHECK V33] adminFirestore_DefaultDB is null:', adminFirestore_DefaultDB === null);
+  if (adminFirestore_DefaultDB) {
+    console.log('[Register User Firestore Action - PRE-CHECK V33] adminFirestore_DefaultDB.app.options.projectId:', adminFirestore_DefaultDB?.app?.options?.projectId);
+  }
+
+
+  if (adminSDKInitializationError) {
+    console.error('[Register User Firestore Action - CRITICAL_FAILURE] Aborting due to Admin SDK init error:', adminSDKInitializationError, '(REF: SDK_INIT_FAIL_REG)');
+    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,100)} (REF: SDK_INIT_FAIL_REG)`, status: 'error' };
   }
   if (!adminFirestore_DefaultDB) {
-    return { message: "Erro Crítico no Servidor: Conexão com Firestore (Default DB) para usuários não está disponível.", status: 'error' };
+    console.error('[Register User Firestore Action - CRITICAL_FAILURE] adminFirestore_DefaultDB is null. This means the Admin SDK did not initialize Firestore correctly. (REF: FS_INSTANCE_NULL_REG)');
+    return { message: 'Erro crítico na configuração do servidor: Acesso ao banco de dados não está disponível. (REF: FS_INSTANCE_NULL_REG)', status: 'error' };
+  }
+   if (!adminAuth) {
+    console.error('[Register User Firestore Action - CRITICAL_FAILURE] adminAuth is null. This means the Admin SDK did not initialize Auth service correctly. (REF: AUTH_SVC_NULL_REG)');
+    return { message: 'Erro crítico na configuração do servidor: Serviço de autenticação não disponível. (REF: AUTH_SVC_NULL_REG)', status: 'error' };
   }
 
   const name = formData.get('name') as string;
@@ -71,16 +85,27 @@ export async function registerUserInFirestore(prevState: any, formData: FormData
 }
 
 export async function loginUserWithFirestore(prevState: any, formData: FormData): Promise<ActionResult> {
-  console.log('[Login User Firestore Action - Definitive Fix Attempt] Attempting login...');
-  if (adminSDKAuthError) {
-    console.error('[Login User Firestore Action] Admin SDK Error:', adminSDKAuthError);
-    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKAuthError}`, status: 'error' };
-  }
-  if (!adminFirestore_DefaultDB) {
-     console.error('[Login User Firestore Action] Firestore Default DB not available.');
-     return { message: "Erro Crítico no Servidor: Conexão com Firestore (Default DB) para usuários não está disponível.", status: 'error' };
+  console.log('[Login User Firestore Action - PRE-CHECK V33] adminSDKInitializationError:', adminSDKInitializationError);
+  console.log('[Login User Firestore Action - PRE-CHECK V33] adminAuth is null:', adminAuth === null);
+  console.log('[Login User Firestore Action - PRE-CHECK V33] adminFirestore_DefaultDB is null:', adminFirestore_DefaultDB === null);
+  if (adminFirestore_DefaultDB) {
+    console.log('[Login User Firestore Action - PRE-CHECK V33] adminFirestore_DefaultDB.app.options.projectId:', adminFirestore_DefaultDB?.app?.options?.projectId);
   }
 
+  if (adminSDKInitializationError) {
+    console.error('[Login User Firestore Action - CRITICAL_FAILURE] Aborting due to Admin SDK init error:', adminSDKInitializationError, '(REF: SDK_INIT_FAIL_LOGIN)');
+    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,100)} (REF: SDK_INIT_FAIL_LOGIN)`, status: 'error' };
+  }
+  if (!adminFirestore_DefaultDB) {
+    console.error('[Login User Firestore Action - CRITICAL_FAILURE] adminFirestore_DefaultDB is null. This means the Admin SDK did not initialize Firestore correctly. (REF: FS_INSTANCE_NULL_LOGIN)');
+    return { message: 'Erro crítico na configuração do servidor: Acesso ao banco de dados não está disponível. (REF: FS_INSTANCE_NULL_LOGIN)', status: 'error' };
+  }
+  if (!adminAuth) { // Added this check as well
+    console.error('[Login User Firestore Action - CRITICAL_FAILURE] adminAuth is null. This means the Admin SDK did not initialize Auth service correctly. (REF: AUTH_SVC_NULL_LOGIN)');
+    return { message: 'Erro crítico na configuração do servidor: Serviço de autenticação não disponível. (REF: AUTH_SVC_NULL_LOGIN)', status: 'error' };
+  }
+
+  console.log('[Login User Firestore Action - Definitive Fix Attempt] Attempting login...');
   const email = formData.get('email') as string;
   const rawSubmittedPassword = formData.get('password') as string;
   
@@ -115,11 +140,8 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
     let isMatch = false;
     let needsPasswordUpdate = false;
 
-    // Step 1: Try bcrypt.compare
     console.log(`[Login User Firestore Action] Attempting bcrypt.compare for user ${email}.`);
     try {
-        // bcrypt.compare expects the first argument to be plaintext and the second to be the hash.
-        // If storedPasswordValue is plaintext, bcrypt.compare will likely return false, not throw an error, unless storedPasswordValue is not a string or malformed for bcrypt.
         isMatch = await bcrypt.compare(submittedPasswordTrimmed, String(storedPasswordValue));
         if (isMatch) {
             console.log(`[Login User Firestore Action] Hashed password match SUCCESS for user ${email}.`);
@@ -127,20 +149,13 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
             console.log(`[Login User Firestore Action] bcrypt.compare returned false for user ${email}. Proceeding to plaintext check.`);
         }
     } catch (bcryptError: any) {
-        // This catch block is for errors during bcrypt.compare itself (e.g., if storedPasswordValue is not a string or is too short to be a hash)
-        // It doesn't mean the stored password is plaintext, just that bcrypt.compare failed to execute.
         console.warn(`[Login User Firestore Action] bcrypt.compare threw an error for user ${email}: ${bcryptError.message}. This is unexpected if storedPasswordValue is a simple string. Will proceed to plaintext check anyway.`);
-        isMatch = false; // Ensure isMatch is false if bcrypt.compare fails catastrophically
+        isMatch = false; 
     }
 
-    // Step 2: If bcrypt.compare did not find a match, try direct plaintext comparison
     if (!isMatch) {
         console.log(`[Login User Firestore Action] --- PLAINTEXT COMPARISON BLOCK FOR USER: ${email} ---`);
         const storedPasswordStringTrimmed = String(storedPasswordValue).trim();
-
-        console.log(`  - Submitted (already trimmed): '${submittedPasswordTrimmed}' (Length: ${submittedPasswordTrimmed.length})`);
-        console.log(`  - Stored from DB (trimmed):  '${storedPasswordStringTrimmed}' (Length: ${storedPasswordStringTrimmed.length})`);
-
         const plaintextMatch = submittedPasswordTrimmed === storedPasswordStringTrimmed;
         console.log(`  - RESULT OF ('${submittedPasswordTrimmed}' === '${storedPasswordStringTrimmed}'): ${plaintextMatch}`);
         
@@ -160,7 +175,6 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
       return { message: 'Senha incorreta.', status: 'error' };
     }
 
-    // If login was successful and password needs update (was plaintext and matched)
     if (needsPasswordUpdate) {
       try {
         console.log(`[Login User Firestore Action] Attempting to update password to hash for user ${email}.`);
@@ -170,11 +184,9 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
         console.log(`[Login User Firestore Action] Password for user ${email} successfully updated to hash in Firestore.`);
       } catch (updateError: any) {
         console.error(`[Login User Firestore Action] FAILED to update password to hash for user ${email}:`, updateError.message);
-        // Non-critical error for login flow, user is already authenticated. Log and continue.
       }
     }
 
-    // Post-authentication checks
     if (!userDataFromDb.isApproved && userDataFromDb.pendingApproval) {
       console.log(`[Login User Firestore Action] User ${email} login attempt: pending approval.`);
       return { message: 'Sua conta está pendente de aprovação pelo administrador.', status: 'pending' };
@@ -200,7 +212,12 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
 
   } catch (error: any) {
     console.error('[Login User Firestore Action] Outer catch block error:', error);
-    return { message: `Erro no login: ${error.message || 'Erro desconhecido no servidor.'}.`, status: 'error' };
+    // Log the specific error code and details if available
+    if (error.code) {
+        console.error(`[Login User Firestore Action] Firestore Error Code: ${error.code}, Details: ${error.details}`);
+    }
+    return { message: `Erro no login: ${error.message || 'Erro desconhecido no servidor.'}. (Code: ${error.code || 'N/A'})`, status: 'error' };
   }
 }
+
     
