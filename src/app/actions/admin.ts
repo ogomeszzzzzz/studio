@@ -24,25 +24,25 @@ async function verifyAdminByEmail(callerEmail: string | undefined): Promise<bool
 
 
 export async function getPendingUsers(adminUserEmail: string): Promise<AdminActionResult> {
-  console.log(`[Get Pending Users Action - PRE-CHECK V33] adminSDKInitializationError: ${adminSDKInitializationError}`);
-  console.log(`[Get Pending Users Action - PRE-CHECK V33] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
-  if (adminFirestore_DefaultDB) {
-    console.log(`[Get Pending Users Action - PRE-CHECK V33] adminFirestore_DefaultDB.app.options.projectId: ${adminFirestore_DefaultDB?.app?.options?.projectId}`);
-  }
-
-
+  console.log('[Get Pending Users Action - PRE-CHECK V35] adminSDKInitializationError:', adminSDKInitializationError);
   if (adminSDKInitializationError) {
-    console.error('[Get Pending Users Action - CRITICAL_FAILURE] Aborting due to Admin SDK init error:', adminSDKInitializationError, '(REF: SDK_INIT_FAIL_GPU)');
-    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,100)} (REF: SDK_INIT_FAIL_GPU)`, status: 'error' };
+    console.error('[Get Pending Users Action - CRITICAL_FAILURE] Aborting due to Admin SDK init error:', adminSDKInitializationError, '(REF: SDK_INIT_FAIL_GPU_V35)');
+    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,100)} (REF: SDK_INIT_FAIL_GPU_V35)`, status: 'error' };
   }
+  console.log('[Get Pending Users Action - PRE-CHECK V35] adminFirestore_DefaultDB is null:', adminFirestore_DefaultDB === null);
   if (!adminFirestore_DefaultDB) {
-    console.error("[Get Pending Users Action - CRITICAL_FAILURE] adminFirestore_DefaultDB is null. (REF: FS_INSTANCE_NULL_GPU)");
-    return { message: "Erro Crítico no Servidor: Acesso ao banco de dados não está disponível. (REF: FS_INSTANCE_NULL_GPU)", status: 'error' };
+    console.error("[Get Pending Users Action - CRITICAL_FAILURE] adminFirestore_DefaultDB is null. (REF: FS_INSTANCE_NULL_GPU_V35)");
+    return { message: "Erro Crítico no Servidor: Acesso ao banco de dados não está disponível. (REF: FS_INSTANCE_NULL_GPU_V35)", status: 'error' };
   }
+  console.log('[Get Pending Users Action - PRE-CHECK V35] adminAuth is null:', adminAuth === null);
    if (!adminAuth) {
-    console.error('[Get Pending Users Action - CRITICAL_FAILURE] adminAuth is null. (REF: AUTH_SVC_NULL_GPU)');
-    return { message: 'Erro crítico na configuração do servidor: Serviço de autenticação não disponível. (REF: AUTH_SVC_NULL_GPU)', status: 'error' };
+    console.error('[Get Pending Users Action - CRITICAL_FAILURE] adminAuth is null. (REF: AUTH_SVC_NULL_GPU_V35)');
+    return { message: 'Erro crítico na configuração do servidor: Serviço de autenticação não disponível. (REF: AUTH_SVC_NULL_GPU_V35)', status: 'error' };
   }
+  if (adminFirestore_DefaultDB) {
+    console.log('[Get Pending Users Action - PRE-CHECK V35] adminFirestore_DefaultDB.app.options.projectId:', adminFirestore_DefaultDB?.app?.options?.projectId);
+  }
+
   if (!adminUserEmail) {
     return { message: "Email do administrador não fornecido para a ação.", status: "error" };
   }
@@ -52,7 +52,7 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
     return { message: 'Acesso não autorizado para buscar usuários pendentes (verificação de email falhou).', status: 'error' };
   }
 
-  console.log('[Get Pending Users Action] Admin verified. Fetching pending users from Firestore (Default DB)...');
+  console.log('[Get Pending Users Action V35] Admin verified. Fetching pending users from Firestore (Default DB)...');
   try {
     const snapshot = await adminFirestore_DefaultDB
       .collection('auth_users')
@@ -100,10 +100,10 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
 }
 
 export async function approveUserInFirestore(adminUserEmail: string, userEmailToApprove: string): Promise<AdminActionResult> {
-  console.log(`[Approve User Action - PRE-CHECK V33] adminSDKInitializationError: ${adminSDKInitializationError}`);
-  if (adminSDKInitializationError) return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,100)} (REF: SDK_INIT_FAIL_APU)`, status: 'error' };
-  if (!adminFirestore_DefaultDB) return { message: "Erro Crítico no Servidor: Acesso ao banco de dados não disponível. (REF: FS_INSTANCE_NULL_APU)", status: 'error' };
-  if (!adminAuth) return { message: 'Erro crítico na configuração do servidor: Serviço de autenticação não disponível. (REF: AUTH_SVC_NULL_APU)', status: 'error' };
+  console.log(`[Approve User Action - PRE-CHECK V35] adminSDKInitializationError: ${adminSDKInitializationError}`);
+  if (adminSDKInitializationError) return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,100)} (REF: SDK_INIT_FAIL_APU_V35)`, status: 'error' };
+  if (!adminFirestore_DefaultDB) return { message: "Erro Crítico no Servidor: Acesso ao banco de dados não disponível. (REF: FS_INSTANCE_NULL_APU_V35)", status: 'error' };
+  if (!adminAuth) return { message: 'Erro crítico na configuração do servidor: Serviço de autenticação não disponível. (REF: AUTH_SVC_NULL_APU_V35)', status: 'error' };
   if (!adminUserEmail) return { message: "Email do administrador não fornecido para a ação.", status: "error" };
   if (!userEmailToApprove) return { message: 'Email do usuário para aprovação é obrigatório.', status: 'error' };
 
@@ -124,10 +124,10 @@ export async function approveUserInFirestore(adminUserEmail: string, userEmailTo
 }
 
 export async function getAllUsers(adminUserEmail: string): Promise<AdminActionResult> {
-  console.log(`[Get All Users Action - PRE-CHECK V33] adminSDKInitializationError: ${adminSDKInitializationError}`);
-  if (adminSDKInitializationError) return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,100)} (REF: SDK_INIT_FAIL_GAU)`, status: 'error' };
-  if (!adminFirestore_DefaultDB) return { message: "Erro Crítico no Servidor: Acesso ao banco de dados não disponível. (REF: FS_INSTANCE_NULL_GAU)", status: 'error' };
-  if (!adminAuth) return { message: 'Erro crítico na configuração do servidor: Serviço de autenticação não disponível. (REF: AUTH_SVC_NULL_GAU)', status: 'error' };
+  console.log(`[Get All Users Action - PRE-CHECK V35] adminSDKInitializationError: ${adminSDKInitializationError}`);
+  if (adminSDKInitializationError) return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,100)} (REF: SDK_INIT_FAIL_GAU_V35)`, status: 'error' };
+  if (!adminFirestore_DefaultDB) return { message: "Erro Crítico no Servidor: Acesso ao banco de dados não disponível. (REF: FS_INSTANCE_NULL_GAU_V35)", status: 'error' };
+  if (!adminAuth) return { message: 'Erro crítico na configuração do servidor: Serviço de autenticação não disponível. (REF: AUTH_SVC_NULL_GAU_V35)', status: 'error' };
   if (!adminUserEmail) return { message: "Email do administrador não fornecido.", status: "error" };
 
   const isAdmin = await verifyAdminByEmail(adminUserEmail);
@@ -166,10 +166,10 @@ export async function updateUserByAdmin(
   targetUserEmail: string,
   updates: { name?: string; password?: string; isApproved?: boolean; isAdmin?: boolean }
 ): Promise<AdminActionResult> {
-  console.log(`[Update User by Admin Action - PRE-CHECK V33] adminSDKInitializationError: ${adminSDKInitializationError}`);
-  if (adminSDKInitializationError) return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,100)} (REF: SDK_INIT_FAIL_UUA)`, status: 'error' };
-  if (!adminFirestore_DefaultDB) return { message: "Erro Crítico no Servidor: Acesso ao banco de dados não disponível. (REF: FS_INSTANCE_NULL_UUA)", status: 'error' };
-  if (!adminAuth) return { message: 'Erro crítico na configuração do servidor: Serviço de autenticação não disponível. (REF: AUTH_SVC_NULL_UUA)', status: 'error' };
+  console.log(`[Update User by Admin Action - PRE-CHECK V35] adminSDKInitializationError: ${adminSDKInitializationError}`);
+  if (adminSDKInitializationError) return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,100)} (REF: SDK_INIT_FAIL_UUA_V35)`, status: 'error' };
+  if (!adminFirestore_DefaultDB) return { message: "Erro Crítico no Servidor: Acesso ao banco de dados não disponível. (REF: FS_INSTANCE_NULL_UUA_V35)", status: 'error' };
+  if (!adminAuth) return { message: 'Erro crítico na configuração do servidor: Serviço de autenticação não disponível. (REF: AUTH_SVC_NULL_UUA_V35)', status: 'error' };
   if (!adminUserEmail || !targetUserEmail) return { message: "Emails do administrador e do usuário alvo são obrigatórios.", status: 'error' };
 
   const isAdmin = await verifyAdminByEmail(adminUserEmail);
@@ -216,10 +216,10 @@ export async function updateUserByAdmin(
 }
 
 export async function deleteUserByAdmin(adminUserEmail: string, targetUserEmail: string): Promise<AdminActionResult> {
-  console.log(`[Delete User by Admin Action - PRE-CHECK V33] adminSDKInitializationError: ${adminSDKInitializationError}`);
-  if (adminSDKInitializationError) return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,100)} (REF: SDK_INIT_FAIL_DUA)`, status: 'error' };
-  if (!adminFirestore_DefaultDB) return { message: "Erro Crítico no Servidor: Acesso ao banco de dados não disponível. (REF: FS_INSTANCE_NULL_DUA)", status: 'error' };
-  if (!adminAuth) return { message: 'Erro crítico na configuração do servidor: Serviço de autenticação não disponível. (REF: AUTH_SVC_NULL_DUA)', status: 'error' };
+  console.log(`[Delete User by Admin Action - PRE-CHECK V35] adminSDKInitializationError: ${adminSDKInitializationError}`);
+  if (adminSDKInitializationError) return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,100)} (REF: SDK_INIT_FAIL_DUA_V35)`, status: 'error' };
+  if (!adminFirestore_DefaultDB) return { message: "Erro Crítico no Servidor: Acesso ao banco de dados não disponível. (REF: FS_INSTANCE_NULL_DUA_V35)", status: 'error' };
+  if (!adminAuth) return { message: 'Erro crítico na configuração do servidor: Serviço de autenticação não disponível. (REF: AUTH_SVC_NULL_DUA_V35)', status: 'error' };
   if (!adminUserEmail || !targetUserEmail) return { message: "Emails do administrador e do usuário alvo são obrigatórios.", status: 'error' };
 
   const isAdmin = await verifyAdminByEmail(adminUserEmail);
