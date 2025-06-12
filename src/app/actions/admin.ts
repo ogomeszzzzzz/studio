@@ -14,7 +14,7 @@ interface AdminActionResult {
 
 const ADMIN_PRIMARY_EMAIL_SERVER = process.env.ADMIN_EMAIL || "gustavo.cordeiro@altenburg.com.br";
 const SALT_ROUNDS = 10;
-const LOG_VERSION_TAG_ACTION = "V38"; 
+const LOG_VERSION_TAG_ACTION = "V41"; 
 
 async function verifyAdminByEmail(callerEmail: string | undefined): Promise<boolean> {
   const expectedAdminEmailFromServer = ADMIN_PRIMARY_EMAIL_SERVER; 
@@ -24,18 +24,19 @@ async function verifyAdminByEmail(callerEmail: string | undefined): Promise<bool
 }
 
 export async function getPendingUsers(adminUserEmail: string): Promise<AdminActionResult> {
-  const initErrorMsg = await getAdminSDKInitializationError();
+  const initialErrorMsg = await getAdminSDKInitializationError();
   const adminAuth = await getAdminAuthInstance();
   const adminFirestore_DefaultDB = await getAdminFirestoreInstance();
   
-  console.log(`[Get Pending Users Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitializationError (from getter): ${initErrorMsg}`);
-  console.log(`[Get Pending Users Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null: ${adminAuth === null}`);
-  console.log(`[Get Pending Users Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
+  console.log(`[Get Pending Users Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] Initial SDK Error: ${initialErrorMsg}`);
+  console.log(`[Get Pending Users Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminAuth is null: ${adminAuth === null}`);
+  console.log(`[Get Pending Users Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
 
-  if (initErrorMsg || !adminAuth || !adminFirestore_DefaultDB) {
-    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${initErrorMsg || 'Serviços Admin não disponíveis'}. Verifique os logs ${LOG_VERSION_TAG_ACTION} do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_GPU_${LOG_VERSION_TAG_ACTION})`;
-    console.error(`[Get Pending Users Action - CRITICAL_FAILURE] ${errorMsg}`);
-    return { message: errorMsg, status: 'error' };
+  if (initialErrorMsg || !adminAuth || !adminFirestore_DefaultDB) {
+    const errorDetail = initialErrorMsg || "Serviços Admin (Auth ou Firestore) não disponíveis.";
+    const finalMessage = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${errorDetail}. Verifique os logs ${LOG_VERSION_TAG_ACTION} do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_GPU_${LOG_VERSION_TAG_ACTION})`;
+    console.error(`[Get Pending Users Action ${LOG_VERSION_TAG_ACTION} - CRITICAL_FAILURE] ${finalMessage}`);
+    return { message: finalMessage, status: 'error' };
   }
   
   if (!adminUserEmail) {
@@ -86,7 +87,7 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
     return { message: 'Usuários pendentes carregados.', status: 'success', users };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Erro desconhecido ao buscar usuários pendentes.";
-    if (error instanceof Error && (error as any).code === 5) {
+    if (error instanceof Error && (error as any).code === 5) { // Firestore 'NOT_FOUND' or 'FAILED_PRECONDITION' for missing index
         const firebaseErrorDetails = (error as any).details || "Índice composto necessário.";
         return { message: `Erro ao buscar usuários: Índice do Firestore necessário. Detalhes: ${firebaseErrorDetails.substring(0,300)}`, status: 'error' };
     }
@@ -95,18 +96,19 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
 }
 
 export async function approveUserInFirestore(adminUserEmail: string, userEmailToApprove: string): Promise<AdminActionResult> {
-  const initErrorMsg = await getAdminSDKInitializationError();
+  const initialErrorMsg = await getAdminSDKInitializationError();
   const adminAuth = await getAdminAuthInstance();
   const adminFirestore_DefaultDB = await getAdminFirestoreInstance();
 
-  console.log(`[Approve User Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitializationError (from getter): ${initErrorMsg}`);
-  console.log(`[Approve User Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null: ${adminAuth === null}`);
-  console.log(`[Approve User Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
+  console.log(`[Approve User Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] Initial SDK Error: ${initialErrorMsg}`);
+  console.log(`[Approve User Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminAuth is null: ${adminAuth === null}`);
+  console.log(`[Approve User Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
   
-  if (initErrorMsg || !adminAuth || !adminFirestore_DefaultDB) {
-    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${initErrorMsg || 'Serviços Admin não disponíveis'}. Verifique os logs ${LOG_VERSION_TAG_ACTION} do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_APU_${LOG_VERSION_TAG_ACTION})`;
-    console.error(`[Approve User Action - CRITICAL_FAILURE] ${errorMsg}`);
-    return { message: errorMsg, status: 'error' };
+  if (initialErrorMsg || !adminAuth || !adminFirestore_DefaultDB) {
+    const errorDetail = initialErrorMsg || "Serviços Admin (Auth ou Firestore) não disponíveis.";
+    const finalMessage = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${errorDetail}. Verifique os logs ${LOG_VERSION_TAG_ACTION} do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_APU_${LOG_VERSION_TAG_ACTION})`;
+    console.error(`[Approve User Action ${LOG_VERSION_TAG_ACTION} - CRITICAL_FAILURE] ${finalMessage}`);
+    return { message: finalMessage, status: 'error' };
   }
 
   if (!adminUserEmail) return { message: "Email do administrador não fornecido para a ação.", status: "error" };
@@ -129,18 +131,19 @@ export async function approveUserInFirestore(adminUserEmail: string, userEmailTo
 }
 
 export async function getAllUsers(adminUserEmail: string): Promise<AdminActionResult> {
-  const initErrorMsg = await getAdminSDKInitializationError();
+  const initialErrorMsg = await getAdminSDKInitializationError();
   const adminAuth = await getAdminAuthInstance();
   const adminFirestore_DefaultDB = await getAdminFirestoreInstance();
 
-  console.log(`[Get All Users Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitializationError (from getter): ${initErrorMsg}`);
-  console.log(`[Get All Users Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null: ${adminAuth === null}`);
-  console.log(`[Get All Users Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
+  console.log(`[Get All Users Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] Initial SDK Error: ${initialErrorMsg}`);
+  console.log(`[Get All Users Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminAuth is null: ${adminAuth === null}`);
+  console.log(`[Get All Users Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
   
-  if (initErrorMsg || !adminAuth || !adminFirestore_DefaultDB) {
-    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${initErrorMsg || 'Serviços Admin não disponíveis'}. Verifique os logs ${LOG_VERSION_TAG_ACTION} do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_GAU_${LOG_VERSION_TAG_ACTION})`;
-    console.error(`[Get All Users Action - CRITICAL_FAILURE] ${errorMsg}`);
-    return { message: errorMsg, status: 'error' };
+  if (initialErrorMsg || !adminAuth || !adminFirestore_DefaultDB) {
+    const errorDetail = initialErrorMsg || "Serviços Admin (Auth ou Firestore) não disponíveis.";
+    const finalMessage = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${errorDetail}. Verifique os logs ${LOG_VERSION_TAG_ACTION} do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_GAU_${LOG_VERSION_TAG_ACTION})`;
+    console.error(`[Get All Users Action ${LOG_VERSION_TAG_ACTION} - CRITICAL_FAILURE] ${finalMessage}`);
+    return { message: finalMessage, status: 'error' };
   }
   
   if (!adminUserEmail) return { message: "Email do administrador não fornecido.", status: "error" };
@@ -181,18 +184,19 @@ export async function updateUserByAdmin(
   targetUserEmail: string,
   updates: { name?: string; password?: string; isApproved?: boolean; isAdmin?: boolean }
 ): Promise<AdminActionResult> {
-  const initErrorMsg = await getAdminSDKInitializationError();
+  const initialErrorMsg = await getAdminSDKInitializationError();
   const adminAuth = await getAdminAuthInstance();
   const adminFirestore_DefaultDB = await getAdminFirestoreInstance();
 
-  console.log(`[Update User by Admin Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitializationError (from getter): ${initErrorMsg}`);
-  console.log(`[Update User by Admin Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null: ${adminAuth === null}`);
-  console.log(`[Update User by Admin Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
+  console.log(`[Update User by Admin Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] Initial SDK Error: ${initialErrorMsg}`);
+  console.log(`[Update User by Admin Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminAuth is null: ${adminAuth === null}`);
+  console.log(`[Update User by Admin Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
   
-  if (initErrorMsg || !adminAuth || !adminFirestore_DefaultDB) {
-    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${initErrorMsg || 'Serviços Admin não disponíveis'}. Verifique os logs ${LOG_VERSION_TAG_ACTION} do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_UUA_${LOG_VERSION_TAG_ACTION})`;
-    console.error(`[Update User by Admin Action - CRITICAL_FAILURE] ${errorMsg}`);
-    return { message: errorMsg, status: 'error' };
+  if (initialErrorMsg || !adminAuth || !adminFirestore_DefaultDB) {
+    const errorDetail = initialErrorMsg || "Serviços Admin (Auth ou Firestore) não disponíveis.";
+    const finalMessage = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${errorDetail}. Verifique os logs ${LOG_VERSION_TAG_ACTION} do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_UUA_${LOG_VERSION_TAG_ACTION})`;
+    console.error(`[Update User by Admin Action ${LOG_VERSION_TAG_ACTION} - CRITICAL_FAILURE] ${finalMessage}`);
+    return { message: finalMessage, status: 'error' };
   }
 
   if (!adminUserEmail || !targetUserEmail) return { message: "Emails do administrador e do usuário alvo são obrigatórios.", status: 'error' };
@@ -241,18 +245,19 @@ export async function updateUserByAdmin(
 }
 
 export async function deleteUserByAdmin(adminUserEmail: string, targetUserEmail: string): Promise<AdminActionResult> {
-  const initErrorMsg = await getAdminSDKInitializationError();
+  const initialErrorMsg = await getAdminSDKInitializationError();
   const adminAuth = await getAdminAuthInstance();
   const adminFirestore_DefaultDB = await getAdminFirestoreInstance();
 
-  console.log(`[Delete User by Admin Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitializationError (from getter): ${initErrorMsg}`);
-  console.log(`[Delete User by Admin Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null: ${adminAuth === null}`);
-  console.log(`[Delete User by Admin Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
+  console.log(`[Delete User by Admin Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] Initial SDK Error: ${initialErrorMsg}`);
+  console.log(`[Delete User by Admin Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminAuth is null: ${adminAuth === null}`);
+  console.log(`[Delete User by Admin Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
   
-  if (initErrorMsg || !adminAuth || !adminFirestore_DefaultDB) {
-    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${initErrorMsg || 'Serviços Admin não disponíveis'}. Verifique os logs ${LOG_VERSION_TAG_ACTION} do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_DUA_${LOG_VERSION_TAG_ACTION})`;
-    console.error(`[Delete User by Admin Action - CRITICAL_FAILURE] ${errorMsg}`);
-    return { message: errorMsg, status: 'error' };
+  if (initialErrorMsg || !adminAuth || !adminFirestore_DefaultDB) {
+    const errorDetail = initialErrorMsg || "Serviços Admin (Auth ou Firestore) não disponíveis.";
+    const finalMessage = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${errorDetail}. Verifique os logs ${LOG_VERSION_TAG_ACTION} do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_DUA_${LOG_VERSION_TAG_ACTION})`;
+    console.error(`[Delete User by Admin Action ${LOG_VERSION_TAG_ACTION} - CRITICAL_FAILURE] ${finalMessage}`);
+    return { message: finalMessage, status: 'error' };
   }
   
   if (!adminUserEmail || !targetUserEmail) return { message: "Emails do administrador e do usuário alvo são obrigatórios.", status: 'error' };
@@ -273,4 +278,3 @@ export async function deleteUserByAdmin(adminUserEmail: string, targetUserEmail:
     return { message: `Erro ao excluir usuário: ${errorMessage.substring(0, 200)}`, status: 'error' };
   }
 }
-

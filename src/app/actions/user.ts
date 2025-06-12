@@ -3,6 +3,7 @@
 
 import { getAdminAuthInstance, getAdminFirestoreInstance, getAdminSDKInitializationError } from '@/lib/firebase/adminConfig';
 import type { UserProfile } from '@/types';
+import { Timestamp } from 'firebase-admin/firestore'; // Explicitly import Timestamp from admin SDK
 
 interface UserActionResult {
   message: string;
@@ -10,24 +11,25 @@ interface UserActionResult {
   user?: UserProfile;
 }
 
-const LOG_VERSION_TAG_ACTION = "V38"; 
+const LOG_VERSION_TAG_ACTION = "V41"; 
 
 export async function updateUserProfile(
   currentUserEmail: string,
   updates: { name?: string; photoURL?: string }
 ): Promise<UserActionResult> {
-  const initErrorMsg = await getAdminSDKInitializationError();
+  const initialErrorMsg = await getAdminSDKInitializationError();
   const adminAuth = await getAdminAuthInstance();
   const adminFirestore_DefaultDB = await getAdminFirestoreInstance();
 
-  console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitializationError (from getter): ${initErrorMsg}`);
-  console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null: ${adminAuth === null}`);
-  console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
+  console.log(`[Update User Profile Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] Initial SDK Error: ${initialErrorMsg}`);
+  console.log(`[Update User Profile Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminAuth is null: ${adminAuth === null}`);
+  console.log(`[Update User Profile Action ${LOG_VERSION_TAG_ACTION} - PRE-CHECK] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
 
-  if (initErrorMsg || !adminAuth || !adminFirestore_DefaultDB) {
-    const errorMsg = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${initErrorMsg || 'Serviços Admin não disponíveis'}. Verifique os logs ${LOG_VERSION_TAG_ACTION} do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_UUP_${LOG_VERSION_TAG_ACTION})`;
-    console.error(`[Update User Profile Action - CRITICAL_FAILURE] ${errorMsg}`);
-    return { message: errorMsg, status: 'error' };
+  if (initialErrorMsg || !adminAuth || !adminFirestore_DefaultDB) {
+    const errorDetail = initialErrorMsg || "Serviços Admin (Auth ou Firestore) não disponíveis.";
+    const finalMessage = `Erro Crítico de Inicialização do Servidor (Admin SDK): ${errorDetail}. Verifique os logs ${LOG_VERSION_TAG_ACTION} do servidor. (REF: SDK_INIT_FAIL_IN_ACTION_UUP_${LOG_VERSION_TAG_ACTION})`;
+    console.error(`[Update User Profile Action ${LOG_VERSION_TAG_ACTION} - CRITICAL_FAILURE] ${finalMessage}`);
+    return { message: finalMessage, status: 'error' };
   }
   
   if (!currentUserEmail) {
@@ -63,10 +65,10 @@ export async function updateUserProfile(
     await userDocRef.update(updateData);
     console.log(`[Update User Profile Action ${LOG_VERSION_TAG_ACTION}] Profile updated successfully for: ${currentUserEmail}`);
 
-    const updatedUserDocSnap = await userDocRef.get();
+    const updatedUserDocSnap = await userDocRef.get(); // Re-fetch to get the latest data including any server-side transformations
     const updatedUserData = updatedUserDocSnap.data();
 
-    if (!updatedUserData) {
+    if (!updatedUserData) { // Should not happen if update was successful and doc exists
         return { message: "Perfil atualizado, mas não foi possível buscar os dados atualizados.", status: "error" };
     }
     
@@ -77,7 +79,7 @@ export async function updateUserProfile(
         isApproved: updatedUserData.isApproved,
         pendingApproval: updatedUserData.pendingApproval,
         isAdmin: updatedUserData.isAdmin,
-        createdAt: updatedUserData.createdAt ? (updatedUserData.createdAt as any).toDate() : new Date(),
+        createdAt: updatedUserData.createdAt instanceof Timestamp ? updatedUserData.createdAt.toDate() : new Date(), // Ensure it's a Date object
         photoURL: updatedUserData.photoURL,
       };
 
@@ -89,4 +91,3 @@ export async function updateUserProfile(
     return { message: `Erro ao atualizar perfil: ${errorMessage.substring(0, 200)}`, status: 'error' };
   }
 }
-
