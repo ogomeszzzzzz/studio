@@ -7,9 +7,9 @@ import { getFirestore as getFirebaseAdminFirestore, type Firestore } from 'fireb
 import fs from 'fs';
 import path from 'path';
 
-const LOG_VERSION_TAG_CONFIG = "V36"; 
+const LOG_VERSION_TAG_CONFIG = "V36"; // Keep this version tag for now
 
-console.log(`--- [ADMIN SDK INIT ${LOG_VERSION_TAG_CONFIG} - Explicit Service Get, Getter Export] ---`);
+console.log(`--- [ADMIN SDK INIT ${LOG_VERSION_TAG_CONFIG} - Getter Functions, Explicit Instance Checks] ---`);
 console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] Node Env: ${process.env.NODE_ENV}`);
 console.log(`[Admin SDK ${LOG_VERSION_TAG_CONFIG}] Initial admin.apps.length: ${admin.apps ? admin.apps.length : 'admin.apps is undefined/null'}`);
 
@@ -25,7 +25,7 @@ let adminAuthService: Auth | null = null;
 let adminFirestoreDefaultDBInstance: Firestore | null = null;
 
 const expectedProjectId = "ecommerce-db-75f77";
-const uniqueAppPrefix = `firebase-admin-app-${expectedProjectId}`; 
+const uniqueAppPrefix = `firebase-admin-app-${expectedProjectId}`;
 
 if (!admin || !admin.credential || typeof admin.credential.cert !== 'function' || typeof admin.initializeApp !== 'function') {
   _adminSDKInitializationErrorMsg = `CRITICAL: The 'firebase-admin' module is not loaded correctly or essential parts are missing. (REF: SDK_LOAD_FAIL_${LOG_VERSION_TAG_CONFIG})`;
@@ -171,15 +171,15 @@ if (_adminSDKInitializationErrorMsg) {
 console.log(`[Admin SDK Final Status ${LOG_VERSION_TAG_CONFIG}] Initialization Error: ${_adminSDKInitializationErrorMsg || 'None'}. adminAuthService is ${adminAuthService ? 'CONFIGURED' : 'NULL'}. adminFirestoreDefaultDBInstance is ${adminFirestoreDefaultDBInstance ? `CONFIGURED for project: ${adminFirestoreDefaultDBInstance?.app?.options?.projectId}` : 'NULL'}.`);
 console.log(`--- [ADMIN SDK INIT END ${LOG_VERSION_TAG_CONFIG}] ---`);
 
-export function getAdminAuthInstance(): Auth | null {
+export async function getAdminAuthInstance(): Promise<Auth | null> {
   return adminAuthService;
 }
 
-export function getAdminFirestoreInstance(): Firestore | null {
+export async function getAdminFirestoreInstance(): Promise<Firestore | null> {
   return adminFirestoreDefaultDBInstance;
 }
 
 // Getter for the initialization error message (still logged, but not directly causing "use server" issues if not exported)
-export function getAdminSDKInitializationError(): string | null {
-    return _adminSDKInitializationErrorMsg;
+export async function getAdminSDKInitializationError(): Promise<string | null> {
+  return _adminSDKInitializationErrorMsg;
 }

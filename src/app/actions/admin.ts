@@ -24,11 +24,11 @@ async function verifyAdminByEmail(callerEmail: string | undefined): Promise<bool
 }
 
 export async function getPendingUsers(adminUserEmail: string): Promise<AdminActionResult> {
-  const adminAuth = getAdminAuthInstance();
-  const adminFirestore_DefaultDB = getAdminFirestoreInstance();
-  const adminSDKInitError = getAdminSDKInitializationError();
+  const adminAuth = await getAdminAuthInstance();
+  const adminFirestore_DefaultDB = await getAdminFirestoreInstance();
+  const adminSDKInitError = await getAdminSDKInitializationError();
   
-  console.log(`[Get Pending Users Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitError: ${adminSDKInitError}`);
+  console.log(`[Get Pending Users Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitError (from getter): ${adminSDKInitError}`);
   console.log(`[Get Pending Users Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null: ${adminAuth === null}`);
   console.log(`[Get Pending Users Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
 
@@ -95,11 +95,11 @@ export async function getPendingUsers(adminUserEmail: string): Promise<AdminActi
 }
 
 export async function approveUserInFirestore(adminUserEmail: string, userEmailToApprove: string): Promise<AdminActionResult> {
-  const adminAuth = getAdminAuthInstance();
-  const adminFirestore_DefaultDB = getAdminFirestoreInstance();
-  const adminSDKInitError = getAdminSDKInitializationError();
+  const adminAuth = await getAdminAuthInstance();
+  const adminFirestore_DefaultDB = await getAdminFirestoreInstance();
+  const adminSDKInitError = await getAdminSDKInitializationError();
 
-  console.log(`[Approve User Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitError: ${adminSDKInitError}`);
+  console.log(`[Approve User Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitError (from getter): ${adminSDKInitError}`);
   console.log(`[Approve User Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null: ${adminAuth === null}`);
   console.log(`[Approve User Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
   
@@ -129,11 +129,11 @@ export async function approveUserInFirestore(adminUserEmail: string, userEmailTo
 }
 
 export async function getAllUsers(adminUserEmail: string): Promise<AdminActionResult> {
-  const adminAuth = getAdminAuthInstance();
-  const adminFirestore_DefaultDB = getAdminFirestoreInstance();
-  const adminSDKInitError = getAdminSDKInitializationError();
+  const adminAuth = await getAdminAuthInstance();
+  const adminFirestore_DefaultDB = await getAdminFirestoreInstance();
+  const adminSDKInitError = await getAdminSDKInitializationError();
 
-  console.log(`[Get All Users Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitError: ${adminSDKInitError}`);
+  console.log(`[Get All Users Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitError (from getter): ${adminSDKInitError}`);
   console.log(`[Get All Users Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null: ${adminAuth === null}`);
   console.log(`[Get All Users Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
   
@@ -181,11 +181,11 @@ export async function updateUserByAdmin(
   targetUserEmail: string,
   updates: { name?: string; password?: string; isApproved?: boolean; isAdmin?: boolean }
 ): Promise<AdminActionResult> {
-  const adminAuth = getAdminAuthInstance();
-  const adminFirestore_DefaultDB = getAdminFirestoreInstance();
-  const adminSDKInitError = getAdminSDKInitializationError();
+  const adminAuth = await getAdminAuthInstance();
+  const adminFirestore_DefaultDB = await getAdminFirestoreInstance();
+  const adminSDKInitError = await getAdminSDKInitializationError();
 
-  console.log(`[Update User by Admin Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitError: ${adminSDKInitError}`);
+  console.log(`[Update User by Admin Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitError (from getter): ${adminSDKInitError}`);
   console.log(`[Update User by Admin Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null: ${adminAuth === null}`);
   console.log(`[Update User by Admin Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
   
@@ -241,11 +241,11 @@ export async function updateUserByAdmin(
 }
 
 export async function deleteUserByAdmin(adminUserEmail: string, targetUserEmail: string): Promise<AdminActionResult> {
-  const adminAuth = getAdminAuthInstance();
-  const adminFirestore_DefaultDB = getAdminFirestoreInstance();
-  const adminSDKInitError = getAdminSDKInitializationError();
+  const adminAuth = await getAdminAuthInstance();
+  const adminFirestore_DefaultDB = await getAdminFirestoreInstance();
+  const adminSDKInitError = await getAdminSDKInitializationError();
 
-  console.log(`[Delete User by Admin Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitError: ${adminSDKInitError}`);
+  console.log(`[Delete User by Admin Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitError (from getter): ${adminSDKInitError}`);
   console.log(`[Delete User by Admin Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null: ${adminAuth === null}`);
   console.log(`[Delete User by Admin Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
   

@@ -16,11 +16,11 @@ export async function updateUserProfile(
   currentUserEmail: string,
   updates: { name?: string; photoURL?: string }
 ): Promise<UserActionResult> {
-  const adminAuth = getAdminAuthInstance();
-  const adminFirestore_DefaultDB = getAdminFirestoreInstance();
-  const adminSDKInitError = getAdminSDKInitializationError();
+  const adminAuth = await getAdminAuthInstance();
+  const adminFirestore_DefaultDB = await getAdminFirestoreInstance();
+  const adminSDKInitError = await getAdminSDKInitializationError();
 
-  console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitError: ${adminSDKInitError}`);
+  console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitError (from getter): ${adminSDKInitError}`);
   console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null: ${adminAuth === null}`);
   console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null: ${adminFirestore_DefaultDB === null}`);
 
