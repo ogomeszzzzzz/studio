@@ -2,7 +2,7 @@
 'use server';
 
 // Imports direto das instâncias configuradas
-import { adminFirestore_DefaultDB, adminSDKInitializationError, adminAuth } from '@/lib/firebase/adminConfig';
+import { adminFirestore_DefaultDB, adminAuth } from '@/lib/firebase/adminConfig'; // Removed adminSDKInitializationError
 import type { UserProfile } from '@/types';
 
 interface UserActionResult {
@@ -11,26 +11,24 @@ interface UserActionResult {
   user?: UserProfile;
 }
 
-const LOG_VERSION_TAG_ACTION = "V36"; // Consistent with adminConfig
+const LOG_VERSION_TAG_ACTION = "V36"; 
 
 export async function updateUserProfile(
   currentUserEmail: string,
   updates: { name?: string; photoURL?: string }
 ): Promise<UserActionResult> {
-  console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminSDKInitializationError:`, adminSDKInitializationError);
-  if (adminSDKInitializationError) {
-    console.error(`[Update User Profile Action - CRITICAL_FAILURE] Aborting due to Admin SDK init error: ${adminSDKInitializationError} (REF: SDK_INIT_FAIL_UUP_${LOG_VERSION_TAG_ACTION})`);
-    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,100)} (REF: SDK_INIT_FAIL_UUP_${LOG_VERSION_TAG_ACTION})`, status: 'error' };
-  }
-  console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null:`, adminFirestore_DefaultDB === null);
-  if (!adminFirestore_DefaultDB) {
-    console.error(`[Update User Profile Action - CRITICAL_FAILURE] adminFirestore_DefaultDB is null. (REF: FS_INSTANCE_NULL_UUP_${LOG_VERSION_TAG_ACTION})`);
-    return { message: `Erro crítico na configuração do servidor: Acesso ao banco de dados não está disponível. (REF: FS_INSTANCE_NULL_UUP_${LOG_VERSION_TAG_ACTION})`, status: 'error' };
-  }
   console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminAuth is null:`, adminAuth === null);
-  if (!adminAuth) { 
-    console.error(`[Update User Profile Action - CRITICAL_FAILURE] adminAuth is null. (REF: AUTH_SVC_NULL_UUP_${LOG_VERSION_TAG_ACTION})`);
-    return { message: `Erro crítico na configuração do servidor: Serviço de autenticação não disponível. (REF: AUTH_SVC_NULL_UUP_${LOG_VERSION_TAG_ACTION})`, status: 'error' };
+  console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB is null:`, adminFirestore_DefaultDB === null);
+
+  if (!adminAuth) {
+    const errorMsg = `Erro Crítico no Servidor: Serviço de autenticação Admin SDK não disponível. Verifique logs de inicialização V36. (REF: AUTH_SVC_UNAVAILABLE_IN_ACTION_UUP_${LOG_VERSION_TAG_ACTION})`;
+    console.error(`[Update User Profile Action - CRITICAL_FAILURE] ${errorMsg}`);
+    return { message: errorMsg, status: 'error' };
+  }
+  if (!adminFirestore_DefaultDB) {
+    const errorMsg = `Erro Crítico no Servidor: Serviço Firestore Admin SDK não disponível. Verifique logs de inicialização V36. (REF: FS_SVC_UNAVAILABLE_IN_ACTION_UUP_${LOG_VERSION_TAG_ACTION})`;
+    console.error(`[Update User Profile Action - CRITICAL_FAILURE] ${errorMsg}`);
+    return { message: errorMsg, status: 'error' };
   }
   console.log(`[Update User Profile Action - PRE-CHECK ${LOG_VERSION_TAG_ACTION}] adminFirestore_DefaultDB.app.options.projectId:`, adminFirestore_DefaultDB?.app?.options?.projectId);
 
@@ -43,7 +41,7 @@ export async function updateUserProfile(
     return { message: "Nenhuma atualização fornecida.", status: "error" };
   }
 
-  // Check Firestore instance integrity before use
+  // Check Firestore instance integrity before use (already done in adminConfig.ts, but good for explicit check here too)
   if (!adminFirestore_DefaultDB.app || !adminFirestore_DefaultDB.app.options || adminFirestore_DefaultDB.app.options.projectId !== "ecommerce-db-75f77") {
     console.error(`[Update User Profile Action ${LOG_VERSION_TAG_ACTION} - CRITICAL FAILURE AT FS CHECK] Firestore instance is invalid or for wrong project.`);
     return { message: `Erro crítico: Configuração do banco de dados inválida no servidor (Update). (REF: FS_INTEGRITY_FAIL_UUP_${LOG_VERSION_TAG_ACTION})`, status: 'error' };
