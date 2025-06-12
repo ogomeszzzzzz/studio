@@ -1,7 +1,7 @@
 
 'use server';
 
-import { adminFirestore_DefaultDB, adminSDKInitializationError, adminAuth } from '@/lib/firebase/adminConfig';
+import { adminFirestore_DefaultDB, adminSDKInitializationError as globalAdminSDKError, adminAuth } from '@/lib/firebase/adminConfig';
 import { Timestamp } from 'firebase-admin/firestore';
 import type { UserProfile } from '@/types';
 import bcrypt from 'bcrypt';
@@ -16,10 +16,10 @@ const ADMIN_PRIMARY_EMAIL = process.env.ADMIN_EMAIL || "gustavo.cordeiro@altenbu
 const SALT_ROUNDS = 10;
 
 export async function registerUserInFirestore(prevState: any, formData: FormData): Promise<ActionResult> {
-  console.log('[Register User Firestore Action - PRE-CHECK V35] adminSDKInitializationError:', adminSDKInitializationError);
-  if (adminSDKInitializationError) {
-    console.error('[Register User Firestore Action - CRITICAL_FAILURE] Aborting due to Admin SDK init error:', adminSDKInitializationError, '(REF: SDK_INIT_FAIL_REG_V35)');
-    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,100)} (REF: SDK_INIT_FAIL_REG_V35)`, status: 'error' };
+  console.log('[Register User Firestore Action - PRE-CHECK V35] adminSDKInitializationError:', globalAdminSDKError);
+  if (globalAdminSDKError) {
+    console.error('[Register User Firestore Action - CRITICAL_FAILURE] Aborting due to Admin SDK init error:', globalAdminSDKError, '(REF: SDK_INIT_FAIL_REG_V35)');
+    return { message: `Erro Crítico no Servidor (Admin SDK): ${globalAdminSDKError.substring(0,100)} (REF: SDK_INIT_FAIL_REG_V35)`, status: 'error' };
   }
   console.log('[Register User Firestore Action - PRE-CHECK V35] adminFirestore_DefaultDB is null:', adminFirestore_DefaultDB === null);
   if (!adminFirestore_DefaultDB) {
@@ -31,7 +31,7 @@ export async function registerUserInFirestore(prevState: any, formData: FormData
     console.error('[Register User Firestore Action - CRITICAL_FAILURE] adminAuth is null. (REF: AUTH_SVC_NULL_REG_V35)');
     return { message: 'Erro crítico na configuração do servidor: Serviço de autenticação não disponível. (REF: AUTH_SVC_NULL_REG_V35)', status: 'error' };
   }
-  if (adminFirestore_DefaultDB) { // Check again before using, though already checked above
+  if (adminFirestore_DefaultDB) {
     console.log('[Register User Firestore Action - PRE-CHECK V35] adminFirestore_DefaultDB.app.options.projectId:', adminFirestore_DefaultDB?.app?.options?.projectId);
   }
 
@@ -83,31 +83,29 @@ export async function registerUserInFirestore(prevState: any, formData: FormData
 }
 
 export async function loginUserWithFirestore(prevState: any, formData: FormData): Promise<ActionResult> {
-  console.log('[Login User Firestore Action - PRE-CHECK V35] adminSDKInitializationError:', adminSDKInitializationError);
-  if (adminSDKInitializationError) {
-    console.error('[Login User Firestore Action - CRITICAL_FAILURE] Aborting due to Admin SDK init error:', adminSDKInitializationError, '(REF: SDK_INIT_FAIL_LOGIN_V35)');
-    return { message: `Erro Crítico no Servidor (Admin SDK): ${adminSDKInitializationError.substring(0,100)} (REF: SDK_INIT_FAIL_LOGIN_V35)`, status: 'error' };
+  console.log('[Login User Firestore Action - PRE-CHECK V35] globalAdminSDKError:', globalAdminSDKError);
+  if (globalAdminSDKError) {
+    console.error('[Login User Firestore Action - CRITICAL_FAILURE] Aborting due to Admin SDK init error:', globalAdminSDKError, '(REF: SDK_INIT_FAIL_LOGIN_V35)');
+    return { message: `Erro Crítico no Servidor (Admin SDK Init): ${globalAdminSDKError.substring(0,100)} (REF: SDK_INIT_FAIL_LOGIN_V35)`, status: 'error' };
   }
 
   console.log('[Login User Firestore Action - PRE-CHECK V35] adminFirestore_DefaultDB is null:', adminFirestore_DefaultDB === null);
   if (!adminFirestore_DefaultDB) {
-    console.error('[Login User Firestore Action - CRITICAL_FAILURE] adminFirestore_DefaultDB is null. This means the Admin SDK did not initialize Firestore correctly. REF: FS_INSTANCE_NULL_LOGIN_V35');
+    console.error('[Login User Firestore Action - CRITICAL_FAILURE] adminFirestore_DefaultDB is null. (REF: FS_INSTANCE_NULL_LOGIN_V35)');
     return {
-      message: 'Erro crítico na configuração do servidor: Acesso ao banco de dados não está disponível. Contate o suporte. (REF: FS_INSTANCE_NULL_LOGIN_V35)',
+      message: 'Erro crítico na configuração do servidor: Acesso ao banco de dados não está disponível. (REF: FS_INSTANCE_NULL_LOGIN_V35)',
       status: 'error',
     };
   }
-
+  
   console.log('[Login User Firestore Action - PRE-CHECK V35] adminAuth is null:', adminAuth === null);
   if (!adminAuth) {
-    console.error('[Login User Firestore Action - CRITICAL_FAILURE] adminAuth is null. This means the Admin SDK did not initialize Auth correctly. REF: AUTH_SVC_NULL_LOGIN_V35');
+    console.error('[Login User Firestore Action - CRITICAL_FAILURE] adminAuth is null. (REF: AUTH_SVC_NULL_LOGIN_V35)');
     return {
-      message: 'Erro crítico na configuração do servidor: Serviço de autenticação não disponível. Contate o suporte. (REF: AUTH_SVC_NULL_LOGIN_V35)',
+      message: 'Erro crítico na configuração do servidor: Serviço de autenticação não disponível. (REF: AUTH_SVC_NULL_LOGIN_V35)',
       status: 'error',
     };
   }
-
-  // Log projectId if adminFirestore_DefaultDB is not null
   console.log('[Login User Firestore Action - PRE-CHECK V35] adminFirestore_DefaultDB.app.options.projectId:', adminFirestore_DefaultDB?.app?.options?.projectId);
 
 
@@ -125,13 +123,23 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
   const submittedPasswordTrimmed = rawSubmittedPassword.trim();
   console.log(`[Login User Firestore Action V35] Submitted password (trimmed): type: ${typeof submittedPasswordTrimmed}, length: ${submittedPasswordTrimmed.length}, value: '${submittedPasswordTrimmed.substring(0,10)}...'`);
 
+  // Detailed check before the critical if condition
+  console.log(`[Login Action V35 - DETAIL CHECK 1] adminFirestore_DefaultDB is null/undefined: ${!adminFirestore_DefaultDB}`);
+  console.log(`[Login Action V35 - DETAIL CHECK 2] adminFirestore_DefaultDB.app is null/undefined: ${adminFirestore_DefaultDB ? !adminFirestore_DefaultDB.app : 'N/A (adminFirestore_DefaultDB is null)'}`);
+  console.log(`[Login Action V35 - DETAIL CHECK 3] adminFirestore_DefaultDB.app.options is null/undefined: ${adminFirestore_DefaultDB && adminFirestore_DefaultDB.app ? !adminFirestore_DefaultDB.app.options : 'N/A (app or adminFirestore_DefaultDB is null)'}`);
+  if (adminFirestore_DefaultDB && adminFirestore_DefaultDB.app && adminFirestore_DefaultDB.app.options) {
+      console.log(`[Login Action V35 - DETAIL CHECK 4] adminFirestore_DefaultDB.app.options.projectId value: '${adminFirestore_DefaultDB.app.options.projectId}'`);
+      console.log(`[Login Action V35 - DETAIL CHECK 5] adminFirestore_DefaultDB.app.options.projectId !== "ecommerce-db-75f77": ${adminFirestore_DefaultDB.app.options.projectId !== "ecommerce-db-75f77"}`);
+  } else {
+      console.log(`[Login Action V35 - DETAIL CHECK 4 & 5] Cannot check projectId because some part of the path is null/undefined.`);
+  }
+
   // --- FINAL CHECK BEFORE Firestore .get() call ---
-  console.log(`[Login Action V35 - FINAL CHECK BEFORE GET] Firestore DB Project ID: ${adminFirestore_DefaultDB?.app?.options?.projectId}, Firestore Instance Valid: ${!!adminFirestore_DefaultDB}`);
+  // console.log(`[Login Action V35 - FINAL CHECK BEFORE GET] Firestore DB Project ID: ${adminFirestore_DefaultDB?.app?.options?.projectId}, Firestore Instance Valid: ${!!adminFirestore_DefaultDB}`); // Original log
   if (!adminFirestore_DefaultDB || !adminFirestore_DefaultDB.app || !adminFirestore_DefaultDB.app.options || adminFirestore_DefaultDB.app.options.projectId !== "ecommerce-db-75f77") {
-      console.error(`[Login Action V35 - CRITICAL FAILURE AT GET] Firestore instance is invalid, or its 'app' or 'options' property is undefined, or it's for the wrong project. Expected 'ecommerce-db-75f77', got '${adminFirestore_DefaultDB?.app?.options?.projectId}'.`);
+      console.error(`[Login Action V35 - CRITICAL FAILURE AT GET] Firestore instance is invalid or for wrong project. Expected 'ecommerce-db-75f77', got '${adminFirestore_DefaultDB?.app?.options?.projectId}'.`);
       return { message: `Erro crítico: Configuração do banco de dados inválida no servidor. Contate o suporte. (REF: FS_GET_PRECHECK_FAIL_V35)`, status: 'error' };
   }
-  // --- END FINAL CHECK ---
 
   try {
     const userDocRef = adminFirestore_DefaultDB.collection('auth_users').doc(email.toLowerCase());
@@ -198,7 +206,6 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
         console.log(`[Login User Firestore Action V35] Password for user ${email} successfully updated to hash in Firestore.`);
       } catch (updateError: any) {
         console.error(`[Login User Firestore Action V35] FAILED to update password to hash for user ${email}:`, updateError.message);
-        // Non-critical for login flow if update fails, proceed with login
       }
     }
 
@@ -233,3 +240,4 @@ export async function loginUserWithFirestore(prevState: any, formData: FormData)
     return { message: `Erro no login: ${error.message || 'Erro desconhecido no servidor.'}. (Code: ${error.code || 'N/A'})`, status: 'error' };
   }
 }
+
